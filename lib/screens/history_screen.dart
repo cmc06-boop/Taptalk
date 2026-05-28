@@ -123,7 +123,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   Text(
                     AppStrings.history(lang),
                     style: GoogleFonts.poppins(
-                      fontSize: 26,
+                      fontSize: 22,
                       fontWeight: FontWeight.w800,
                       color: theme.textMain,
                     ),
@@ -132,7 +132,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   Text(
                     AppStrings.historySubtitle(lang),
                     style: GoogleFonts.poppins(
-                      fontSize: 13,
+                      fontSize: 12,
                       color: theme.textMain.withValues(alpha: 0.72),
                       height: 1.35,
                     ),

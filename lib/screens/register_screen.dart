@@ -76,11 +76,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final isWide = constraints.maxWidth >= 500;
+          final compactHeight = constraints.maxHeight < 820;
+          final headerHeight = isWide ? 176.0 : (compactHeight ? 130.0 : 170.0);
+          final logoSize = compactHeight ? 70.0 : 86.0;
+          final contentHorizontal = isWide ? 36.0 : 24.0;
+          final contentTop = compactHeight ? 10.0 : 16.0;
+          final sectionGap = compactHeight ? 8.0 : 14.0;
+          final fieldGap = compactHeight ? 6.0 : 10.0;
           return Column(
             children: [
               Container(
                 width: double.infinity,
-                height: isWide ? 200 : 220,
+                height: headerHeight,
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
@@ -91,35 +98,47 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 alignment: Alignment.center,
                 child: Text(
                   'TapTalk',
-                  style: GoogleFonts.tiltWarp(fontSize: 32, color: Colors.white),
+                  style: GoogleFonts.poppins(
+                    fontSize: compactHeight ? 34 : 38,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                    letterSpacing: 0.4,
+                    shadows: [
+                      Shadow(
+                        color: Color(0x22000000),
+                        blurRadius: 6,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               Expanded(
                 child: Transform.translate(
-                  offset: Offset(0, isWide ? -48 : -72),
+                  offset: Offset(0, isWide ? -34 : -42),
                   child: Material(
                     color: Colors.white,
                     borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(120),
+                      top: Radius.circular(52),
                     ),
                     clipBehavior: Clip.antiAlias,
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(
-                        AppSpacing.xl,
-                        AppSpacing.xxl,
-                        AppSpacing.xl,
-                        AppSpacing.lg,
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        contentHorizontal,
+                        contentTop,
+                        contentHorizontal,
+                        compactHeight ? 8 : 14,
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          const Center(child: TapTalkLogo(size: 100)),
-                          const SizedBox(height: AppSpacing.lg),
+                          Center(child: TapTalkLogo(size: logoSize)),
+                          SizedBox(height: sectionGap),
                           Text(
                             AppStrings.signUp(lang),
                             textAlign: TextAlign.center,
                             style: GoogleFonts.poppins(
-                              fontSize: 24,
+                              fontSize: compactHeight ? 21 : 24,
                               fontWeight: FontWeight.w700,
                               color: const Color(0xFF5BB88A),
                             ),
@@ -132,15 +151,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               style: const TextStyle(color: Color(0xFFC62828)),
                             ),
                           ],
-                          const SizedBox(height: AppSpacing.lg),
+                          SizedBox(height: sectionGap),
                           _field(AppStrings.fullName(lang), _name),
-                          const SizedBox(height: AppSpacing.md),
+                          SizedBox(height: fieldGap),
                           _field(
                             AppStrings.email(lang),
                             _email,
                             keyboard: TextInputType.emailAddress,
                           ),
-                          const SizedBox(height: AppSpacing.md),
+                          SizedBox(height: fieldGap),
                           _field(
                             AppStrings.password(lang),
                             _password,
@@ -148,7 +167,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             onToggleObscure: () =>
                                 setState(() => _obscurePassword = !_obscurePassword),
                           ),
-                          const SizedBox(height: AppSpacing.md),
+                          SizedBox(height: fieldGap),
                           _field(
                             AppStrings.confirmPassword(lang),
                             _confirmPassword,
@@ -156,17 +175,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             onToggleObscure: () =>
                                 setState(() => _obscureConfirm = !_obscureConfirm),
                           ),
-                          const SizedBox(height: AppSpacing.lg),
+                          SizedBox(height: sectionGap),
                           Text(
                             AppStrings.whatAreYou(lang),
                             textAlign: TextAlign.center,
                             style: GoogleFonts.poppins(
-                              fontSize: 13,
+                              fontSize: compactHeight ? 12 : 13,
                               fontWeight: FontWeight.w600,
                               color: const Color(0xFF5A6B63),
                             ),
                           ),
-                          const SizedBox(height: AppSpacing.md),
+                          SizedBox(height: compactHeight ? 4 : 8),
                           Row(
                             children: [
                               Expanded(
@@ -194,12 +213,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               ),
                             ],
                           ),
-                          const SizedBox(height: AppSpacing.xl),
+                          SizedBox(height: compactHeight ? 8 : 12),
                           FilledButton(
                             onPressed: _busy ? null : _submit,
                             style: FilledButton.styleFrom(
                               backgroundColor: Colors.black,
-                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              minimumSize: Size(double.infinity, compactHeight ? 42 : 46),
+                              padding: const EdgeInsets.symmetric(vertical: 0),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(14),
                               ),
@@ -222,9 +242,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                     ),
                                   ),
                           ),
-                          const SizedBox(height: AppSpacing.md),
+                          SizedBox(height: compactHeight ? 0 : 6),
                           TextButton(
                             onPressed: () => app.setRoute(AppRoute.login),
+                            style: TextButton.styleFrom(
+                              minimumSize: Size.zero,
+                              padding: const EdgeInsets.symmetric(vertical: 0),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
                             child: RichText(
                               text: TextSpan(
                                 style: GoogleFonts.poppins(
@@ -245,6 +270,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               ),
                             ),
                           ),
+                          SizedBox(height: compactHeight ? 0 : 2),
                         ],
                       ),
                     ),
@@ -260,38 +286,80 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   Widget _roleOption(String role, IconData icon, String label) {
     final selected = _role == role;
-    return InkWell(
-      onTap: () => setState(() => _role = role),
-      borderRadius: BorderRadius.circular(14),
-      child: Column(
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: selected ? const Color(0xFFD6F3E3) : const Color(0xFFF5F5F5),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: selected ? const Color(0xFF5BB88A) : const Color(0xFFE0E0E0),
-                width: selected ? 2 : 1,
-              ),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => setState(() => _role = role),
+        borderRadius: BorderRadius.circular(14),
+        splashColor: const Color(0xFF5BB88A).withValues(alpha: 0.12),
+        highlightColor: const Color(0xFF5BB88A).withValues(alpha: 0.08),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic,
+          height: 68,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected
+                  ? const Color(0xFF5BB88A).withValues(alpha: 0.78)
+                  : const Color(0xFFDCE7E1),
+              width: selected ? 2 : 1,
             ),
-            child: Icon(
-              icon,
-              size: 28,
-              color: selected ? const Color(0xFF5BB88A) : const Color(0xFF9E9E9E),
-            ),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: const Color(0xFF5BB88A).withValues(alpha: 0.10),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ]
+                : null,
           ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            label,
-            style: GoogleFonts.poppins(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: selected ? const Color(0xFF5BB88A) : const Color(0xFF9E9E9E),
-            ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+                TweenAnimationBuilder<double>(
+                  tween: Tween<double>(begin: 1, end: selected ? 1.03 : 1),
+                  duration: const Duration(milliseconds: 240),
+                  curve: Curves.easeOutCubic,
+                  builder: (context, scale, child) =>
+                      Transform.scale(scale: scale, child: child),
+                  child: Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? const Color(0xFFEAF8F1)
+                          : const Color(0xFFF5F5F5),
+                      borderRadius: BorderRadius.circular(9),
+                      border: Border.all(
+                        color: selected
+                            ? const Color(0xFF5BB88A).withValues(alpha: 0.55)
+                            : const Color(0xFFE5E5E5),
+                      ),
+                    ),
+                    child: Icon(
+                      icon,
+                      size: 16,
+                      color: selected ? const Color(0xFF5BB88A) : const Color(0xFF9E9E9E),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 3),
+                AnimatedDefaultTextStyle(
+                  duration: const Duration(milliseconds: 240),
+                  curve: Curves.easeOutCubic,
+                  style: GoogleFonts.poppins(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: selected ? const Color(0xFF5BB88A) : const Color(0xFF9E9E9E),
+                  ),
+                  child: Text(label),
+                ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -317,24 +385,37 @@ class _RegisterScreenState extends State<RegisterScreen> {
           keyboardType: keyboard,
           decoration: InputDecoration(
             filled: true,
-            fillColor: const Color(0xFFD6F3E3),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            fillColor: const Color(0xFFEFF8F3),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             suffixIcon: onToggleObscure == null
                 ? null
                 : IconButton(
                     icon: Icon(
                       obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
                       color: const Color(0xFF5A6B63),
+                      size: 19,
                     ),
                     onPressed: onToggleObscure,
+                    constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
                   ),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide.none,
+              borderSide: const BorderSide(
+                color: Color(0xFFDCECE4),
+              ),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide.none,
+              borderSide: const BorderSide(
+                color: Color(0xFFDCECE4),
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(
+                color: const Color(0xFF5BB88A).withValues(alpha: 0.65),
+                width: 1.6,
+              ),
             ),
           ),
         ),

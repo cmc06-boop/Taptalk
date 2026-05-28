@@ -64,7 +64,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                     Text(
                       AppStrings.favorites(lang),
                       style: GoogleFonts.poppins(
-                        fontSize: 28,
+                        fontSize: 22,
                         fontWeight: FontWeight.w800,
                         color: theme.textMain,
                       ),
@@ -74,8 +74,8 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                       AppStrings.favoritesHint(lang),
                       style: GoogleFonts.poppins(
                         fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: theme.bgAccent,
+                        fontWeight: FontWeight.w400,
+                        color: theme.textMain.withValues(alpha: 0.78),
                       ),
                     ),
                   ],
@@ -88,7 +88,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
               child: Text(
                 AppStrings.categories(lang),
                 style: GoogleFonts.poppins(
-                  fontSize: 16,
+                  fontSize: 14,
                   fontWeight: FontWeight.w800,
                   color: theme.textMain,
                 ),
@@ -115,8 +115,8 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                       color: active ? Colors.white : theme.textMain,
                     ),
                     selectedColor: theme.bgAccent,
-                    backgroundColor: Colors.white,
-                    side: BorderSide(color: theme.bgAccent, width: 1.5),
+                    backgroundColor: Colors.white.withValues(alpha: 0.65),
+                    side: BorderSide(color: theme.bgMid, width: 1.5),
                     onSelected: (_) => setState(() => _filterCategoryKey = cat.key),
                   );
                 },
@@ -128,7 +128,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
               child: Text(
                 AppStrings.favoritePhrases(lang),
                 style: GoogleFonts.poppins(
-                  fontSize: 16,
+                  fontSize: 14,
                   fontWeight: FontWeight.w800,
                   color: theme.textMain,
                 ),

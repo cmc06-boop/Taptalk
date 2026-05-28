@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
 
 import '../core/l10n/app_strings.dart';
 import '../core/utils/phrase_image_storage.dart';
@@ -31,6 +32,7 @@ enum AppRoute {
 
 class AppState extends ChangeNotifier {
   AppState() {
+    _bindTtsCallbacks();
     _init();
   }
 
@@ -45,6 +47,13 @@ class AppState extends ChangeNotifier {
   double _ttsSpeed = 1.0;
   String _selectedCategoryKey = 'feelings';
   bool _drawerOpen = false;
+  bool _isSpeaking = false;
+  String _speakingText = '';
+  int _spokenWordStart = -1;
+  int _spokenWordEnd = -1;
+  Timer? _readAlongTimer;
+  int _readAlongWordIndex = 0;
+  List<String> _emergencyContacts = [];
 
   List<CategoryModel> _categories = [];
   List<PhraseModel> _phrases = [];
@@ -59,6 +68,11 @@ class AppState extends ChangeNotifier {
   double get ttsSpeed => _ttsSpeed;
   String get selectedCategoryKey => _selectedCategoryKey;
   bool get drawerOpen => _drawerOpen;
+  bool get isSpeaking => _isSpeaking;
+  String get speakingText => _speakingText;
+  int get spokenWordStart => _spokenWordStart;
+  int get spokenWordEnd => _spokenWordEnd;
+  List<String> get emergencyContacts => List.unmodifiable(_emergencyContacts);
   List<CategoryModel> get categories => _categories;
   List<PhraseModel> get phrases => _phrases;
   List<FavoriteModel> get favorites => _favorites;
@@ -73,6 +87,80 @@ class AppState extends ChangeNotifier {
       if (c.key == _selectedCategoryKey) return c;
     }
     return null;
+  }
+
+  void _bindTtsCallbacks() {
+    tts.onStart = () {
+      _isSpeaking = true;
+      _startReadAlongFallback();
+      notifyListeners();
+    };
+    tts.onProgress = (text, start, end, word) {
+      _stopReadAlongFallback();
+      _speakingText = text;
+      _spokenWordStart = start;
+      _spokenWordEnd = end;
+      notifyListeners();
+    };
+    tts.onComplete = () {
+      _stopReadAlongFallback();
+      _isSpeaking = false;
+      _spokenWordStart = -1;
+      _spokenWordEnd = -1;
+      notifyListeners();
+    };
+    tts.onError = (_) {
+      _stopReadAlongFallback();
+      _isSpeaking = false;
+      _spokenWordStart = -1;
+      _spokenWordEnd = -1;
+      notifyListeners();
+    };
+  }
+
+  List<(int, int)> _wordRanges(String text) {
+    final matches = RegExp(r'\S+').allMatches(text);
+    return matches.map((m) => (m.start, m.end)).toList();
+  }
+
+  void _startReadAlongFallback() {
+    _stopReadAlongFallback();
+    final text = _speakingText.trim();
+    if (text.isEmpty) return;
+    final ranges = _wordRanges(_speakingText);
+    if (ranges.isEmpty) return;
+    _readAlongWordIndex = 0;
+    final tick = Duration(milliseconds: (360 / _ttsSpeed).clamp(180, 700).round());
+    _readAlongTimer = Timer.periodic(tick, (timer) {
+      if (!_isSpeaking || ranges.isEmpty) {
+        timer.cancel();
+        return;
+      }
+      if (_readAlongWordIndex >= ranges.length) {
+        _readAlongWordIndex = ranges.length - 1;
+      }
+      final (start, end) = ranges[_readAlongWordIndex];
+      _spokenWordStart = start;
+      _spokenWordEnd = end;
+      notifyListeners();
+      _readAlongWordIndex++;
+      if (_readAlongWordIndex >= ranges.length) {
+        timer.cancel();
+      }
+    });
+  }
+
+  void _stopReadAlongFallback() {
+    _readAlongTimer?.cancel();
+    _readAlongTimer = null;
+  }
+
+  void _resetSpeechTracking() {
+    _stopReadAlongFallback();
+    _isSpeaking = false;
+    _speakingText = '';
+    _spokenWordStart = -1;
+    _spokenWordEnd = -1;
   }
 
   Future<void> _init() async {
@@ -138,6 +226,17 @@ class AppState extends ChangeNotifier {
       _language = AppLanguage.filipino;
     } else if (lang == 'English') {
       _language = AppLanguage.english;
+    }
+    final contacts = settings['emergency_contacts'];
+    if (contacts is List) {
+      _emergencyContacts = contacts
+          .whereType<String>()
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .take(2)
+          .toList();
+    } else {
+      _emergencyContacts = [];
     }
 
     _categories = await _repo.getCategories(_user!.id);
@@ -208,6 +307,13 @@ class AppState extends ChangeNotifier {
       await _repo.updateUserTheme(_user!.id, themeKey);
       _user = _user!.copyWith(themeKey: themeKey);
     }
+    notifyListeners();
+  }
+
+  void previewTheme(String themeKey) {
+    final next = TapTalkThemes.byKey(themeKey);
+    if (_theme.key == next.key) return;
+    _theme = next;
     notifyListeners();
   }
 
@@ -293,6 +399,8 @@ class AppState extends ChangeNotifier {
     _favorites = [];
     _history = [];
     _theme = TapTalkThemes.appDefault;
+    _emergencyContacts = [];
+    _resetSpeechTracking();
     _route = AppRoute.login;
     _drawerOpen = false;
     notifyListeners();
@@ -418,6 +526,19 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  Future<String?> updateEmergencyContacts(List<String> contacts) async {
+    if (_user == null) return AppStrings.notSignedIn(_language);
+    final cleaned = contacts
+        .map((c) => c.trim())
+        .where((c) => c.isNotEmpty)
+        .take(2)
+        .toList();
+    await _repo.updateEmergencyContacts(_user!.id, cleaned);
+    _emergencyContacts = cleaned;
+    notifyListeners();
+    return null;
+  }
+
   Future<String?> changePassword(String currentPassword, String newPassword) async {
     if (_user == null) return AppStrings.notSignedIn(_language);
     final ok = await _repo.updateUserPassword(_user!.id, currentPassword, newPassword);
@@ -433,8 +554,33 @@ class AppState extends ChangeNotifier {
       _selectedCategoryKey,
       lang: _language,
     );
+    _speakingText = spoken;
+    _isSpeaking = true;
+    _spokenWordStart = -1;
+    _spokenWordEnd = -1;
+    _startReadAlongFallback();
+    notifyListeners();
     final ok = await tts.speak(spoken, rate: _ttsSpeed, lang: _language);
+    if (!ok) {
+      _resetSpeechTracking();
+      notifyListeners();
+    }
     if (ok && record) await recordHistory(spoken);
     return ok;
+  }
+
+  Future<void> pauseSpeech() async {
+    await tts.pause();
+    _stopReadAlongFallback();
+    _isSpeaking = false;
+    _spokenWordStart = -1;
+    _spokenWordEnd = -1;
+    notifyListeners();
+  }
+
+  Future<void> stopSpeech() async {
+    await tts.stop();
+    _resetSpeechTracking();
+    notifyListeners();
   }
 }

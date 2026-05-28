@@ -6,7 +6,7 @@ import '../core/constants/app_spacing.dart';
 import '../core/constants/tts_speed_options.dart';
 import '../providers/app_state.dart';
 
-class TtsSpeedSelector extends StatelessWidget {
+class TtsSpeedSelector extends StatefulWidget {
   const TtsSpeedSelector({
     super.key,
     this.showScaleLabels = false,
@@ -17,12 +17,26 @@ class TtsSpeedSelector extends StatelessWidget {
   final String? sectionLabel;
 
   @override
+  State<TtsSpeedSelector> createState() => _TtsSpeedSelectorState();
+}
+
+class _TtsSpeedSelectorState extends State<TtsSpeedSelector> {
+  double? _liveSliderIndex;
+
+  void _applySpeed(AppState app, double index) {
+    final snapped = TtsSpeedOptions.valueAtIndex(index.round());
+    app.setTtsSpeed(snapped);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final theme = app.theme;
-    final speed = TtsSpeedOptions.snap(app.ttsSpeed);
-    final displayLabel = TtsSpeedOptions.shortLabel(speed);
-    final sliderIndex = TtsSpeedOptions.indexOf(speed).toDouble();
+    final committedSpeed = TtsSpeedOptions.snap(app.ttsSpeed);
+    final committedIndex = TtsSpeedOptions.indexOf(committedSpeed).toDouble();
+    final sliderIndex = _liveSliderIndex ?? committedIndex;
+    final displaySpeed = TtsSpeedOptions.valueAtIndex(sliderIndex.round());
+    final displayLabel = TtsSpeedOptions.shortLabel(displaySpeed);
 
     final slider = SliderTheme(
       data: SliderTheme.of(context).copyWith(
@@ -38,12 +52,15 @@ class TtsSpeedSelector extends StatelessWidget {
         min: 0,
         max: TtsSpeedOptions.sliderDivisions.toDouble(),
         divisions: TtsSpeedOptions.sliderDivisions,
-        onChanged: (index) =>
-            app.setTtsSpeed(TtsSpeedOptions.valueAtIndex(index.round())),
+        onChanged: (index) => setState(() => _liveSliderIndex = index),
+        onChangeEnd: (index) {
+          setState(() => _liveSliderIndex = null);
+          _applySpeed(app, index);
+        },
       ),
     );
 
-    if (!showScaleLabels) {
+    if (!widget.showScaleLabels) {
       return Row(
         children: [
           Expanded(child: slider),
@@ -69,9 +86,9 @@ class TtsSpeedSelector extends StatelessWidget {
       children: [
         Row(
           children: [
-            if (sectionLabel != null)
+            if (widget.sectionLabel != null)
               Text(
-                sectionLabel!,
+                widget.sectionLabel!,
                 style: GoogleFonts.poppins(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -98,7 +115,7 @@ class TtsSpeedSelector extends StatelessWidget {
               Expanded(
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTap: () => app.setTtsSpeed(TtsSpeedOptions.scaleMarks[i]),
+                  onTap: () => _applySpeed(app, i.toDouble()),
                   child: Align(
                     alignment: i == 0
                         ? Alignment.centerLeft
@@ -109,10 +126,10 @@ class TtsSpeedSelector extends StatelessWidget {
                       TtsSpeedOptions.shortLabel(TtsSpeedOptions.scaleMarks[i]),
                       style: GoogleFonts.poppins(
                         fontSize: 11,
-                        fontWeight: speed == TtsSpeedOptions.scaleMarks[i]
+                        fontWeight: displaySpeed == TtsSpeedOptions.scaleMarks[i]
                             ? FontWeight.w700
                             : FontWeight.w400,
-                        color: speed == TtsSpeedOptions.scaleMarks[i]
+                        color: displaySpeed == TtsSpeedOptions.scaleMarks[i]
                             ? theme.textMain
                             : theme.textMain.withValues(alpha: 0.5),
                       ),

@@ -84,10 +84,12 @@ class _CircleIconButton extends StatelessWidget {
               Colors.white.withValues(alpha: 0.55),
               accent,
             )
-          : Colors.transparent,
-      shape: const CircleBorder(),
+          : Colors.white.withValues(alpha: 0.22),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: InkWell(
-        customBorder: const CircleBorder(),
+        borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: SizedBox(
           width: 36,

@@ -25,11 +25,12 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final _textController = TextEditingController();
+  final TextEditingController _textController = _HighlightingTextController();
   final _categoryScroll = ScrollController();
   final _undoStack = <String>[];
   final stt.SpeechToText _speech = stt.SpeechToText();
   bool _listening = false;
+  bool _speechReady = false;
   String? _attachedImagePath;
 
   @override
@@ -45,6 +46,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _speech.cancel();
     _textController.dispose();
     _categoryScroll.dispose();
     super.dispose();
@@ -57,29 +59,80 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() => _listening = false);
       return;
     }
-    final available = await _speech.initialize();
-    if (!available) {
+    if (!_speechReady) {
+      final available = await _speech.initialize(
+        options: [
+          stt.SpeechToText.androidIntentLookup,
+          stt.SpeechToText.androidNoBluetooth,
+        ],
+        onStatus: (status) {
+          if (!mounted) return;
+          if (status == stt.SpeechToText.notListeningStatus ||
+              status == stt.SpeechToText.doneStatus) {
+            setState(() => _listening = false);
+          }
+        },
+        onError: (error) {
+          if (!mounted) return;
+          setState(() => _listening = false);
+          if (error.permanent) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(AppStrings.speechNotAvailable(app.language))),
+            );
+          }
+        },
+      );
+      _speechReady = available;
+    }
+
+    if (!_speechReady) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(AppStrings.speechNeedsInternet(app.language))),
+          SnackBar(content: Text(AppStrings.speechNotAvailable(app.language))),
         );
       }
       return;
     }
+
+    final locales = await _speech.locales();
+    final preferred = app.language == AppLanguage.filipino
+        ? ['fil_PH', 'tl_PH', 'en_US']
+        : ['en_US', 'en_GB'];
+    String locale = preferred.last;
+    for (final p in preferred) {
+      if (locales.any((l) => l.localeId == p)) {
+        locale = p;
+        break;
+      }
+    }
+
     setState(() => _listening = true);
-    final locale = app.language == AppLanguage.filipino ? 'fil_PH' : 'en_US';
-    await _speech.listen(
-      listenOptions: stt.SpeechListenOptions(localeId: locale),
-      onResult: (result) {
-        if (result.finalResult) {
-          final current = _textController.text.trim();
-          final next = current.isEmpty
-              ? result.recognizedWords
-              : '$current ${result.recognizedWords}';
-          _textController.text = next;
-        }
-      },
-    );
+    try {
+      await _speech.listen(
+        listenOptions: stt.SpeechListenOptions(
+          localeId: locale,
+          onDevice: true,
+          listenMode: stt.ListenMode.dictation,
+          partialResults: true,
+          cancelOnError: true,
+        ),
+        onResult: (result) {
+          if (result.finalResult) {
+            final current = _textController.text.trim();
+            final next = current.isEmpty
+                ? result.recognizedWords
+                : '$current ${result.recognizedWords}';
+            _textController.text = next;
+          }
+        },
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _listening = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.speechNeedsInternet(app.language))),
+      );
+    }
   }
 
   Future<void> _pickImage() async {
@@ -102,50 +155,143 @@ class _HomeScreenState extends State<HomeScreen> {
     final app = context.read<AppState>();
     final lang = app.language;
     final controller = TextEditingController();
-    String? error;
 
-    await showDialog<void>(
+    final created = await showDialog<bool>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setLocal) => AlertDialog(
-          title: Text(AppStrings.newCategory(lang)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: controller,
-                decoration: InputDecoration(
-                  hintText: AppStrings.categoryNameHint(lang),
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x26000000),
+                  blurRadius: 24,
+                  offset: Offset(0, 10),
                 ),
-              ),
-              if (error != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: AppSpacing.sm),
-                  child: Text(error!, style: const TextStyle(color: Colors.red)),
+              ],
+            ),
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  AppStrings.newCategory(lang),
+                  style: GoogleFonts.poppins(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: app.theme.textMain,
+                  ),
                 ),
-            ],
+                const SizedBox(height: 6),
+                Text(
+                  AppStrings.chooseCategorySub(lang),
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w400,
+                    color: app.theme.textMain.withValues(alpha: 0.72),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => Navigator.of(dialogContext).pop(true),
+                  decoration: InputDecoration(
+                    hintText: AppStrings.categoryNameHint(lang),
+                    hintStyle: GoogleFonts.poppins(
+                      fontSize: 13,
+                      color: app.theme.textMain.withValues(alpha: 0.45),
+                    ),
+                    filled: true,
+                    fillColor: app.theme.bgMid.withValues(alpha: 0.28),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: app.theme.bgAccent.withValues(alpha: 0.8),
+                        width: 1.6,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(false),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(44),
+                          side: BorderSide(color: app.theme.bgAccent.withValues(alpha: 0.45)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          AppStrings.cancel(lang),
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w600,
+                            color: app.theme.textMain,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(true),
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(44),
+                          backgroundColor: Colors.black,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          AppStrings.add(lang),
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(AppStrings.cancel(lang)),
-            ),
-            FilledButton(
-              onPressed: () async {
-                final err = await app.addCategory(controller.text);
-                if (!ctx.mounted) return;
-                if (err != null) {
-                  setLocal(() => error = err);
-                } else {
-                  Navigator.pop(ctx);
-                }
-              },
-              child: Text(AppStrings.add(lang)),
-            ),
-          ],
-        ),
-      ),
+        );
+      },
     );
+
+    if (created != true) {
+      controller.dispose();
+      return;
+    }
+
+    final err = await app.addCategory(controller.text);
+    controller.dispose();
+    if (!mounted) return;
+    if (err != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(err, style: GoogleFonts.poppins()),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   @override
@@ -155,6 +301,14 @@ class _HomeScreenState extends State<HomeScreen> {
     final lang = app.language;
     final userName = app.user?.fullName ?? AppStrings.defaultLearnerName(lang);
     final columns = AppSpacing.phraseGridColumns(context);
+    final highlightController = _textController;
+    if (highlightController is _HighlightingTextController) {
+      highlightController.updateHighlight(
+        start: app.spokenWordStart,
+        end: app.spokenWordEnd,
+        accent: theme.bgAccent,
+      );
+    }
 
     return LearnerScaffold(
       title: AppStrings.appName(lang),
@@ -283,7 +437,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         IconButton(
                           icon: const Icon(Icons.close_rounded, size: 22),
                           onPressed: () {
-                            app.tts.stop();
+                            app.stopSpeech();
                             _textController.clear();
                           },
                         ),
@@ -330,6 +484,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       TextField(
                         controller: _textController,
                         maxLines: 4,
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w400,
+                          color: theme.textMain,
+                          height: 1.45,
+                        ),
                         decoration: InputDecoration(
                           hintText: AppStrings.enterText(lang),
                           filled: true,
@@ -419,7 +579,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       label: Text(AppStrings.play(lang)),
                     ),
                     FilledButton.icon(
-                      onPressed: () => app.tts.pause(),
+                      onPressed: () => app.pauseSpeech(),
                       style: FilledButton.styleFrom(backgroundColor: theme.bgAccent),
                       icon: const Icon(Icons.pause_rounded),
                       label: Text(AppStrings.pause(lang)),
@@ -489,6 +649,54 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _HighlightingTextController extends TextEditingController {
+  int _highlightStart = -1;
+  int _highlightEnd = -1;
+  Color _accent = const Color(0xFF5BB88A);
+
+  void updateHighlight({
+    required int start,
+    required int end,
+    required Color accent,
+  }) {
+    if (_highlightStart == start && _highlightEnd == end && _accent == accent) return;
+    _highlightStart = start;
+    _highlightEnd = end;
+    _accent = accent;
+    notifyListeners();
+  }
+
+  @override
+  TextSpan buildTextSpan({
+    required BuildContext context,
+    TextStyle? style,
+    required bool withComposing,
+  }) {
+    final textValue = text;
+    final start = _highlightStart.clamp(0, textValue.length);
+    final end = _highlightEnd.clamp(0, textValue.length);
+    if (start >= end || textValue.isEmpty) {
+      return TextSpan(style: style, text: textValue);
+    }
+
+    return TextSpan(
+      style: style,
+      children: [
+        TextSpan(text: textValue.substring(0, start)),
+        TextSpan(
+          text: textValue.substring(start, end),
+          style: TextStyle(
+            color: Colors.white,
+            backgroundColor: _accent.withValues(alpha: 0.95),
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        TextSpan(text: textValue.substring(end)),
+      ],
     );
   }
 }

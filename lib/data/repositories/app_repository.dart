@@ -139,6 +139,28 @@ class AppRepository {
     );
   }
 
+  Future<void> updateEmergencyContacts(int userId, List<String> contacts) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query('users', where: 'id = ?', whereArgs: [userId], limit: 1);
+    if (rows.isEmpty) return;
+    Map<String, dynamic> settings = {};
+    if (rows.first['settings_json'] != null) {
+      settings = jsonDecode(rows.first['settings_json'] as String) as Map<String, dynamic>;
+    }
+    final cleaned = contacts
+        .map((c) => c.trim())
+        .where((c) => c.isNotEmpty)
+        .take(2)
+        .toList();
+    settings['emergency_contacts'] = cleaned;
+    await db.update(
+      'users',
+      {'settings_json': jsonEncode(settings)},
+      where: 'id = ?',
+      whereArgs: [userId],
+    );
+  }
+
   Future<Map<String, dynamic>> getUserSettings(int userId) async {
     final db = await _dbHelper.database;
     final rows = await db.query('users', where: 'id = ?', whereArgs: [userId], limit: 1);

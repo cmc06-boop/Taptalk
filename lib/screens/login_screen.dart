@@ -54,11 +54,18 @@ class _LoginScreenState extends State<LoginScreen> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final isWide = constraints.maxWidth >= 500;
+          final compactHeight = constraints.maxHeight < 760;
+          final headerHeight = isWide ? 180.0 : (compactHeight ? 150.0 : 190.0);
+          final logoSize = compactHeight ? 70.0 : 86.0;
+          final contentHorizontal = isWide ? 36.0 : 24.0;
+          final contentTop = compactHeight ? 16.0 : 22.0;
+          final sectionGap = compactHeight ? 12.0 : 16.0;
+          final fieldGap = compactHeight ? 10.0 : 14.0;
           return Column(
             children: [
               Container(
                 width: double.infinity,
-                height: isWide ? 200 : 240,
+                height: headerHeight,
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
@@ -69,35 +76,47 @@ class _LoginScreenState extends State<LoginScreen> {
                 alignment: Alignment.center,
                 child: Text(
                   'TapTalk',
-                  style: GoogleFonts.tiltWarp(fontSize: 32, color: Colors.white),
+                  style: GoogleFonts.poppins(
+                    fontSize: compactHeight ? 34 : 38,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                    letterSpacing: 0.4,
+                    shadows: [
+                      Shadow(
+                        color: Color(0x22000000),
+                        blurRadius: 6,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               Expanded(
                 child: Transform.translate(
-                  offset: Offset(0, isWide ? -48 : -80),
+                  offset: Offset(0, isWide ? -34 : -50),
                   child: Material(
                     color: Colors.white,
                     borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(120),
+                      top: Radius.circular(52),
                     ),
                     clipBehavior: Clip.antiAlias,
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(
-                        AppSpacing.xl,
-                        AppSpacing.xxl,
-                        AppSpacing.xl,
-                        AppSpacing.lg,
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        contentHorizontal,
+                        contentTop,
+                        contentHorizontal,
+                        compactHeight ? 14 : 18,
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          const Center(child: TapTalkLogo(size: 100)),
-                          const SizedBox(height: AppSpacing.lg),
+                          Center(child: TapTalkLogo(size: logoSize)),
+                          SizedBox(height: sectionGap),
                           Text(
                             AppStrings.loginTitle(lang),
                             textAlign: TextAlign.center,
                             style: GoogleFonts.poppins(
-                              fontSize: 24,
+                              fontSize: compactHeight ? 22 : 24,
                               fontWeight: FontWeight.w700,
                               color: const Color(0xFF5BB88A),
                             ),
@@ -110,10 +129,10 @@ class _LoginScreenState extends State<LoginScreen> {
                               style: const TextStyle(color: Color(0xFFC62828)),
                             ),
                           ],
-                          const SizedBox(height: AppSpacing.lg),
+                          SizedBox(height: sectionGap),
                           _field(AppStrings.email(lang), _email,
                               keyboard: TextInputType.emailAddress),
-                          const SizedBox(height: AppSpacing.md),
+                          SizedBox(height: fieldGap),
                           _field(
                             AppStrings.password(lang),
                             _password,
@@ -121,12 +140,12 @@ class _LoginScreenState extends State<LoginScreen> {
                             onToggleObscure: () =>
                                 setState(() => _obscurePassword = !_obscurePassword),
                           ),
-                          const SizedBox(height: AppSpacing.lg),
+                          const Spacer(),
                           FilledButton(
                             onPressed: _busy ? null : _submit,
                             style: FilledButton.styleFrom(
                               backgroundColor: Colors.black,
-                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              padding: EdgeInsets.symmetric(vertical: compactHeight ? 14 : 16),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(14),
                               ),
@@ -146,7 +165,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                         GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 16),
                                   ),
                           ),
-                          const SizedBox(height: AppSpacing.lg),
+                          SizedBox(height: compactHeight ? 10 : 14),
                           Text.rich(
                             textAlign: TextAlign.center,
                             TextSpan(
@@ -172,6 +191,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               ],
                             ),
                           ),
+                          SizedBox(height: compactHeight ? 4 : 6),
                         ],
                       ),
                     ),
@@ -206,27 +226,32 @@ class _LoginScreenState extends State<LoginScreen> {
           keyboardType: keyboard,
           decoration: InputDecoration(
             filled: true,
-            fillColor: const Color(0xFFD6F3E3),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            fillColor: const Color(0xFFEFF8F3),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             suffixIcon: onToggleObscure == null
                 ? null
                 : IconButton(
                     icon: Icon(
                       obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
                       color: const Color(0xFF5A6B63),
+                      size: 19,
                     ),
                     onPressed: onToggleObscure,
+                    constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
                   ),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide(
-                color: const Color(0xFF5BB88A).withValues(alpha: 0.35),
-              ),
+              borderSide: const BorderSide(color: Color(0xFFDCECE4)),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFDCECE4)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
               borderSide: BorderSide(
-                color: const Color(0xFF5BB88A).withValues(alpha: 0.35),
+                color: const Color(0xFF5BB88A).withValues(alpha: 0.65),
+                width: 1.6,
               ),
             ),
           ),

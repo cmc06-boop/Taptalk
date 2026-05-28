@@ -358,4 +358,23 @@ abstract final class AppStrings {
   static String wrongCurrentPassword(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Maling kasalukuyang password.'
       : 'Current password is incorrect.';
+
+  static String emergencyContacts(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Emergency Contact'
+      : 'Emergency Contact';
+
+  static String emergencyContactHint(AppLanguage lang, int index) =>
+      'Contact $index';
+
+  static String addAnotherContact(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Magdagdag pa ng contact'
+      : 'Add another contact';
+
+  static String emergencyContactHelp(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Para ito sa emergency alerts ng learner. Hindi ipinapakita sa teacher ang buong number.'
+      : 'Used for learner emergency alerts. The teacher does not see the full number.';
+
+  static String emergencyContactRequired(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Maglagay ng kahit isang emergency contact.'
+      : 'Please add at least one emergency contact.';
 }

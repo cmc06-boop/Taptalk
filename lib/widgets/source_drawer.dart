@@ -15,71 +15,104 @@ class SourceDrawer extends StatelessWidget {
     final theme = app.theme;
     final lang = app.language;
 
-    if (!app.drawerOpen) return const SizedBox.shrink();
-
     return Stack(
       children: [
-        GestureDetector(
-          onTap: () => app.toggleDrawer(false),
-          child: Container(color: Colors.black.withValues(alpha: 0.18)),
+        IgnorePointer(
+          ignoring: !app.drawerOpen,
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 240),
+            curve: Curves.easeOutCubic,
+            opacity: app.drawerOpen ? 1 : 0,
+            child: GestureDetector(
+              onTap: () => app.toggleDrawer(false),
+              child: Container(color: Colors.black.withValues(alpha: 0.18)),
+            ),
+          ),
         ),
         Align(
           alignment: Alignment.centerLeft,
-          child: Material(
-            elevation: 12,
-            color: theme.bgMid,
-            child: SizedBox(
-              width: 228,
-              child: SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.md,
-                    AppSpacing.lg,
-                    AppSpacing.md,
-                    AppSpacing.lg,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        'TapTalk',
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          color: theme.textMain,
-                        ),
+          child: IgnorePointer(
+            ignoring: !app.drawerOpen,
+            child: AnimatedSlide(
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOutCubic,
+              offset: app.drawerOpen ? Offset.zero : const Offset(-1.04, 0),
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                opacity: app.drawerOpen ? 1 : 0,
+                child: Container(
+                  width: 238,
+                  decoration: BoxDecoration(
+                    color: theme.bgMid,
+                    borderRadius: const BorderRadius.horizontal(
+                      right: Radius.circular(24),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: theme.textMain.withValues(alpha: 0.20),
+                        blurRadius: 24,
+                        offset: const Offset(8, 0),
                       ),
-                      const SizedBox(height: AppSpacing.md),
-                      Text(
-                        AppStrings.sources(lang).toUpperCase(),
-                        style: GoogleFonts.poppins(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1,
-                          color: theme.textMain.withValues(alpha: 0.52),
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.sm),
-                      _DrawerItem(
-                        icon: Icons.school_outlined,
-                        label: AppStrings.classes(lang),
-                        onTap: () {},
-                      ),
-                      _DrawerItem(
-                        icon: Icons.person_outline,
-                        label: AppStrings.forMe(lang),
-                        active: true,
-                        onTap: () => app.toggleDrawer(false),
-                      ),
-                      const Spacer(),
-                      _DrawerItem(
-                        icon: Icons.logout_rounded,
-                        label: AppStrings.logout(lang),
-                        centered: true,
-                        onTap: () => app.logout(),
+                      BoxShadow(
+                        color: theme.bgAccent.withValues(alpha: 0.10),
+                        blurRadius: 30,
+                        offset: const Offset(10, 0),
                       ),
                     ],
+                  ),
+                  child: SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.md,
+                        AppSpacing.lg,
+                        AppSpacing.md,
+                        AppSpacing.lg,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            'TapTalk',
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.poppins(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: theme.textMain,
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.md),
+                          Text(
+                            AppStrings.sources(lang).toUpperCase(),
+                            style: GoogleFonts.poppins(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1,
+                              color: theme.textMain.withValues(alpha: 0.52),
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          _DrawerItem(
+                            icon: Icons.school_outlined,
+                            label: AppStrings.classes(lang),
+                            onTap: () {},
+                          ),
+                          _DrawerItem(
+                            icon: Icons.person_outline,
+                            label: AppStrings.forMe(lang),
+                            active: true,
+                            onTap: () => app.toggleDrawer(false),
+                          ),
+                          const Spacer(),
+                          _DrawerItem(
+                            icon: Icons.logout_rounded,
+                            label: AppStrings.logout(lang),
+                            centered: true,
+                            onTap: () => app.logout(),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),

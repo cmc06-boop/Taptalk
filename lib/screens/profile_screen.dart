@@ -19,37 +19,102 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   final _nameController = TextEditingController();
+  final _emergency1Controller = TextEditingController();
+  final _emergency2Controller = TextEditingController();
   String _savedName = '';
+  List<String> _savedEmergencyContacts = const [];
+  bool _showSecondEmergency = false;
+  bool _editing = false;
   bool _saving = false;
 
   @override
   void dispose() {
     _nameController.dispose();
+    _emergency1Controller.dispose();
+    _emergency2Controller.dispose();
     super.dispose();
   }
 
   void _syncFromUser(AppState app) {
     final name = app.user?.fullName ?? '';
-    if (_savedName == name) return;
+    final contacts = app.emergencyContacts;
+    if (_savedName == name && _savedEmergencyContacts.join('|') == contacts.join('|')) {
+      return;
+    }
     _savedName = name;
+    _savedEmergencyContacts = List.from(contacts);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (_nameController.text != name) {
         _nameController.text = name;
       }
+      final first = contacts.isNotEmpty ? contacts.first : '';
+      final second = contacts.length > 1 ? contacts[1] : '';
+      if (_emergency1Controller.text != first) {
+        _emergency1Controller.text = first;
+      }
+      if (_emergency2Controller.text != second) {
+        _emergency2Controller.text = second;
+      }
+      final shouldShowSecond = second.isNotEmpty;
+      if (_showSecondEmergency != shouldShowSecond) {
+        setState(() => _showSecondEmergency = shouldShowSecond);
+      }
     });
   }
 
-  bool get _hasChanges => _nameController.text.trim() != _savedName.trim();
+  List<String> get _draftEmergencyContacts {
+    final out = <String>[];
+    final first = _emergency1Controller.text.trim();
+    final second = _emergency2Controller.text.trim();
+    if (first.isNotEmpty) out.add(first);
+    if (_showSecondEmergency && second.isNotEmpty) out.add(second);
+    return out.take(2).toList();
+  }
+
+  bool get _hasChanges =>
+      _nameController.text.trim() != _savedName.trim() ||
+      _draftEmergencyContacts.join('|') != _savedEmergencyContacts.join('|');
+
+  bool _canSave(AppState app) {
+    final hasName = _nameController.text.trim().isNotEmpty;
+    final hasEmail = (app.user?.email ?? '').trim().isNotEmpty;
+    final hasPrimaryContact = _emergency1Controller.text.trim().isNotEmpty;
+    return _editing && !_saving && hasName && hasEmail && hasPrimaryContact;
+  }
 
   void _cancelEdits() {
     _nameController.text = _savedName;
+    _emergency1Controller.text = _savedEmergencyContacts.isNotEmpty ? _savedEmergencyContacts[0] : '';
+    _emergency2Controller.text = _savedEmergencyContacts.length > 1 ? _savedEmergencyContacts[1] : '';
+    _showSecondEmergency = _savedEmergencyContacts.length > 1;
+    _editing = false;
     setState(() {});
   }
 
   Future<void> _save(AppState app, AppLanguage lang) async {
+    final name = _nameController.text.trim();
+    final email = (app.user?.email ?? '').trim();
+    final primaryContact = _emergency1Controller.text.trim();
+    if (name.isEmpty || email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.fillAllFields(lang))),
+      );
+      return;
+    }
+    if (primaryContact.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.emergencyContactRequired(lang))),
+      );
+      return;
+    }
+
+    final contacts = _draftEmergencyContacts;
     setState(() => _saving = true);
     final err = await app.updateProfileName(_nameController.text);
+    if (err == null) {
+      await app.updateEmergencyContacts(contacts);
+    }
     if (!mounted) return;
     setState(() => _saving = false);
     if (err != null) {
@@ -57,6 +122,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
     _savedName = _nameController.text.trim();
+    _savedEmergencyContacts = List.from(contacts);
+    _editing = false;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(AppStrings.profileUpdated(lang))),
     );
@@ -97,28 +164,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
               AppSpacing.lg,
               0,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  AppStrings.myProfile(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w800,
-                    color: theme.textMain,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: theme.bgMid.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    AppStrings.myProfile(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: theme.textMain,
+                    ),
                   ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  AppStrings.profileSubtitle(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 13,
-                    color: theme.textMain.withValues(alpha: 0.72),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    AppStrings.profileSubtitle(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: theme.textMain.withValues(alpha: 0.72),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
+          const SizedBox(height: AppSpacing.sm),
           PanelCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -135,7 +211,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ),
                     ),
-                    if (_hasChanges)
+                    if (_editing && _hasChanges)
                       TextButton(
                         onPressed: _cancelEdits,
                         style: TextButton.styleFrom(
@@ -157,6 +233,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                         ),
                       ),
+                    if (!_editing)
+                      TextButton(
+                        onPressed: () => setState(() => _editing = true),
+                        style: TextButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: theme.textMain,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.md,
+                            vertical: AppSpacing.xs,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                          ),
+                        ),
+                        child: Text(
+                          'Edit',
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.md),
@@ -164,7 +262,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   label: AppStrings.fullName(lang),
                   controller: _nameController,
                   theme: theme,
-                  onChanged: (_) => setState(() {}),
+                  enabled: _editing,
+                  onChanged: _editing ? (_) => setState(() {}) : null,
                 ),
                 const SizedBox(height: AppSpacing.md),
                 _ProfileReadOnlyValue(
@@ -172,6 +271,56 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   value: user?.email ?? '',
                   theme: theme,
                 ),
+                const SizedBox(height: AppSpacing.md),
+                Text(
+                  AppStrings.emergencyContacts(lang),
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: theme.textMain.withValues(alpha: 0.85),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                _ProfileField(
+                  label: '',
+                  controller: _emergency1Controller,
+                  theme: theme,
+                  keyboardType: TextInputType.phone,
+                  enabled: _editing,
+                  showLabel: false,
+                  hintText: AppStrings.emergencyContactHint(lang, 1),
+                  onChanged: _editing ? (_) => setState(() {}) : null,
+                ),
+                if (_showSecondEmergency) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  _ProfileField(
+                    label: '',
+                    controller: _emergency2Controller,
+                    theme: theme,
+                    keyboardType: TextInputType.phone,
+                    enabled: _editing,
+                    showLabel: false,
+                    hintText: 'Contact 2 (Optional)',
+                    onChanged: _editing ? (_) => setState(() {}) : null,
+                  ),
+                ],
+                if (!_showSecondEmergency)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: _editing
+                          ? () => setState(() => _showSecondEmergency = true)
+                          : null,
+                      icon: const Icon(Icons.add_rounded, size: 16),
+                      label: Text(AppStrings.addAnotherContact(lang)),
+                      style: TextButton.styleFrom(
+                        foregroundColor: theme.bgAccent,
+                        padding: const EdgeInsets.only(top: 6, bottom: 2),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: AppSpacing.md),
                 Text(
                   AppStrings.profileCode(lang),
@@ -234,7 +383,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 FilledButton(
-                  onPressed: !_hasChanges || _saving ? null : () => _save(app, lang),
+                  onPressed: _canSave(app) ? () => _save(app, lang) : null,
                   style: FilledButton.styleFrom(
                     backgroundColor: theme.bgAccent,
                     foregroundColor: Colors.white,
@@ -472,7 +621,7 @@ class _ProfileReadOnlyValue extends StatelessWidget {
             value,
             style: GoogleFonts.poppins(
               fontSize: 14,
-              fontWeight: FontWeight.w500,
+              fontWeight: FontWeight.w400,
               color: theme.textMain,
             ),
           ),
@@ -490,6 +639,10 @@ class _ProfileField extends StatelessWidget {
     this.obscure = false,
     this.onToggleObscure,
     this.onChanged,
+    this.keyboardType,
+    this.hintText,
+    this.showLabel = true,
+    this.enabled = true,
   });
 
   final String label;
@@ -498,33 +651,47 @@ class _ProfileField extends StatelessWidget {
   final bool obscure;
   final VoidCallback? onToggleObscure;
   final ValueChanged<String>? onChanged;
+  final TextInputType? keyboardType;
+  final String? hintText;
+  final bool showLabel;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: GoogleFonts.poppins(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: theme.textMain.withValues(alpha: 0.85),
+        if (showLabel) ...[
+          Text(
+            label,
+            style: GoogleFonts.poppins(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: theme.textMain.withValues(alpha: 0.85),
+            ),
           ),
-        ),
-        const SizedBox(height: AppSpacing.xs),
+          const SizedBox(height: AppSpacing.xs),
+        ],
         TextField(
           controller: controller,
+          enabled: enabled,
           obscureText: obscure,
           onChanged: onChanged,
+          keyboardType: keyboardType,
           style: GoogleFonts.poppins(
             fontSize: 14,
-            fontWeight: FontWeight.w500,
+            fontWeight: FontWeight.w400,
             color: theme.textMain,
           ),
           decoration: InputDecoration(
             filled: true,
             fillColor: Colors.white,
+            hintText: hintText,
+            hintStyle: GoogleFonts.poppins(
+              fontSize: 13,
+              fontWeight: FontWeight.w400,
+              color: theme.textMain.withValues(alpha: 0.45),
+            ),
             contentPadding: const EdgeInsets.symmetric(
               horizontal: AppSpacing.md,
               vertical: AppSpacing.md,

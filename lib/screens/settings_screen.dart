@@ -26,30 +26,40 @@ class SettingsScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
         children: [
-          PanelCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  AppStrings.settings(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w800,
-                    color: theme.textMain,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: theme.bgMid.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    AppStrings.settings(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: theme.textMain,
+                    ),
                   ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  AppStrings.settingsSubtitle(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 13,
-                    color: theme.textMain.withValues(alpha: 0.72),
-                    height: 1.35,
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    AppStrings.settingsSubtitle(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: theme.textMain.withValues(alpha: 0.72),
+                      height: 1.35,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
+          const SizedBox(height: AppSpacing.sm),
           PanelCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

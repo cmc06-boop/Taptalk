@@ -11,6 +11,14 @@ Future<void> speakWithFeedback(
   bool record = false,
 }) async {
   final app = context.read<AppState>();
+  if (text.trim().isEmpty) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.enterText(app.language))),
+      );
+    }
+    return;
+  }
   final ok = await app.speakText(text, record: record);
   if (!ok && context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(
