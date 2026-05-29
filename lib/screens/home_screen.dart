@@ -11,6 +11,7 @@ import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/utils/speak_feedback.dart';
 import '../providers/app_state.dart';
+import '../widgets/add_category_dialog.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/panel_card.dart';
 import '../widgets/phrase_card.dart';
@@ -153,136 +154,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _showAddCategoryDialog() async {
     final app = context.read<AppState>();
-    final lang = app.language;
-    final controller = TextEditingController();
+    final name = await AddCategoryDialog.show(context);
+    if (!mounted || name == null) return;
 
-    final created = await showDialog<bool>(
-      context: context,
-      barrierDismissible: true,
-      builder: (dialogContext) {
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x26000000),
-                  blurRadius: 24,
-                  offset: Offset(0, 10),
-                ),
-              ],
-            ),
-            padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  AppStrings.newCategory(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                    color: app.theme.textMain,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  AppStrings.chooseCategorySub(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w400,
-                    color: app.theme.textMain.withValues(alpha: 0.72),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: controller,
-                  autofocus: true,
-                  textInputAction: TextInputAction.done,
-                  onSubmitted: (_) => Navigator.of(dialogContext).pop(true),
-                  decoration: InputDecoration(
-                    hintText: AppStrings.categoryNameHint(lang),
-                    hintStyle: GoogleFonts.poppins(
-                      fontSize: 13,
-                      color: app.theme.textMain.withValues(alpha: 0.45),
-                    ),
-                    filled: true,
-                    fillColor: app.theme.bgMid.withValues(alpha: 0.28),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: app.theme.bgAccent.withValues(alpha: 0.8),
-                        width: 1.6,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.of(dialogContext).pop(false),
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size.fromHeight(44),
-                          side: BorderSide(color: app.theme.bgAccent.withValues(alpha: 0.45)),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: Text(
-                          AppStrings.cancel(lang),
-                          style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.w600,
-                            color: app.theme.textMain,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: () => Navigator.of(dialogContext).pop(true),
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size.fromHeight(44),
-                          backgroundColor: Colors.black,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: Text(
-                          AppStrings.add(lang),
-                          style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-
-    if (created != true) {
-      controller.dispose();
-      return;
-    }
-
-    final err = await app.addCategory(controller.text);
-    controller.dispose();
+    final err = await app.addCategory(name);
     if (!mounted) return;
     if (err != null) {
       ScaffoldMessenger.of(context).showSnackBar(
