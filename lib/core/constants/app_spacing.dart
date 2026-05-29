@@ -42,4 +42,11 @@ abstract final class AppSpacing {
     if (w >= 600) return 3;
     return 2;
   }
+
+  /// Category picker grid: 3 columns on phone, 5 on tablet and wider.
+  static int categoryGridColumns(BuildContext context) {
+    final w = MediaQuery.sizeOf(context).width;
+    if (w >= 600) return 5;
+    return 3;
+  }
 }

@@ -129,9 +129,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         contentHorizontal,
                         compactHeight ? 8 : 14,
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
+                      child: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
                           Center(child: TapTalkLogo(size: logoSize)),
                           SizedBox(height: sectionGap),
                           Text(
@@ -271,7 +272,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             ),
                           ),
                           SizedBox(height: compactHeight ? 0 : 2),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
