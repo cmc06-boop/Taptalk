@@ -8,6 +8,8 @@ import 'screens/choose_theme_screen.dart';
 import 'screens/favorites_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/classes_screen.dart';
+import 'screens/my_child_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/register_screen.dart';
@@ -74,6 +76,10 @@ class TapTalkApp extends StatelessWidget {
         return const SettingsScreen();
       case AppRoute.profile:
         return const ProfileScreen();
+      case AppRoute.myChild:
+        return const MyChildScreen();
+      case AppRoute.classes:
+        return const ClassesScreen();
     }
   }
 }

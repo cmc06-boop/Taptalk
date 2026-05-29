@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -27,7 +28,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 3,
+      version: 6,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE users (
@@ -80,13 +81,102 @@ class DatabaseHelper {
             created_at INTEGER NOT NULL
           )
         ''');
+        await _createParentChildrenTable(db);
+        await _createClassTables(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 3) {
           await _upgradeBuiltinPhraseImages(db);
         }
+        if (oldVersion < 4) {
+          await _createParentChildrenTable(db);
+        }
+        if (oldVersion < 5) {
+          await _backfillLearnerProfileCodes(db);
+        }
+        if (oldVersion < 6) {
+          await _createClassTables(db);
+          await _backfillTeacherClasses(db);
+        }
       },
     );
+  }
+
+  Future<void> _backfillLearnerProfileCodes(Database db) async {
+    final rows = await db.query('users', where: "role = 'learner'");
+    for (final row in rows) {
+      final id = row['id'] as int;
+      Map<String, dynamic> settings = {};
+      final raw = row['settings_json'];
+      if (raw != null) {
+        settings = jsonDecode(raw as String) as Map<String, dynamic>;
+      }
+      final existing = settings['profile_code'] as String?;
+      if (existing != null && existing.trim().isNotEmpty) continue;
+      final hex = id.toRadixString(16).toUpperCase();
+      settings['profile_code'] = 'TT-${hex.padLeft(10, '0')}';
+      await db.update(
+        'users',
+        {'settings_json': jsonEncode(settings)},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
+  }
+
+  Future<void> _createParentChildrenTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS parent_children (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        parent_user_id INTEGER NOT NULL,
+        learner_user_id INTEGER NOT NULL,
+        linked_at INTEGER NOT NULL,
+        UNIQUE(parent_user_id, learner_user_id)
+      )
+    ''');
+  }
+
+  Future<void> _createClassTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS teacher_classes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        teacher_user_id INTEGER NOT NULL,
+        class_name TEXT NOT NULL,
+        class_code TEXT NOT NULL UNIQUE,
+        created_at INTEGER NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS class_enrollments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        learner_user_id INTEGER NOT NULL,
+        class_id INTEGER NOT NULL,
+        enrolled_at INTEGER NOT NULL,
+        UNIQUE(learner_user_id, class_id)
+      )
+    ''');
+  }
+
+  Future<void> _backfillTeacherClasses(Database db) async {
+    final teachers = await db.query('users', where: "role = 'teacher'");
+    for (final row in teachers) {
+      final teacherId = row['id'] as int;
+      final existing = await db.query(
+        'teacher_classes',
+        where: 'teacher_user_id = ?',
+        whereArgs: [teacherId],
+        limit: 1,
+      );
+      if (existing.isNotEmpty) continue;
+      final code =
+          'CLS-${teacherId.toRadixString(16).toUpperCase().padLeft(8, '0')}';
+      await db.insert('teacher_classes', {
+        'teacher_user_id': teacherId,
+        'class_name': 'My Class',
+        'class_code': code,
+        'created_at': DateTime.now().millisecondsSinceEpoch,
+      });
+    }
   }
 
   Future<void> _upgradeBuiltinPhraseImages(Database db) async {

@@ -92,24 +92,59 @@ class SourceDrawer extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(height: AppSpacing.sm),
-                          _DrawerItem(
-                            icon: Icons.school_outlined,
-                            label: AppStrings.classes(lang),
-                            onTap: () {},
-                          ),
-                          _DrawerItem(
-                            icon: Icons.person_outline,
-                            label: AppStrings.forMe(lang),
-                            active: true,
-                            onTap: () => app.toggleDrawer(false),
-                          ),
-                          const Spacer(),
-                          _DrawerItem(
-                            icon: Icons.logout_rounded,
-                            label: AppStrings.logout(lang),
-                            centered: true,
-                            onTap: () => app.logout(),
-                          ),
+                          if (app.user?.isParent ?? false) ...[
+                            _DrawerItem(
+                              icon: Icons.child_care_outlined,
+                              label: AppStrings.myChild(lang),
+                              active: app.route == AppRoute.myChild,
+                              onTap: () {
+                                app.setRoute(AppRoute.myChild);
+                              },
+                            ),
+                            _DrawerItem(
+                              icon: Icons.person_outline,
+                              label: AppStrings.forMe(lang),
+                              active: app.route != AppRoute.myChild &&
+                                  app.route != AppRoute.profile,
+                              onTap: () {
+                                app.setRoute(AppRoute.home);
+                              },
+                            ),
+                            _DrawerItem(
+                              icon: Icons.person_outline_rounded,
+                              label: AppStrings.profile(lang),
+                              onTap: () {
+                                app.toggleDrawer(false);
+                                app.setRoute(AppRoute.profile);
+                              },
+                            ),
+                          ] else if (app.user?.isLearner ?? false) ...[
+                            _DrawerItem(
+                              icon: Icons.school_outlined,
+                              label: AppStrings.classes(lang),
+                              active: app.route == AppRoute.classes,
+                              onTap: () {
+                                app.setRoute(AppRoute.classes);
+                              },
+                            ),
+                            _DrawerItem(
+                              icon: Icons.person_outline,
+                              label: AppStrings.forMe(lang),
+                              active: app.route != AppRoute.classes,
+                              onTap: () {
+                                app.setRoute(AppRoute.home);
+                              },
+                            ),
+                          ] else ...[
+                            _DrawerItem(
+                              icon: Icons.person_outline_rounded,
+                              label: AppStrings.profile(lang),
+                              active: app.route == AppRoute.profile,
+                              onTap: () {
+                                app.setRoute(AppRoute.profile);
+                              },
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -130,14 +165,12 @@ class _DrawerItem extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.active = false,
-    this.centered = false,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback onTap;
   final bool active;
-  final bool centered;
 
   @override
   Widget build(BuildContext context) {
@@ -159,8 +192,6 @@ class _DrawerItem extends StatelessWidget {
               vertical: AppSpacing.md,
             ),
             child: Row(
-              mainAxisAlignment:
-                  centered ? MainAxisAlignment.center : MainAxisAlignment.start,
               children: [
                 Container(
                   width: 36,
@@ -173,17 +204,15 @@ class _DrawerItem extends StatelessWidget {
                   ),
                   child: Icon(icon, color: theme.textMain, size: 19),
                 ),
-                if (!centered) ...[
-                  const SizedBox(width: AppSpacing.sm),
-                  Text(
-                    label,
-                    style: GoogleFonts.poppins(
-                      fontSize: 14,
-                      fontWeight: active ? FontWeight.w700 : FontWeight.w600,
-                      color: theme.textMain,
-                    ),
+                const SizedBox(width: AppSpacing.sm),
+                Text(
+                  label,
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: active ? FontWeight.w700 : FontWeight.w600,
+                    color: theme.textMain,
                   ),
-                ],
+                ),
               ],
             ),
           ),

@@ -9,6 +9,7 @@ Future<void> speakWithFeedback(
   BuildContext context,
   String text, {
   bool record = false,
+  String? categoryKey,
 }) async {
   final app = context.read<AppState>();
   if (text.trim().isEmpty) {
@@ -19,7 +20,11 @@ Future<void> speakWithFeedback(
     }
     return;
   }
-  final ok = await app.speakText(text, record: record);
+  final ok = await app.speakText(
+    text,
+    record: record,
+    categoryKey: categoryKey,
+  );
   if (!ok && context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(AppStrings.ttsNotAvailable(app.language))),

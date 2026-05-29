@@ -37,7 +37,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _syncFromUser(AppState app) {
     final name = app.user?.fullName ?? '';
-    final contacts = app.emergencyContacts;
+    final isLearner = app.user?.isLearner ?? false;
+    final contacts = isLearner ? app.emergencyContacts : const <String>[];
     if (_savedName == name && _savedEmergencyContacts.join('|') == contacts.join('|')) {
       return;
     }
@@ -48,6 +49,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (_nameController.text != name) {
         _nameController.text = name;
       }
+      if (!isLearner) return;
       final first = contacts.isNotEmpty ? contacts.first : '';
       final second = contacts.length > 1 ? contacts[1] : '';
       if (_emergency1Controller.text != first) {
@@ -72,13 +74,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return out.take(2).toList();
   }
 
-  bool get _hasChanges =>
-      _nameController.text.trim() != _savedName.trim() ||
-      _draftEmergencyContacts.join('|') != _savedEmergencyContacts.join('|');
+  bool _hasChanges(AppState app) {
+    final nameChanged = _nameController.text.trim() != _savedName.trim();
+    if (!(app.user?.isLearner ?? false)) return nameChanged;
+    return nameChanged ||
+        _draftEmergencyContacts.join('|') != _savedEmergencyContacts.join('|');
+  }
 
   bool _canSave(AppState app) {
     final hasName = _nameController.text.trim().isNotEmpty;
     final hasEmail = (app.user?.email ?? '').trim().isNotEmpty;
+    if (!(app.user?.isLearner ?? false)) {
+      return _editing && !_saving && hasName && hasEmail;
+    }
     final hasPrimaryContact = _emergency1Controller.text.trim().isNotEmpty;
     return _editing && !_saving && hasName && hasEmail && hasPrimaryContact;
   }
@@ -95,24 +103,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _save(AppState app, AppLanguage lang) async {
     final name = _nameController.text.trim();
     final email = (app.user?.email ?? '').trim();
-    final primaryContact = _emergency1Controller.text.trim();
+    final isLearner = app.user?.isLearner ?? false;
     if (name.isEmpty || email.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(AppStrings.fillAllFields(lang))),
       );
       return;
     }
-    if (primaryContact.isEmpty) {
+    if (isLearner && _emergency1Controller.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(AppStrings.emergencyContactRequired(lang))),
       );
       return;
     }
 
-    final contacts = _draftEmergencyContacts;
+    final contacts = isLearner ? _draftEmergencyContacts : const <String>[];
     setState(() => _saving = true);
     final err = await app.updateProfileName(_nameController.text);
-    if (err == null) {
+    if (err == null && isLearner) {
       await app.updateEmergencyContacts(contacts);
     }
     if (!mounted) return;
@@ -122,7 +130,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
     _savedName = _nameController.text.trim();
-    _savedEmergencyContacts = List.from(contacts);
+    if (isLearner) {
+      _savedEmergencyContacts = List.from(contacts);
+    }
     _editing = false;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(AppStrings.profileUpdated(lang))),
@@ -211,7 +221,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ),
                     ),
-                    if (_editing && _hasChanges)
+                    if (_editing && _hasChanges(app))
                       TextButton(
                         onPressed: _cancelEdits,
                         style: TextButton.styleFrom(
@@ -248,7 +258,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                         ),
                         child: Text(
-                          'Edit',
+                          AppStrings.edit(lang),
                           style: GoogleFonts.poppins(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -271,116 +281,198 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   value: user?.email ?? '',
                   theme: theme,
                 ),
-                const SizedBox(height: AppSpacing.md),
-                Text(
-                  AppStrings.emergencyContacts(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: theme.textMain.withValues(alpha: 0.85),
+                if (user?.isLearner ?? false) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  Text(
+                    AppStrings.emergencyContacts(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: theme.textMain.withValues(alpha: 0.85),
+                    ),
                   ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                _ProfileField(
-                  label: '',
-                  controller: _emergency1Controller,
-                  theme: theme,
-                  keyboardType: TextInputType.phone,
-                  enabled: _editing,
-                  showLabel: false,
-                  hintText: AppStrings.emergencyContactHint(lang, 1),
-                  onChanged: _editing ? (_) => setState(() {}) : null,
-                ),
-                if (_showSecondEmergency) ...[
-                  const SizedBox(height: AppSpacing.sm),
+                  const SizedBox(height: AppSpacing.xs),
                   _ProfileField(
                     label: '',
-                    controller: _emergency2Controller,
+                    controller: _emergency1Controller,
                     theme: theme,
                     keyboardType: TextInputType.phone,
                     enabled: _editing,
                     showLabel: false,
-                    hintText: 'Contact 2 (Optional)',
+                    hintText: AppStrings.emergencyContactHint(lang, 1),
                     onChanged: _editing ? (_) => setState(() {}) : null,
                   ),
-                ],
-                if (!_showSecondEmergency)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: _editing
-                          ? () => setState(() => _showSecondEmergency = true)
-                          : null,
-                      icon: const Icon(Icons.add_rounded, size: 16),
-                      label: Text(AppStrings.addAnotherContact(lang)),
-                      style: TextButton.styleFrom(
-                        foregroundColor: theme.bgAccent,
-                        padding: const EdgeInsets.only(top: 6, bottom: 2),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: AppSpacing.md),
-                Text(
-                  AppStrings.profileCode(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.6,
-                    color: theme.textMain.withValues(alpha: 0.65),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        app.profileCode,
-                        style: GoogleFonts.poppins(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: theme.textMain,
-                        ),
-                      ),
-                    ),
-                    FilledButton(
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: app.profileCode));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(AppStrings.copied(lang))),
-                        );
-                      },
-                      style: FilledButton.styleFrom(
-                        backgroundColor: theme.bgAccent,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.lg,
-                          vertical: AppSpacing.sm,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                        ),
-                      ),
-                      child: Text(
-                        AppStrings.copy(lang),
-                        style: GoogleFonts.poppins(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                  if (_showSecondEmergency) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    _ProfileField(
+                      label: '',
+                      controller: _emergency2Controller,
+                      theme: theme,
+                      keyboardType: TextInputType.phone,
+                      enabled: _editing,
+                      showLabel: false,
+                      hintText: AppStrings.emergencyContactHint(lang, 2),
+                      onChanged: _editing ? (_) => setState(() {}) : null,
                     ),
                   ],
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  AppStrings.profileCodeHint(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 11,
-                    color: theme.textMain.withValues(alpha: 0.62),
-                    height: 1.4,
+                  if (!_showSecondEmergency)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: _editing
+                            ? () => setState(() => _showSecondEmergency = true)
+                            : null,
+                        icon: const Icon(Icons.add_rounded, size: 16),
+                        label: Text(AppStrings.addAnotherContact(lang)),
+                        style: TextButton.styleFrom(
+                          foregroundColor: theme.bgAccent,
+                          padding: const EdgeInsets.only(top: 6, bottom: 2),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: AppSpacing.md),
+                  Text(
+                    AppStrings.profileCode(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.6,
+                      color: theme.textMain.withValues(alpha: 0.65),
+                    ),
                   ),
-                ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          app.profileCode,
+                          style: GoogleFonts.poppins(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: theme.textMain,
+                          ),
+                        ),
+                      ),
+                      FilledButton(
+                        onPressed: app.profileCode.isEmpty
+                            ? null
+                            : () {
+                                Clipboard.setData(
+                                  ClipboardData(text: app.profileCode),
+                                );
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(AppStrings.copied(lang))),
+                                );
+                              },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: theme.bgAccent,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.lg,
+                            vertical: AppSpacing.sm,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                          ),
+                        ),
+                        child: Text(
+                          AppStrings.copy(lang),
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    AppStrings.profileCodeHint(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      color: theme.textMain.withValues(alpha: 0.62),
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+                if (user?.isTeacher ?? false) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  Text(
+                    AppStrings.classCode(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.6,
+                      color: theme.textMain.withValues(alpha: 0.65),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  for (final teacherClass in app.teacherClasses) ...[
+                    Text(
+                      teacherClass.name,
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: theme.textMain.withValues(alpha: 0.8),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            teacherClass.code,
+                            style: GoogleFonts.poppins(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: theme.textMain,
+                            ),
+                          ),
+                        ),
+                        FilledButton(
+                          onPressed: () {
+                            Clipboard.setData(
+                              ClipboardData(text: teacherClass.code),
+                            );
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(AppStrings.copied(lang))),
+                            );
+                          },
+                          style: FilledButton.styleFrom(
+                            backgroundColor: theme.bgAccent,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.lg,
+                              vertical: AppSpacing.sm,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(AppSpacing.radiusSm),
+                            ),
+                          ),
+                          child: Text(
+                            AppStrings.copy(lang),
+                            style: GoogleFonts.poppins(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                  ],
+                  Text(
+                    AppStrings.classCodeHint(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      color: theme.textMain.withValues(alpha: 0.62),
+                      height: 1.4,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: AppSpacing.lg),
                 FilledButton(
                   onPressed: _canSave(app) ? () => _save(app, lang) : null,

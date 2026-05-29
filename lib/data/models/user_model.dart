@@ -16,6 +16,8 @@ class UserModel {
   final String? passwordHash;
 
   bool get isLearner => role == 'learner';
+  bool get isParent => role == 'parent';
+  bool get isTeacher => role == 'teacher';
   bool get needsTheme => isLearner && (themeKey == null || themeKey!.isEmpty);
 
   UserModel copyWith({

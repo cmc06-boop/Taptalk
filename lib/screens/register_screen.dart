@@ -16,6 +16,7 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
+  final _formKey = GlobalKey<FormState>();
   final _name = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
@@ -38,11 +39,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Future<void> _submit() async {
     final lang = context.read<AppState>().language;
 
-    if (_name.text.trim().isEmpty ||
-        _email.text.trim().isEmpty ||
-        _password.text.isEmpty ||
-        _confirmPassword.text.isEmpty) {
-      setState(() => _error = AppStrings.fillAllFields(lang));
+    if (!_formKey.currentState!.validate()) {
+      setState(() => _error = null);
       return;
     }
     if (_password.text != _confirmPassword.text) {
@@ -71,6 +69,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final lang = app.language;
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
 
     return TapTalkShell(
       child: LayoutBuilder(
@@ -78,39 +77,57 @@ class _RegisterScreenState extends State<RegisterScreen> {
           final isWide = constraints.maxWidth >= 500;
           final compactHeight = constraints.maxHeight < 820;
           final headerHeight = isWide ? 176.0 : (compactHeight ? 130.0 : 170.0);
-          final logoSize = compactHeight ? 70.0 : 86.0;
+          final logoSize = compactHeight ? 64.0 : 80.0;
           final contentHorizontal = isWide ? 36.0 : 24.0;
-          final contentTop = compactHeight ? 10.0 : 16.0;
-          final sectionGap = compactHeight ? 8.0 : 14.0;
-          final fieldGap = compactHeight ? 6.0 : 10.0;
+          final contentTop = compactHeight ? 12.0 : 18.0;
+          final sectionGap = compactHeight ? 10.0 : 14.0;
+          final fieldGap = compactHeight ? 8.0 : 12.0;
+          final roleHeight = compactHeight ? 60.0 : 68.0;
+
           return Column(
             children: [
-              Container(
+              SizedBox(
                 width: double.infinity,
                 height: headerHeight,
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0xFF3ECF8E), Color(0xFFB3E6CC)],
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  'TapTalk',
-                  style: GoogleFonts.poppins(
-                    fontSize: compactHeight ? 34 : 38,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                    letterSpacing: 0.4,
-                    shadows: [
-                      Shadow(
-                        color: Color(0x22000000),
-                        blurRadius: 6,
-                        offset: Offset(0, 2),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Color(0xFF3ECF8E), Color(0xFFB3E6CC)],
+                        ),
                       ),
-                    ],
-                  ),
+                      child: SizedBox.expand(),
+                    ),
+                    Text(
+                      'TapTalk',
+                      style: GoogleFonts.poppins(
+                        fontSize: compactHeight ? 34 : 38,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                        letterSpacing: 0.4,
+                        shadows: const [
+                          Shadow(
+                            color: Color(0x22000000),
+                            blurRadius: 6,
+                            offset: Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Positioned(
+                      left: 4,
+                      top: 0,
+                      child: IconButton(
+                        onPressed: () => app.setRoute(AppRoute.welcome),
+                        icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                        tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               Expanded(
@@ -122,156 +139,204 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       top: Radius.circular(52),
                     ),
                     clipBehavior: Clip.antiAlias,
-                    child: Padding(
+                    child: SingleChildScrollView(
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
                       padding: EdgeInsets.fromLTRB(
                         contentHorizontal,
                         contentTop,
                         contentHorizontal,
-                        compactHeight ? 8 : 14,
+                        (compactHeight ? 12 : 18) + bottomInset,
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Center(child: TapTalkLogo(size: logoSize)),
-                          SizedBox(height: sectionGap),
-                          Text(
-                            AppStrings.signUp(lang),
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.poppins(
-                              fontSize: compactHeight ? 21 : 24,
-                              fontWeight: FontWeight.w700,
-                              color: const Color(0xFF5BB88A),
-                            ),
-                          ),
-                          if (_error != null) ...[
-                            const SizedBox(height: AppSpacing.md),
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Center(child: TapTalkLogo(size: logoSize)),
+                            SizedBox(height: sectionGap),
                             Text(
-                              _error!,
+                              AppStrings.signUp(lang),
                               textAlign: TextAlign.center,
-                              style: const TextStyle(color: Color(0xFFC62828)),
-                            ),
-                          ],
-                          SizedBox(height: sectionGap),
-                          _field(AppStrings.fullName(lang), _name),
-                          SizedBox(height: fieldGap),
-                          _field(
-                            AppStrings.email(lang),
-                            _email,
-                            keyboard: TextInputType.emailAddress,
-                          ),
-                          SizedBox(height: fieldGap),
-                          _field(
-                            AppStrings.password(lang),
-                            _password,
-                            obscure: _obscurePassword,
-                            onToggleObscure: () =>
-                                setState(() => _obscurePassword = !_obscurePassword),
-                          ),
-                          SizedBox(height: fieldGap),
-                          _field(
-                            AppStrings.confirmPassword(lang),
-                            _confirmPassword,
-                            obscure: _obscureConfirm,
-                            onToggleObscure: () =>
-                                setState(() => _obscureConfirm = !_obscureConfirm),
-                          ),
-                          SizedBox(height: sectionGap),
-                          Text(
-                            AppStrings.whatAreYou(lang),
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.poppins(
-                              fontSize: compactHeight ? 12 : 13,
-                              fontWeight: FontWeight.w600,
-                              color: const Color(0xFF5A6B63),
-                            ),
-                          ),
-                          SizedBox(height: compactHeight ? 4 : 8),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _roleOption(
-                                  'learner',
-                                  Icons.back_hand_outlined,
-                                  AppStrings.learner(lang),
-                                ),
+                              style: GoogleFonts.poppins(
+                                fontSize: compactHeight ? 21 : 24,
+                                fontWeight: FontWeight.w700,
+                                color: const Color(0xFF5BB88A),
                               ),
-                              const SizedBox(width: AppSpacing.sm),
-                              Expanded(
-                                child: _roleOption(
-                                  'parent',
-                                  Icons.family_restroom_outlined,
-                                  AppStrings.parent(lang),
-                                ),
-                              ),
-                              const SizedBox(width: AppSpacing.sm),
-                              Expanded(
-                                child: _roleOption(
-                                  'teacher',
-                                  Icons.school_outlined,
-                                  AppStrings.teacher(lang),
-                                ),
+                            ),
+                            if (_error != null) ...[
+                              const SizedBox(height: AppSpacing.md),
+                              Text(
+                                _error!,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(color: Color(0xFFC62828)),
                               ),
                             ],
-                          ),
-                          SizedBox(height: compactHeight ? 8 : 12),
-                          FilledButton(
-                            onPressed: _busy ? null : _submit,
-                            style: FilledButton.styleFrom(
-                              backgroundColor: Colors.black,
-                              minimumSize: Size(double.infinity, compactHeight ? 42 : 46),
-                              padding: const EdgeInsets.symmetric(vertical: 0),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
+                            SizedBox(height: sectionGap),
+                            _field(
+                              AppStrings.fullName(lang),
+                              _name,
+                              textInputAction: TextInputAction.next,
+                              validator: (value) {
+                                if (value == null || value.trim().isEmpty) {
+                                  return AppStrings.fillAllFields(lang);
+                                }
+                                return null;
+                              },
+                            ),
+                            SizedBox(height: fieldGap),
+                            _field(
+                              AppStrings.email(lang),
+                              _email,
+                              keyboard: TextInputType.emailAddress,
+                              textInputAction: TextInputAction.next,
+                              autocorrect: false,
+                              validator: (value) {
+                                if (value == null || value.trim().isEmpty) {
+                                  return AppStrings.fillAllFields(lang);
+                                }
+                                if (!value.contains('@')) {
+                                  return AppStrings.invalidEmail(lang);
+                                }
+                                return null;
+                              },
+                            ),
+                            SizedBox(height: fieldGap),
+                            _field(
+                              AppStrings.password(lang),
+                              _password,
+                              obscure: _obscurePassword,
+                              textInputAction: TextInputAction.next,
+                              onToggleObscure: () => setState(
+                                () => _obscurePassword = !_obscurePassword,
+                              ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return AppStrings.fillAllFields(lang);
+                                }
+                                if (value.length < 6) {
+                                  return AppStrings.passwordTooShort(lang);
+                                }
+                                return null;
+                              },
+                            ),
+                            SizedBox(height: fieldGap),
+                            _field(
+                              AppStrings.confirmPassword(lang),
+                              _confirmPassword,
+                              obscure: _obscureConfirm,
+                              textInputAction: TextInputAction.done,
+                              onFieldSubmitted: (_) => _submit(),
+                              onToggleObscure: () => setState(
+                                () => _obscureConfirm = !_obscureConfirm,
+                              ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return AppStrings.fillAllFields(lang);
+                                }
+                                return null;
+                              },
+                            ),
+                            SizedBox(height: sectionGap),
+                            Text(
+                              AppStrings.whatAreYou(lang),
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.poppins(
+                                fontSize: compactHeight ? 12 : 13,
+                                fontWeight: FontWeight.w600,
+                                color: const Color(0xFF5A6B63),
                               ),
                             ),
-                            child: _busy
-                                ? const SizedBox(
-                                    height: 22,
-                                    width: 22,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : Text(
-                                    AppStrings.createAccount(lang),
-                                    style: GoogleFonts.poppins(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 16,
-                                      color: Colors.white,
-                                    ),
+                            SizedBox(height: compactHeight ? 6 : 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _roleOption(
+                                    'learner',
+                                    Icons.back_hand_outlined,
+                                    AppStrings.learner(lang),
+                                    height: roleHeight,
                                   ),
-                          ),
-                          SizedBox(height: compactHeight ? 0 : 6),
-                          TextButton(
-                            onPressed: () => app.setRoute(AppRoute.login),
-                            style: TextButton.styleFrom(
-                              minimumSize: Size.zero,
-                              padding: const EdgeInsets.symmetric(vertical: 0),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            child: RichText(
-                              text: TextSpan(
-                                style: GoogleFonts.poppins(
-                                  fontSize: 14,
-                                  color: const Color(0xFF2F5E48),
                                 ),
-                                children: [
-                                  TextSpan(text: '${AppStrings.hasAccount(lang)} '),
-                                  TextSpan(
-                                    text: AppStrings.loginTitle(lang),
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w700,
-                                      color: const Color(0xFF5BB88A),
-                                    ),
+                                const SizedBox(width: AppSpacing.sm),
+                                Expanded(
+                                  child: _roleOption(
+                                    'parent',
+                                    Icons.family_restroom_outlined,
+                                    AppStrings.parent(lang),
+                                    height: roleHeight,
                                   ),
-                                ],
+                                ),
+                                const SizedBox(width: AppSpacing.sm),
+                                Expanded(
+                                  child: _roleOption(
+                                    'teacher',
+                                    Icons.school_outlined,
+                                    AppStrings.teacher(lang),
+                                    height: roleHeight,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            SizedBox(height: sectionGap),
+                            FilledButton(
+                              onPressed: _busy ? null : _submit,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.black,
+                                minimumSize: Size(
+                                  double.infinity,
+                                  compactHeight ? 44 : 48,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: _busy
+                                  ? const SizedBox(
+                                      height: 22,
+                                      width: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : Text(
+                                      AppStrings.createAccount(lang),
+                                      style: GoogleFonts.poppins(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 16,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                            ),
+                            TextButton(
+                              onPressed: () => app.setRoute(AppRoute.login),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 8),
+                              ),
+                              child: Text.rich(
+                                textAlign: TextAlign.center,
+                                TextSpan(
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 14,
+                                    color: const Color(0xFF2F5E48),
+                                  ),
+                                  children: [
+                                    TextSpan(text: '${AppStrings.hasAccount(lang)} '),
+                                    TextSpan(
+                                      text: AppStrings.loginTitle(lang),
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                        color: const Color(0xFF5BB88A),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                          SizedBox(height: compactHeight ? 0 : 2),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -284,7 +349,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  Widget _roleOption(String role, IconData icon, String label) {
+  Widget _roleOption(
+    String role,
+    IconData icon,
+    String label, {
+    required double height,
+  }) {
     final selected = _role == role;
     return Material(
       color: Colors.transparent,
@@ -296,7 +366,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 240),
           curve: Curves.easeOutCubic,
-          height: 68,
+          height: height,
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(14),
@@ -319,44 +389,36 @@ class _RegisterScreenState extends State<RegisterScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-                TweenAnimationBuilder<double>(
-                  tween: Tween<double>(begin: 1, end: selected ? 1.03 : 1),
-                  duration: const Duration(milliseconds: 240),
-                  curve: Curves.easeOutCubic,
-                  builder: (context, scale, child) =>
-                      Transform.scale(scale: scale, child: child),
-                  child: Container(
-                    width: 30,
-                    height: 30,
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? const Color(0xFFEAF8F1)
-                          : const Color(0xFFF5F5F5),
-                      borderRadius: BorderRadius.circular(9),
-                      border: Border.all(
-                        color: selected
-                            ? const Color(0xFF5BB88A).withValues(alpha: 0.55)
-                            : const Color(0xFFE5E5E5),
-                      ),
-                    ),
-                    child: Icon(
-                      icon,
-                      size: 16,
-                      color: selected ? const Color(0xFF5BB88A) : const Color(0xFF9E9E9E),
-                    ),
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: selected ? const Color(0xFFEAF8F1) : const Color(0xFFF5F5F5),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(
+                    color: selected
+                        ? const Color(0xFF5BB88A).withValues(alpha: 0.55)
+                        : const Color(0xFFE5E5E5),
                   ),
                 ),
-                const SizedBox(height: 3),
-                AnimatedDefaultTextStyle(
-                  duration: const Duration(milliseconds: 240),
-                  curve: Curves.easeOutCubic,
-                  style: GoogleFonts.poppins(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: selected ? const Color(0xFF5BB88A) : const Color(0xFF9E9E9E),
-                  ),
-                  child: Text(label),
+                child: Icon(
+                  icon,
+                  size: 16,
+                  color: selected ? const Color(0xFF5BB88A) : const Color(0xFF9E9E9E),
                 ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: selected ? const Color(0xFF5BB88A) : const Color(0xFF9E9E9E),
+                ),
+              ),
             ],
           ),
         ),
@@ -370,6 +432,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
     bool obscure = false,
     VoidCallback? onToggleObscure,
     TextInputType? keyboard,
+    TextInputAction? textInputAction,
+    bool autocorrect = true,
+    ValueChanged<String>? onFieldSubmitted,
+    String? Function(String?)? validator,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -379,19 +445,26 @@ class _RegisterScreenState extends State<RegisterScreen> {
           style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: AppSpacing.xs),
-        TextField(
+        TextFormField(
           controller: controller,
           obscureText: obscure,
           keyboardType: keyboard,
+          textInputAction: textInputAction,
+          autocorrect: autocorrect,
+          onFieldSubmitted: onFieldSubmitted,
+          validator: validator,
           decoration: InputDecoration(
             filled: true,
             fillColor: const Color(0xFFEFF8F3),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            errorStyle: GoogleFonts.poppins(fontSize: 11),
             suffixIcon: onToggleObscure == null
                 ? null
                 : IconButton(
                     icon: Icon(
-                      obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                      obscure
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
                       color: const Color(0xFF5A6B63),
                       size: 19,
                     ),
@@ -400,15 +473,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(
-                color: Color(0xFFDCECE4),
-              ),
+              borderSide: const BorderSide(color: Color(0xFFDCECE4)),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(
-                color: Color(0xFFDCECE4),
-              ),
+              borderSide: const BorderSide(color: Color(0xFFDCECE4)),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
@@ -416,6 +485,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 color: const Color(0xFF5BB88A).withValues(alpha: 0.65),
                 width: 1.6,
               ),
+            ),
+            errorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFC62828)),
+            ),
+            focusedErrorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFC62828), width: 1.6),
             ),
           ),
         ),

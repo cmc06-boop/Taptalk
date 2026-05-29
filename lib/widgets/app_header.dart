@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
+import '../core/l10n/app_strings.dart';
 import '../providers/app_state.dart';
 
 class AppHeader extends StatelessWidget {
@@ -11,17 +12,22 @@ class AppHeader extends StatelessWidget {
     required this.title,
     this.onMenu,
     this.onProfile,
+    this.onNotifications,
     this.showProfile = true,
+    this.showNotifications = false,
   });
 
   final String title;
   final VoidCallback? onMenu;
   final VoidCallback? onProfile;
+  final VoidCallback? onNotifications;
   final bool showProfile;
+  final bool showNotifications;
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.watch<AppState>().theme;
+    final app = context.watch<AppState>();
+    final theme = app.theme;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -48,7 +54,21 @@ class AppHeader extends StatelessWidget {
               ),
             ),
           ),
-          if (showProfile)
+          if (showNotifications)
+            _CircleIconButton(
+              icon: Icons.notifications_outlined,
+              onTap: onNotifications ??
+                  () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(AppStrings.noNotifications(app.language)),
+                      ),
+                    );
+                  },
+              accent: theme.bgAccent,
+              filled: true,
+            )
+          else if (showProfile)
             _CircleIconButton(
               icon: Icons.person_outline_rounded,
               onTap: onProfile,

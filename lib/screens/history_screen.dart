@@ -7,7 +7,6 @@ import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/utils/speak_feedback.dart';
 import '../core/theme/theme_tokens.dart';
-import '../core/l10n/content_localization.dart';
 import '../data/models/history_model.dart';
 import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
@@ -21,32 +20,59 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
+  GlobalKey<AnimatedListState> _listKey = GlobalKey<AnimatedListState>();
   List<HistoryModel> _items = [];
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _syncFromApp());
+    _items = List.from(context.read<AppState>().history);
   }
 
-  void _syncFromApp() {
-    final history = context.read<AppState>().history;
-    if (!_sameItems(history)) {
-      setState(() => _items = List.from(history));
+  void _mergeNewHistory(List<HistoryModel> source) {
+    if (source.isEmpty) {
+      if (_items.isNotEmpty) {
+        setState(() {
+          _items = [];
+          _listKey = GlobalKey<AnimatedListState>();
+        });
+      }
+      return;
     }
-  }
-
-  bool _sameItems(List<HistoryModel> source) {
-    if (_items.length != source.length) return false;
-    for (var i = 0; i < _items.length; i++) {
-      if (_items[i].id != source[i].id) return false;
+    final hasNewEntries = source.length > _items.length ||
+        (_items.isNotEmpty && source.first.id != _items.first.id);
+    if (hasNewEntries) {
+      setState(() {
+        _items = List.from(source);
+        _listKey = GlobalKey<AnimatedListState>();
+      });
     }
-    return true;
   }
 
   void _removeItem(HistoryModel item) {
-    setState(() => _items.removeWhere((e) => e.id == item.id));
+    final index = _items.indexWhere((e) => e.id == item.id);
+    if (index < 0) return;
+
+    _items.removeAt(index);
+    _listKey.currentState?.removeItem(
+      index,
+      _buildRemoveTransition,
+      duration: const Duration(milliseconds: 120),
+    );
     context.read<AppState>().deleteHistoryItem(item);
+    setState(() {});
+  }
+
+  Widget _buildRemoveTransition(BuildContext context, Animation<double> animation) {
+    final curved = CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeInOutCubic,
+    );
+    return SizeTransition(
+      sizeFactor: curved,
+      alignment: Alignment.topCenter,
+      child: const SizedBox.shrink(),
+    );
   }
 
   Future<void> _clearAll(AppLanguage lang) async {
@@ -67,7 +93,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
       ),
     );
     if (confirm != true || !mounted) return;
-    setState(() => _items = []);
+    setState(() {
+      _items = [];
+      _listKey = GlobalKey<AnimatedListState>();
+    });
     await context.read<AppState>().clearAllHistory();
   }
 
@@ -80,13 +109,32 @@ class _HistoryScreenState extends State<HistoryScreen> {
       }
     }
     if (categoryLabel == item.categoryKey) {
-      categoryLabel = ContentLocalization.category(
-        item.categoryKey,
-        item.categoryKey,
-        lang,
-      );
+      categoryLabel = app.localizedCategoryKey(item.categoryKey);
     }
     return categoryLabel;
+  }
+
+  Widget _buildCard(HistoryModel item) {
+    final app = context.read<AppState>();
+    final theme = app.theme;
+    final lang = app.language;
+    final fmt = DateFormat('d MMM - h:mm a');
+
+    return _HistoryCard(
+      key: ValueKey(item.id),
+      item: item,
+      categoryLabel: _categoryLabel(app, item, lang),
+      formattedTime: fmt.format(item.createdAt),
+      theme: theme,
+      lang: lang,
+      onRemove: () => _removeItem(item),
+      onSpeak: () => speakWithFeedback(
+            context,
+            item.text,
+            record: false,
+            categoryKey: item.categoryKey,
+          ),
+    );
   }
 
   @override
@@ -94,13 +142,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final app = context.watch<AppState>();
     final theme = app.theme;
     final lang = app.language;
-    final fmt = DateFormat('d MMM - h:mm a');
 
-    if (!_sameItems(app.history)) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _syncFromApp();
-      });
-    }
+    _mergeNewHistory(app.history);
 
     return LearnerScaffold(
       title: AppStrings.appName(lang),
@@ -184,18 +227,18 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 ),
               ),
             ),
-            ..._items.map(
-              (item) => _HistoryCard(
-                key: ValueKey(item.id),
-                item: item,
-                categoryLabel: _categoryLabel(app, item, lang),
-                formattedTime: fmt.format(item.createdAt),
-                theme: theme,
-                lang: lang,
-                onRemove: () => _removeItem(item),
-                onSpeak: () =>
-                    speakWithFeedback(context, item.text, record: false),
-              ),
+            AnimatedList(
+              key: _listKey,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              initialItemCount: _items.length,
+              itemBuilder: (context, index, animation) {
+                if (index >= _items.length) return const SizedBox.shrink();
+                return FadeTransition(
+                  opacity: animation,
+                  child: _buildCard(_items[index]),
+                );
+              },
             ),
           ],
         ],
@@ -270,17 +313,17 @@ class _HistoryCardState extends State<_HistoryCard>
 
   @override
   Widget build(BuildContext context) {
-    final phraseText = ContentLocalization.phrase(
+    final app = context.watch<AppState>();
+    final phraseText = app.localizedPhrase(
       widget.item.text,
       widget.item.categoryKey,
-      lang: widget.lang,
     );
     final theme = widget.theme;
 
     return ClipRect(
       child: SizeTransition(
         sizeFactor: _collapse,
-        axisAlignment: 0,
+        alignment: Alignment.topCenter,
         child: FadeTransition(
           opacity: _fadeOut,
           child: SlideTransition(
@@ -297,7 +340,8 @@ class _HistoryCardState extends State<_HistoryCard>
                         borderRadius:
                             BorderRadius.circular(AppSpacing.radiusLg),
                         child: Padding(
-                          padding: const EdgeInsets.only(right: AppSpacing.xs),
+                          padding:
+                              const EdgeInsets.only(right: AppSpacing.xs),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -324,7 +368,8 @@ class _HistoryCardState extends State<_HistoryCard>
                                 widget.formattedTime,
                                 style: GoogleFonts.poppins(
                                   fontSize: 11,
-                                  color: theme.textMain.withValues(alpha: 0.55),
+                                  color:
+                                      theme.textMain.withValues(alpha: 0.55),
                                 ),
                               ),
                               const SizedBox(height: AppSpacing.sm),

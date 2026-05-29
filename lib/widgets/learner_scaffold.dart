@@ -28,6 +28,7 @@ class LearnerScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
+    final isParent = app.user?.isParent ?? false;
 
     return TapTalkShell(
       child: Stack(
@@ -37,6 +38,8 @@ class LearnerScaffold extends StatelessWidget {
                 AppHeader(
                   title: title,
                   onMenu: () => app.toggleDrawer(),
+                  showProfile: !isParent,
+                  showNotifications: isParent,
                   onProfile: () => app.setRoute(AppRoute.profile),
                 ),
                 Expanded(child: body),

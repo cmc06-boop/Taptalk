@@ -11,7 +11,10 @@ import '../core/theme/theme_tokens.dart';
 import '../data/database/database_helper.dart';
 import '../data/models/favorite_model.dart';
 import '../data/models/history_model.dart';
+import '../data/models/enrolled_class_model.dart';
+import '../data/models/linked_child_model.dart';
 import '../data/models/phrase_model.dart';
+import '../data/models/phrase_usage_stat.dart';
 import '../data/models/user_model.dart';
 import '../data/repositories/app_repository.dart';
 import '../services/tts_service.dart';
@@ -28,6 +31,8 @@ enum AppRoute {
   history,
   settings,
   profile,
+  myChild,
+  classes,
 }
 
 class AppState extends ChangeNotifier {
@@ -54,11 +59,16 @@ class AppState extends ChangeNotifier {
   Timer? _readAlongTimer;
   int _readAlongWordIndex = 0;
   List<String> _emergencyContacts = [];
+  String _profileCode = '';
 
   List<CategoryModel> _categories = [];
   List<PhraseModel> _phrases = [];
   List<FavoriteModel> _favorites = [];
   List<HistoryModel> _history = [];
+  List<LinkedChildModel> _linkedChildren = [];
+  int? _selectedChildId;
+  List<EnrolledClassModel> _enrolledClasses = [];
+  List<({int id, String name, String code})> _teacherClasses = [];
 
   bool get loading => _loading;
   UserModel? get user => _user;
@@ -77,6 +87,19 @@ class AppState extends ChangeNotifier {
   List<PhraseModel> get phrases => _phrases;
   List<FavoriteModel> get favorites => _favorites;
   List<HistoryModel> get history => _history;
+  List<LinkedChildModel> get linkedChildren => _linkedChildren;
+  List<EnrolledClassModel> get enrolledClasses => _enrolledClasses;
+  List<({int id, String name, String code})> get teacherClasses =>
+      _teacherClasses;
+  int? get selectedChildId => _selectedChildId;
+
+  LinkedChildModel? get selectedChild {
+    if (_selectedChildId == null) return null;
+    for (final c in _linkedChildren) {
+      if (c.learnerId == _selectedChildId) return c;
+    }
+    return _linkedChildren.isNotEmpty ? _linkedChildren.first : null;
+  }
 
   List<PhraseModel> get phrasesForCategory => _phrases
       .where((p) => p.categoryKey == _selectedCategoryKey && p.isActive)
@@ -188,6 +211,13 @@ class AppState extends ChangeNotifier {
         } else if (_user!.isLearner) {
           final categoryDone = await _isCategoryOnboardingDone(_user!.id);
           _route = categoryDone ? AppRoute.home : AppRoute.chooseCategory;
+        } else if (_user!.isParent) {
+          await _ensureStarterData();
+          await _loadLinkedChildren();
+          _route = AppRoute.home;
+        } else if (_user!.isTeacher) {
+          await _loadTeacherClasses();
+          _route = AppRoute.profile;
         } else {
           _route = AppRoute.login;
         }
@@ -221,11 +251,20 @@ class AppState extends ChangeNotifier {
     _ttsSpeed = TtsSpeedOptions.snap(
       (settings['tts_speed'] as num?)?.toDouble() ?? _ttsSpeed,
     );
-    final lang = settings['language'] as String?;
-    if (lang == 'Filipino') {
-      _language = AppLanguage.filipino;
-    } else if (lang == 'English') {
-      _language = AppLanguage.english;
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.containsKey('lang')) {
+      _language = prefs.getString('lang') == 'fil'
+          ? AppLanguage.filipino
+          : AppLanguage.english;
+    } else {
+      _applyLanguageFromSettings(settings);
+    }
+    await _syncLanguagePref();
+    if (_user != null) {
+      await _repo.updateUserSettings(
+        _user!.id,
+        language: _language == AppLanguage.filipino ? 'Filipino' : 'English',
+      );
     }
     final contacts = settings['emergency_contacts'];
     if (contacts is List) {
@@ -238,6 +277,16 @@ class AppState extends ChangeNotifier {
     } else {
       _emergencyContacts = [];
     }
+
+    if (_user!.isLearner) {
+      _profileCode = await _repo.ensureLearnerProfileCode(_user!.id);
+      await _loadEnrolledClasses();
+    } else {
+      _profileCode = '';
+      _enrolledClasses = [];
+    }
+
+    if (_user!.isTeacher) return;
 
     _categories = await _repo.getCategories(_user!.id);
     _phrases = await _repo.getPhrases(_user!.id);
@@ -262,6 +311,13 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  Future<void> _ensureStarterData() async {
+    if (_user == null || (!_user!.isParent && !_user!.isLearner)) return;
+    if (_categories.isNotEmpty) return;
+    await _repo.seedLearnerData(_user!.id);
+    await _refreshLearnerCollections();
+  }
+
   void setRoute(AppRoute route) {
     _route = route;
     _drawerOpen = false;
@@ -278,10 +334,25 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _applyLanguageFromSettings(Map<String, dynamic> settings) {
+    final raw = settings['language'];
+    if (raw is! String || raw.trim().isEmpty) return;
+    final norm = raw.trim().toLowerCase();
+    if (norm.startsWith('fil') || norm == 'tagalog') {
+      _language = AppLanguage.filipino;
+    } else if (norm.startsWith('en')) {
+      _language = AppLanguage.english;
+    }
+  }
+
+  Future<void> _syncLanguagePref() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('lang', AppStrings.langCode(_language));
+  }
+
   Future<void> setLanguage(AppLanguage lang) async {
     _language = lang;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('lang', AppStrings.langCode(lang));
+    await _syncLanguagePref();
     if (_user != null) {
       await _repo.updateUserSettings(
         _user!.id,
@@ -317,15 +388,25 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  String localizedPhraseText(PhraseModel phrase) => ContentLocalization.phrase(
-        phrase.text,
-        phrase.categoryKey,
-        isBuiltin: phrase.isBuiltin,
+  String localizedPhrase(String text, String categoryKey) =>
+      ContentLocalization.phrase(
+        text,
+        categoryKey,
         lang: _language,
       );
 
+  String localizedPhraseText(PhraseModel phrase) =>
+      localizedPhrase(phrase.text, phrase.categoryKey);
+
   String localizedCategoryName(CategoryModel category) =>
       ContentLocalization.category(category.key, category.name, _language);
+
+  String localizedCategoryKey(String categoryKey, {String? storedName}) =>
+      ContentLocalization.category(
+        AppRepository.normalizeCategoryKey(categoryKey),
+        storedName ?? categoryKey,
+        _language,
+      );
 
   String localizedThemeName(String themeKey, String storedName) =>
       ContentLocalization.themeName(themeKey, storedName, _language);
@@ -350,6 +431,15 @@ class AppState extends ChangeNotifier {
         final categoryDone = await _isCategoryOnboardingDone(_user!.id);
         _route = categoryDone ? AppRoute.home : AppRoute.chooseCategory;
       }
+    } else if (_user!.isParent) {
+      await _loadLearnerData();
+      await _ensureStarterData();
+      await _loadLinkedChildren();
+      _route = AppRoute.home;
+    } else if (_user!.isTeacher) {
+      _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
+      await _loadTeacherClasses();
+      _route = AppRoute.profile;
     } else {
       _route = AppRoute.login;
       return AppStrings.parentTeacherComingSoon(_language);
@@ -383,6 +473,16 @@ class AppState extends ChangeNotifier {
       await _setCategoryOnboardingDone(_user!.id, false);
       await _loadLearnerData();
       _route = AppRoute.chooseTheme;
+    } else if (role == 'parent') {
+      _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
+      await _loadLearnerData();
+      await _ensureStarterData();
+      await _loadLinkedChildren();
+      _route = AppRoute.home;
+    } else if (role == 'teacher') {
+      _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
+      await _loadTeacherClasses();
+      _route = AppRoute.profile;
     } else {
       _route = AppRoute.login;
     }
@@ -398,8 +498,13 @@ class AppState extends ChangeNotifier {
     _phrases = [];
     _favorites = [];
     _history = [];
+    _linkedChildren = [];
+    _selectedChildId = null;
+    _enrolledClasses = [];
+    _teacherClasses = [];
     _theme = TapTalkThemes.appDefault;
     _emergencyContacts = [];
+    _profileCode = '';
     _resetSpeechTracking();
     _route = AppRoute.login;
     _drawerOpen = false;
@@ -437,9 +542,10 @@ class AppState extends ChangeNotifier {
   Future<String?> addPhrase(String text, {String? imagePath}) async {
     if (_user == null || text.trim().isEmpty) return null;
     final savedImagePath = await persistPhraseImageIfNeeded(imagePath);
+    final canonical = ContentLocalization.canonicalPhrase(text);
     await _repo.addPhrase(
       userId: _user!.id,
-      text: text,
+      text: canonical,
       categoryKey: _selectedCategoryKey,
       imagePath: savedImagePath,
     );
@@ -488,12 +594,16 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> recordHistory(String text) async {
+  Future<void> recordHistory(
+    String text, {
+    String? categoryKey,
+  }) async {
     if (_user == null || text.trim().isEmpty) return;
+    final canonical = ContentLocalization.canonicalPhrase(text);
     await _repo.addHistory(
       userId: _user!.id,
-      text: text,
-      categoryKey: _selectedCategoryKey,
+      text: canonical,
+      categoryKey: categoryKey ?? _selectedCategoryKey,
     );
     _history = await _repo.getHistory(_user!.id);
     notifyListeners();
@@ -501,9 +611,9 @@ class AppState extends ChangeNotifier {
 
   Future<void> deleteHistoryItem(HistoryModel item) async {
     if (_user == null) return;
-    await _repo.removeHistory(item.id);
     _history.removeWhere((e) => e.id == item.id);
     notifyListeners();
+    await _repo.removeHistory(item.id);
   }
 
   Future<void> clearAllHistory() async {
@@ -513,8 +623,153 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> _loadLinkedChildren() async {
+    if (_user == null || !_user!.isParent) {
+      _linkedChildren = [];
+      _selectedChildId = null;
+      return;
+    }
+    _linkedChildren = await _repo.getLinkedChildren(_user!.id);
+    if (_linkedChildren.isEmpty) {
+      _selectedChildId = null;
+    } else if (_selectedChildId == null ||
+        !_linkedChildren.any((c) => c.learnerId == _selectedChildId)) {
+      _selectedChildId = _linkedChildren.first.learnerId;
+    }
+  }
+
+  void selectChild(int learnerId) {
+    if (_linkedChildren.any((c) => c.learnerId == learnerId)) {
+      _selectedChildId = learnerId;
+      notifyListeners();
+    }
+  }
+
+  Future<String?> linkChildByProfileCode(String code) async {
+    if (_user == null || !_user!.isParent) {
+      return AppStrings.notSignedIn(_language);
+    }
+    final normalized = AppRepository.normalizeProfileCode(code);
+    if (!AppRepository.isValidProfileCodeFormat(normalized)) {
+      return AppStrings.invalidProfileCode(_language);
+    }
+    final learner = await _repo.findLearnerByProfileCode(normalized);
+    if (learner == null) {
+      return AppStrings.childNotFound(_language);
+    }
+    if (learner.id == _user!.id) {
+      return AppStrings.cannotLinkSelf(_language);
+    }
+    if (await _repo.isChildLinked(_user!.id, learner.id)) {
+      return AppStrings.childAlreadyLinked(_language);
+    }
+    await _repo.linkParentToChild(_user!.id, learner.id);
+    await _loadLinkedChildren();
+    _selectedChildId = learner.id;
+    notifyListeners();
+    return null;
+  }
+
+  Future<String?> unlinkChild(int learnerId) async {
+    if (_user == null || !_user!.isParent) {
+      return AppStrings.notSignedIn(_language);
+    }
+    await _repo.unlinkParentChild(_user!.id, learnerId);
+    await _loadLinkedChildren();
+    notifyListeners();
+    return null;
+  }
+
+  Future<void> _loadTeacherClasses() async {
+    if (_user == null || !_user!.isTeacher) {
+      _teacherClasses = [];
+      return;
+    }
+    await _repo.createDefaultTeacherClass(_user!.id);
+    _teacherClasses = await _repo.getTeacherClasses(_user!.id);
+  }
+
+  Future<void> _loadEnrolledClasses() async {
+    if (_user == null || !_user!.isLearner) {
+      _enrolledClasses = [];
+      return;
+    }
+    _enrolledClasses = await _repo.getEnrolledClasses(_user!.id);
+  }
+
+  Future<String?> enrollByClassCode(String code) async {
+    if (_user == null || !_user!.isLearner) {
+      return AppStrings.notSignedIn(_language);
+    }
+    final normalized = AppRepository.normalizeClassCode(code);
+    if (!AppRepository.isValidClassCodeFormat(normalized)) {
+      return AppStrings.invalidClassCode(_language);
+    }
+    final classRow = await _repo.findClassByCode(normalized);
+    if (classRow == null) {
+      return AppStrings.classNotFound(_language);
+    }
+    final classId = classRow['id'] as int;
+    if (await _repo.isLearnerEnrolled(_user!.id, classId)) {
+      return AppStrings.classAlreadyEnrolled(_language);
+    }
+    await _repo.enrollLearnerInClass(_user!.id, classId);
+    await _loadEnrolledClasses();
+    notifyListeners();
+    return null;
+  }
+
+  Future<String?> leaveClass(int classId) async {
+    if (_user == null || !_user!.isLearner) {
+      return AppStrings.notSignedIn(_language);
+    }
+    await _repo.unenrollLearnerFromClass(_user!.id, classId);
+    await _loadEnrolledClasses();
+    notifyListeners();
+    return null;
+  }
+
+  Future<List<CategoryModel>> categoriesForUser(int userId) =>
+      _repo.getCategories(userId);
+
+  Future<List<PhraseUsageStat>> getSelectedChildPhraseStats({
+    required ChildUsagePeriod period,
+    DateTime? month,
+  }) async {
+    final child = selectedChild;
+    if (child == null) return [];
+    final range = _dateRangeForPeriod(period, month: month);
+    return _repo.getPhraseUsageStats(
+      learnerUserId: child.learnerId,
+      rangeStart: range.$1,
+      rangeEnd: range.$2,
+    );
+  }
+
+  (DateTime, DateTime) _dateRangeForPeriod(
+    ChildUsagePeriod period, {
+    DateTime? month,
+  }) {
+    final now = DateTime.now();
+    switch (period) {
+      case ChildUsagePeriod.today:
+        final start = DateTime(now.year, now.month, now.day);
+        return (start, now.add(const Duration(milliseconds: 1)));
+      case ChildUsagePeriod.thisWeek:
+        final weekday = now.weekday;
+        final start = DateTime(now.year, now.month, now.day)
+            .subtract(Duration(days: weekday - 1));
+        return (start, now.add(const Duration(milliseconds: 1)));
+      case ChildUsagePeriod.month:
+        final m = month ?? DateTime(now.year, now.month);
+        final start = DateTime(m.year, m.month);
+        final end = DateTime(m.year, m.month + 1);
+        return (start, end);
+    }
+  }
+
   String get profileCode =>
-      _user == null ? '' : AppRepository.profileCodeFor(_user!.id);
+      (_user?.isLearner ?? false) ? _profileCode : '';
 
   Future<String?> updateProfileName(String fullName) async {
     if (_user == null) return AppStrings.notSignedIn(_language);
@@ -548,10 +803,16 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
-  Future<bool> speakText(String text, {bool record = false}) async {
+  Future<bool> speakText(
+    String text, {
+    bool record = false,
+    String? categoryKey,
+  }) async {
+    final catKey = categoryKey ?? _selectedCategoryKey;
+    final canonical = ContentLocalization.canonicalPhrase(text);
     final spoken = ContentLocalization.phrase(
-      text,
-      _selectedCategoryKey,
+      canonical,
+      catKey,
       lang: _language,
     );
     _speakingText = spoken;
@@ -565,7 +826,9 @@ class AppState extends ChangeNotifier {
       _resetSpeechTracking();
       notifyListeners();
     }
-    if (ok && record) await recordHistory(spoken);
+    if (ok && record) {
+      await recordHistory(canonical, categoryKey: catKey);
+    }
     return ok;
   }
 
@@ -584,3 +847,5 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 }
+
+enum ChildUsagePeriod { today, thisWeek, month }
