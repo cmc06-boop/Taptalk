@@ -28,7 +28,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 6,
+      version: 8,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE users (
@@ -83,6 +83,8 @@ class DatabaseHelper {
         ''');
         await _createParentChildrenTable(db);
         await _createClassTables(db);
+        await _createParentNotificationsTable(db);
+        await _createLessonTables(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 3) {
@@ -97,6 +99,12 @@ class DatabaseHelper {
         if (oldVersion < 6) {
           await _createClassTables(db);
           await _backfillTeacherClasses(db);
+        }
+        if (oldVersion < 7) {
+          await _createParentNotificationsTable(db);
+        }
+        if (oldVersion < 8) {
+          await _createLessonTables(db);
         }
       },
     );
@@ -122,6 +130,44 @@ class DatabaseHelper {
         whereArgs: [id],
       );
     }
+  }
+
+  Future<void> _createLessonTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS class_lessons (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS lesson_phrases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        lesson_id INTEGER NOT NULL,
+        phrase_text TEXT NOT NULL,
+        image_path TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _createParentNotificationsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS parent_notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        parent_user_id INTEGER NOT NULL,
+        learner_user_id INTEGER,
+        child_name TEXT NOT NULL,
+        alert_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        is_read INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
   }
 
   Future<void> _createParentChildrenTable(Database db) async {

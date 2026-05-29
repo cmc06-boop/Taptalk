@@ -6,6 +6,13 @@ import '../core/l10n/app_strings.dart';
 import '../core/utils/phrase_image_storage.dart';
 import '../core/l10n/content_localization.dart';
 import '../data/models/category_model.dart';
+import '../core/constants/app_spacing.dart';
+export '../core/constants/child_usage_period.dart';
+import '../core/constants/child_usage_period.dart';
+import '../core/utils/session_usage_calculator.dart';
+import '../core/utils/vocabulary_growth_calculator.dart';
+import '../data/models/child_session_summary.dart';
+import '../data/models/vocabulary_growth_summary.dart';
 import '../core/constants/tts_speed_options.dart';
 import '../core/theme/theme_tokens.dart';
 import '../data/database/database_helper.dart';
@@ -13,8 +20,12 @@ import '../data/models/favorite_model.dart';
 import '../data/models/history_model.dart';
 import '../data/models/enrolled_class_model.dart';
 import '../data/models/linked_child_model.dart';
+import '../data/models/parent_notification.dart';
 import '../data/models/phrase_model.dart';
 import '../data/models/phrase_usage_stat.dart';
+import '../data/models/class_lesson.dart';
+import '../data/models/lesson_phrase.dart';
+import '../data/models/teacher_class_student.dart';
 import '../data/models/user_model.dart';
 import '../data/repositories/app_repository.dart';
 import '../services/tts_service.dart';
@@ -33,6 +44,10 @@ enum AppRoute {
   profile,
   myChild,
   classes,
+  notifications,
+  teacherDashboard,
+  teacherMyClasses,
+  teacherMonitoring,
 }
 
 class AppState extends ChangeNotifier {
@@ -66,6 +81,7 @@ class AppState extends ChangeNotifier {
   List<FavoriteModel> _favorites = [];
   List<HistoryModel> _history = [];
   List<LinkedChildModel> _linkedChildren = [];
+  List<ParentNotification> _notifications = [];
   int? _selectedChildId;
   List<EnrolledClassModel> _enrolledClasses = [];
   List<({int id, String name, String code})> _teacherClasses = [];
@@ -88,6 +104,10 @@ class AppState extends ChangeNotifier {
   List<FavoriteModel> get favorites => _favorites;
   List<HistoryModel> get history => _history;
   List<LinkedChildModel> get linkedChildren => _linkedChildren;
+  List<ParentNotification> get notifications =>
+      List.unmodifiable(_notifications);
+  int get unreadNotificationCount =>
+      _notifications.where((n) => !n.isRead).length;
   List<EnrolledClassModel> get enrolledClasses => _enrolledClasses;
   List<({int id, String name, String code})> get teacherClasses =>
       _teacherClasses;
@@ -187,44 +207,52 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _init() async {
-    final prefs = await SharedPreferences.getInstance();
-    final userId = prefs.getInt('user_id');
-    _language = prefs.getString('lang') == 'fil'
-        ? AppLanguage.filipino
-        : AppLanguage.english;
-    _ttsSpeed = TtsSpeedOptions.snap(
-      prefs.getDouble('tts_speed') ?? TtsSpeedOptions.defaultSpeed,
-    );
-    await tts.init();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getInt('user_id');
+      _language = prefs.getString('lang') == 'fil'
+          ? AppLanguage.filipino
+          : AppLanguage.english;
+      _ttsSpeed = TtsSpeedOptions.snap(
+        prefs.getDouble('tts_speed') ?? TtsSpeedOptions.defaultSpeed,
+      );
+      await tts.init();
 
-    if (userId != null) {
-      _user = await _repo.findUserById(userId);
-      if (_user != null) {
-        if (_user!.needsTheme) {
-          _theme = TapTalkThemes.appDefault;
-        } else {
-          _theme = TapTalkThemes.byKey(_user!.themeKey);
-        }
-        await _loadLearnerData();
-        if (_user!.needsTheme) {
-          _route = AppRoute.chooseTheme;
-        } else if (_user!.isLearner) {
-          final categoryDone = await _isCategoryOnboardingDone(_user!.id);
-          _route = categoryDone ? AppRoute.home : AppRoute.chooseCategory;
-        } else if (_user!.isParent) {
-          await _ensureStarterData();
-          await _loadLinkedChildren();
-          _route = AppRoute.home;
-        } else if (_user!.isTeacher) {
-          await _loadTeacherClasses();
-          _route = AppRoute.profile;
-        } else {
-          _route = AppRoute.login;
+      if (userId != null) {
+        _user = await _repo.findUserById(userId);
+        if (_user != null) {
+          if (_user!.needsTheme) {
+            _theme = TapTalkThemes.appDefault;
+          } else {
+            _theme = TapTalkThemes.byKey(_user!.themeKey);
+          }
+          await _loadLearnerData();
+          if (_user!.needsTheme) {
+            _route = AppRoute.chooseTheme;
+          } else if (_user!.isLearner) {
+            final categoryDone = await _isCategoryOnboardingDone(_user!.id);
+            _route = categoryDone ? AppRoute.home : AppRoute.chooseCategory;
+          } else if (_user!.isParent) {
+            await _ensureStarterData();
+            await _loadLinkedChildren();
+            _route = AppRoute.home;
+          } else if (_user!.isTeacher) {
+            await _loadLearnerData();
+            await _ensureStarterData();
+            await _loadTeacherClasses();
+            _route = AppRoute.teacherDashboard;
+          } else {
+            _route = AppRoute.login;
+          }
         }
       }
+    } catch (e, st) {
+      debugPrint('TapTalk init failed: $e\n$st');
+      _route = AppRoute.welcome;
+    } finally {
+      _loading = false;
+      notifyListeners();
     }
-    _loading = false;
-    notifyListeners();
   }
 
   String _categoryOnboardingKey(int userId) => 'category_onboarding_$userId';
@@ -286,8 +314,6 @@ class AppState extends ChangeNotifier {
       _enrolledClasses = [];
     }
 
-    if (_user!.isTeacher) return;
-
     _categories = await _repo.getCategories(_user!.id);
     _phrases = await _repo.getPhrases(_user!.id);
     _favorites = await _repo.getFavorites(_user!.id);
@@ -312,15 +338,23 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _ensureStarterData() async {
-    if (_user == null || (!_user!.isParent && !_user!.isLearner)) return;
+    if (_user == null ||
+        (!_user!.isParent && !_user!.isLearner && !_user!.isTeacher)) {
+      return;
+    }
     if (_categories.isNotEmpty) return;
     await _repo.seedLearnerData(_user!.id);
     await _refreshLearnerCollections();
   }
 
-  void setRoute(AppRoute route) {
+  Future<void> setRoute(AppRoute route) async {
+    if (_drawerOpen) {
+      _drawerOpen = false;
+      notifyListeners();
+      await Future<void>.delayed(AppSpacing.drawerAnimation);
+    }
+    if (_route == route) return;
     _route = route;
-    _drawerOpen = false;
     notifyListeners();
   }
 
@@ -438,8 +472,10 @@ class AppState extends ChangeNotifier {
       _route = AppRoute.home;
     } else if (_user!.isTeacher) {
       _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
+      await _loadLearnerData();
+      await _ensureStarterData();
       await _loadTeacherClasses();
-      _route = AppRoute.profile;
+      _route = AppRoute.teacherDashboard;
     } else {
       _route = AppRoute.login;
       return AppStrings.parentTeacherComingSoon(_language);
@@ -481,8 +517,10 @@ class AppState extends ChangeNotifier {
       _route = AppRoute.home;
     } else if (role == 'teacher') {
       _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
+      await _loadLearnerData();
+      await _ensureStarterData();
       await _loadTeacherClasses();
-      _route = AppRoute.profile;
+      _route = AppRoute.teacherDashboard;
     } else {
       _route = AppRoute.login;
     }
@@ -499,6 +537,7 @@ class AppState extends ChangeNotifier {
     _favorites = [];
     _history = [];
     _linkedChildren = [];
+    _notifications = [];
     _selectedChildId = null;
     _enrolledClasses = [];
     _teacherClasses = [];
@@ -636,6 +675,49 @@ class AppState extends ChangeNotifier {
         !_linkedChildren.any((c) => c.learnerId == _selectedChildId)) {
       _selectedChildId = _linkedChildren.first.learnerId;
     }
+    await _loadNotifications();
+  }
+
+  Future<void> _loadNotifications() async {
+    if (_user == null || !_user!.isParent) {
+      _notifications = [];
+      return;
+    }
+    final childName = _linkedChildren.isNotEmpty
+        ? _linkedChildren.first.fullName
+        : (_language == AppLanguage.filipino ? 'ang iyong anak' : 'your child');
+    await _repo.seedParentNotificationsIfEmpty(
+      parentUserId: _user!.id,
+      childName: childName,
+      learnerUserId:
+          _linkedChildren.isNotEmpty ? _linkedChildren.first.learnerId : null,
+      filipino: _language == AppLanguage.filipino,
+    );
+    _notifications = await _repo.getParentNotifications(_user!.id);
+  }
+
+  Future<void> markNotificationRead(int notificationId) async {
+    await _repo.markNotificationRead(notificationId);
+    final index = _notifications.indexWhere((n) => n.id == notificationId);
+    if (index >= 0) {
+      _notifications[index] =
+          _notifications[index].copyWith(isRead: true);
+      notifyListeners();
+    }
+  }
+
+  Future<void> markAllNotificationsRead() async {
+    if (_user == null || !_user!.isParent) return;
+    await _repo.markAllNotificationsRead(_user!.id);
+    _notifications = [
+      for (final n in _notifications) n.copyWith(isRead: true),
+    ];
+    notifyListeners();
+  }
+
+  Future<void> refreshNotifications() async {
+    await _loadNotifications();
+    notifyListeners();
   }
 
   void selectChild(int learnerId) {
@@ -685,8 +767,103 @@ class AppState extends ChangeNotifier {
       _teacherClasses = [];
       return;
     }
-    await _repo.createDefaultTeacherClass(_user!.id);
     _teacherClasses = await _repo.getTeacherClasses(_user!.id);
+  }
+
+  Future<String?> createTeacherClass(String className) async {
+    if (_user == null || !_user!.isTeacher) {
+      return AppStrings.notSignedIn(_language);
+    }
+    final result = await _repo.createTeacherClass(
+      teacherUserId: _user!.id,
+      className: className,
+    );
+    if (result == 'empty') {
+      return AppStrings.enterClassName(_language);
+    }
+    await _loadTeacherClasses();
+    notifyListeners();
+    return null;
+  }
+
+  Future<String?> deleteTeacherClass(int classId) async {
+    if (_user == null || !_user!.isTeacher) {
+      return AppStrings.notSignedIn(_language);
+    }
+    final ok = await _repo.deleteTeacherClass(
+      teacherUserId: _user!.id,
+      classId: classId,
+    );
+    if (!ok) return AppStrings.classNotFound(_language);
+    await _loadTeacherClasses();
+    notifyListeners();
+    return null;
+  }
+
+  Future<int> studentCountForClass(int classId) async {
+    return _repo.countStudentsInClass(classId);
+  }
+
+  Future<List<ClassLesson>> getClassLessons(int classId) async {
+    if (_user == null || !_user!.isTeacher) return [];
+    return _repo.getClassLessons(
+      teacherUserId: _user!.id,
+      classId: classId,
+    );
+  }
+
+  Future<ClassLesson?> createClassLesson(int classId, String title) async {
+    if (_user == null || !_user!.isTeacher) return null;
+    return _repo.createClassLesson(
+      teacherUserId: _user!.id,
+      classId: classId,
+      title: title,
+    );
+  }
+
+  Future<bool> deleteClassLesson(int lessonId) async {
+    if (_user == null || !_user!.isTeacher) return false;
+    return _repo.deleteClassLesson(
+      teacherUserId: _user!.id,
+      lessonId: lessonId,
+    );
+  }
+
+  Future<List<LessonPhrase>> getLessonPhrases(int lessonId) async {
+    if (_user == null || !_user!.isTeacher) return [];
+    return _repo.getLessonPhrases(
+      teacherUserId: _user!.id,
+      lessonId: lessonId,
+    );
+  }
+
+  Future<String?> addLessonPhrase(
+    int lessonId,
+    String text, {
+    String? imagePath,
+  }) async {
+    if (_user == null || text.trim().isEmpty) return null;
+    final saved = await persistPhraseImageIfNeeded(imagePath);
+    final phrase = await _repo.addLessonPhrase(
+      teacherUserId: _user!.id,
+      lessonId: lessonId,
+      text: ContentLocalization.canonicalPhrase(text),
+      imagePath: saved,
+    );
+    return phrase == null ? AppStrings.unableAddPhrase(_language) : null;
+  }
+
+  Future<void> deleteLessonPhrase(int phraseId) async {
+    if (_user == null || !_user!.isTeacher) return;
+    await _repo.deleteLessonPhrase(
+      teacherUserId: _user!.id,
+      phraseId: phraseId,
+    );
+  }
+
+  Future<List<TeacherClassStudent>> getTeacherClassStudents() async {
+    if (_user == null || !_user!.isTeacher) return [];
+    return _repo.getTeacherClassStudents(_user!.id);
   }
 
   Future<void> _loadEnrolledClasses() async {
@@ -715,9 +892,11 @@ class AppState extends ChangeNotifier {
     }
     await _repo.enrollLearnerInClass(_user!.id, classId);
     await _loadEnrolledClasses();
-    notifyListeners();
     return null;
   }
+
+  /// Call after UI that triggered enroll has closed (avoids rebuild during dialog).
+  void notifyEnrolledClassesChanged() => notifyListeners();
 
   Future<String?> leaveClass(int classId) async {
     if (_user == null || !_user!.isLearner) {
@@ -725,7 +904,6 @@ class AppState extends ChangeNotifier {
     }
     await _repo.unenrollLearnerFromClass(_user!.id, classId);
     await _loadEnrolledClasses();
-    notifyListeners();
     return null;
   }
 
@@ -738,11 +916,100 @@ class AppState extends ChangeNotifier {
   }) async {
     final child = selectedChild;
     if (child == null) return [];
+    return getChildPhraseStats(
+      learnerUserId: child.learnerId,
+      period: period,
+      month: month,
+    );
+  }
+
+  Future<List<PhraseUsageStat>> getChildPhraseStats({
+    required int learnerUserId,
+    required ChildUsagePeriod period,
+    DateTime? month,
+  }) async {
     final range = _dateRangeForPeriod(period, month: month);
     return _repo.getPhraseUsageStats(
-      learnerUserId: child.learnerId,
+      learnerUserId: learnerUserId,
       rangeStart: range.$1,
       rangeEnd: range.$2,
+    );
+  }
+
+  Future<VocabularyGrowthSummary> getChildVocabularyGrowth({
+    required int learnerUserId,
+    required ChildUsagePeriod period,
+    DateTime? month,
+    DateTime? linkedAt,
+  }) async {
+    final firstUses = await _repo.getPhraseFirstUses(
+      learnerUserId: learnerUserId,
+    );
+    final range = _dateRangeForPeriod(period, month: month);
+    final locale =
+        _language == AppLanguage.filipino ? 'fil_PH' : 'en_US';
+    final linked = linkedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+    final earliest = linked.isAfter(range.$1) ? linked : range.$1;
+
+    final periodStats = await getChildPhraseStats(
+      learnerUserId: learnerUserId,
+      period: period,
+      month: month,
+    );
+    final usageByCategory = <String, int>{};
+    final wordsByCategory = <String, int>{};
+    final seenInPeriod = <String>{};
+    for (final stat in periodStats) {
+      usageByCategory.update(
+        stat.categoryKey,
+        (v) => v + stat.count,
+        ifAbsent: () => stat.count,
+      );
+      final key = '${stat.categoryKey}|${stat.text}';
+      if (seenInPeriod.add(key)) {
+        wordsByCategory.update(
+          stat.categoryKey,
+          (v) => v + 1,
+          ifAbsent: () => 1,
+        );
+      }
+    }
+    final periodSlices = periodStats.isEmpty
+        ? null
+        : VocabularyGrowthCalculator.categorySlicesFromUsage(
+            usageByCategory: usageByCategory,
+            wordsByCategory: wordsByCategory,
+          );
+
+    return VocabularyGrowthCalculator.summarize(
+      firstUses: firstUses,
+      now: DateTime.now(),
+      rangeStart: earliest,
+      localeName: locale,
+      periodCategorySlices: periodSlices,
+    );
+  }
+
+  Future<ChildSessionSummary> getChildSessionSummary({
+    required int learnerUserId,
+    required ChildUsagePeriod period,
+    DateTime? month,
+  }) async {
+    final range = _dateRangeForPeriod(period, month: month);
+    final events = await _repo.getHistoryTimestamps(
+      learnerUserId: learnerUserId,
+      rangeStart: range.$1,
+      rangeEnd: range.$2,
+    );
+    final locale =
+        _language == AppLanguage.filipino ? 'fil_PH' : 'en_US';
+    return SessionUsageCalculator.summarize(
+      events: events,
+      period: period,
+      rangeStart: range.$1,
+      rangeEnd: range.$2,
+      localeName: locale,
+      now: DateTime.now(),
     );
   }
 
@@ -848,4 +1115,3 @@ class AppState extends ChangeNotifier {
   }
 }
 
-enum ChildUsagePeriod { today, thisWeek, month }

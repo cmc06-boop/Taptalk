@@ -68,8 +68,9 @@ class _Splash extends StatelessWidget {
             const SizedBox(height: AppSpacing.lg),
             Text(
               'TapTalk',
-              style: GoogleFonts.tiltWarp(
+              style: GoogleFonts.poppins(
                 fontSize: 28,
+                fontWeight: FontWeight.w800,
                 color: Colors.white,
                 shadows: const [
                   Shadow(blurRadius: 28, color: Colors.black26, offset: Offset(0, 10)),
@@ -111,7 +112,11 @@ class _WelcomeContent extends StatelessWidget {
           alignment: Alignment.bottomCenter,
           child: Text(
             'TapTalk',
-            style: GoogleFonts.tiltWarp(fontSize: 32, color: Colors.white),
+            style: GoogleFonts.poppins(
+              fontSize: 32,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+            ),
           ),
         ),
         Expanded(

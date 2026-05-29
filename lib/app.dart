@@ -10,6 +10,10 @@ import 'screens/history_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/classes_screen.dart';
 import 'screens/my_child_screen.dart';
+import 'screens/notifications_screen.dart';
+import 'screens/teacher_dashboard_screen.dart';
+import 'screens/teacher_monitoring_screen.dart';
+import 'screens/teacher_my_classes_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/register_screen.dart';
@@ -29,10 +33,13 @@ class TapTalkApp extends StatelessWidget {
           return MaterialApp(
             title: 'TapTalk',
             debugShowCheckedModeBanner: false,
+            themeMode: ThemeMode.light,
             theme: ThemeData(
               useMaterial3: true,
+              brightness: Brightness.light,
               colorScheme: theme.colorScheme,
               scaffoldBackgroundColor: theme.bgLight,
+              canvasColor: theme.bgLight,
               textTheme: GoogleFonts.poppinsTextTheme(),
               filledButtonTheme: FilledButtonThemeData(
                 style: FilledButton.styleFrom(
@@ -42,9 +49,18 @@ class TapTalkApp extends StatelessWidget {
                 ),
               ),
             ),
+            builder: (context, child) {
+              return ColoredBox(
+                color: theme.bgLight,
+                child: child ?? const SizedBox.shrink(),
+              );
+            },
             home: app.loading
-                ? const Scaffold(
-                    body: Center(child: CircularProgressIndicator()),
+                ? Scaffold(
+                    backgroundColor: theme.bgLight,
+                    body: Center(
+                      child: CircularProgressIndicator(color: theme.bgAccent),
+                    ),
                   )
                 : _buildScreen(app.route),
           );
@@ -80,6 +96,14 @@ class TapTalkApp extends StatelessWidget {
         return const MyChildScreen();
       case AppRoute.classes:
         return const ClassesScreen();
+      case AppRoute.notifications:
+        return const NotificationsScreen();
+      case AppRoute.teacherDashboard:
+        return const TeacherDashboardScreen();
+      case AppRoute.teacherMyClasses:
+        return const TeacherMyClassesScreen();
+      case AppRoute.teacherMonitoring:
+        return const TeacherMonitoringScreen();
     }
   }
 }

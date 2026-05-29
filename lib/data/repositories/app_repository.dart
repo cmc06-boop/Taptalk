@@ -12,7 +12,12 @@ import '../models/history_model.dart';
 import '../models/enrolled_class_model.dart';
 import '../models/linked_child_model.dart';
 import '../models/phrase_model.dart';
+import '../models/parent_notification.dart';
+import '../models/phrase_first_use.dart';
 import '../models/phrase_usage_stat.dart';
+import '../models/class_lesson.dart';
+import '../models/lesson_phrase.dart';
+import '../models/teacher_class_student.dart';
 import '../models/user_model.dart';
 
 class AppRepository {
@@ -105,8 +110,6 @@ class AppRepository {
     final user = (await findUserById(id))!;
     if (role == 'learner' || role == 'parent') {
       await seedLearnerData(user.id);
-    } else if (role == 'teacher') {
-      await createDefaultTeacherClass(user.id);
     }
     return user;
   }
@@ -533,6 +536,68 @@ class AppRepository {
     );
   }
 
+  Future<List<DateTime>> getHistoryTimestamps({
+    required int learnerUserId,
+    required DateTime rangeStart,
+    required DateTime rangeEnd,
+  }) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT created_at
+      FROM history
+      WHERE user_id = ?
+        AND created_at >= ?
+        AND created_at < ?
+      ORDER BY created_at ASC
+    ''', [
+      learnerUserId,
+      rangeStart.millisecondsSinceEpoch,
+      rangeEnd.millisecondsSinceEpoch,
+    ]);
+    return rows
+        .map(
+          (row) => DateTime.fromMillisecondsSinceEpoch(
+            row['created_at'] as int,
+          ),
+        )
+        .toList();
+  }
+
+  Future<List<PhraseFirstUse>> getPhraseFirstUses({
+    required int learnerUserId,
+  }) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT phrase_text, category_key, MIN(created_at) AS first_used_at
+      FROM history
+      WHERE user_id = ?
+      GROUP BY phrase_text, category_key
+    ''', [learnerUserId]);
+
+    final merged = <String, PhraseFirstUse>{};
+    for (final row in rows) {
+      final canonical = ContentLocalization.canonicalPhrase(
+        row['phrase_text'] as String,
+      );
+      final categoryKey = normalizeCategoryKey(row['category_key'] as String);
+      final firstUsedAt = DateTime.fromMillisecondsSinceEpoch(
+        row['first_used_at'] as int,
+      );
+      final mergeKey = '$categoryKey|$canonical';
+      final existing = merged[mergeKey];
+      if (existing == null || firstUsedAt.isBefore(existing.firstUsedAt)) {
+        merged[mergeKey] = PhraseFirstUse(
+          text: canonical,
+          categoryKey: categoryKey,
+          firstUsedAt: firstUsedAt,
+        );
+      }
+    }
+
+    return merged.values.toList()
+      ..sort((a, b) => a.firstUsedAt.compareTo(b.firstUsedAt));
+  }
+
   Future<List<PhraseUsageStat>> getPhraseUsageStats({
     required int learnerUserId,
     required DateTime rangeStart,
@@ -613,6 +678,67 @@ class AppRepository {
         RegExp(r'^CLS-[0-9A-F]{8}$').hasMatch(normalized);
   }
 
+  Future<String?> createTeacherClass({
+    required int teacherUserId,
+    required String className,
+  }) async {
+    final trimmed = className.trim();
+    if (trimmed.isEmpty) return 'empty';
+    final db = await _dbHelper.database;
+    var code = generateClassCode();
+    for (var attempt = 0; attempt < 8; attempt++) {
+      final clash = await db.query(
+        'teacher_classes',
+        where: 'class_code = ?',
+        whereArgs: [code],
+        limit: 1,
+      );
+      if (clash.isEmpty) break;
+      code = generateClassCode();
+    }
+    await db.insert('teacher_classes', {
+      'teacher_user_id': teacherUserId,
+      'class_name': trimmed,
+      'class_code': code,
+      'created_at': DateTime.now().millisecondsSinceEpoch,
+    });
+    return null;
+  }
+
+  Future<bool> deleteTeacherClass({
+    required int teacherUserId,
+    required int classId,
+  }) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'teacher_classes',
+      where: 'id = ? AND teacher_user_id = ?',
+      whereArgs: [classId, teacherUserId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return false;
+    await db.delete(
+      'class_enrollments',
+      where: 'class_id = ?',
+      whereArgs: [classId],
+    );
+    await db.delete(
+      'teacher_classes',
+      where: 'id = ?',
+      whereArgs: [classId],
+    );
+    return true;
+  }
+
+  Future<int> countStudentsInClass(int classId) async {
+    final db = await _dbHelper.database;
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) AS c FROM class_enrollments WHERE class_id = ?',
+      [classId],
+    );
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
   Future<void> createDefaultTeacherClass(int teacherUserId) async {
     final db = await _dbHelper.database;
     final existing = await db.query(
@@ -677,6 +803,40 @@ class AppRepository {
     );
   }
 
+  Future<List<TeacherClassStudent>> getTeacherClassStudents(
+    int teacherUserId,
+  ) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT
+        u.id AS learner_id,
+        u.full_name,
+        tc.id AS class_id,
+        tc.class_name,
+        tc.class_code,
+        ce.enrolled_at
+      FROM class_enrollments ce
+      INNER JOIN teacher_classes tc ON tc.id = ce.class_id
+      INNER JOIN users u ON u.id = ce.learner_user_id
+      WHERE tc.teacher_user_id = ?
+      ORDER BY tc.class_name ASC, u.full_name ASC
+    ''', [teacherUserId]);
+    return rows
+        .map(
+          (row) => TeacherClassStudent(
+            learnerId: row['learner_id'] as int,
+            fullName: row['full_name'] as String,
+            classId: row['class_id'] as int,
+            className: row['class_name'] as String,
+            classCode: row['class_code'] as String,
+            enrolledAt: DateTime.fromMillisecondsSinceEpoch(
+              row['enrolled_at'] as int,
+            ),
+          ),
+        )
+        .toList();
+  }
+
   Future<List<({int id, String name, String code})>> getTeacherClasses(
     int teacherUserId,
   ) async {
@@ -716,5 +876,350 @@ class AppRepository {
       ORDER BY ce.enrolled_at ASC
     ''', [learnerUserId]);
     return rows.map(EnrolledClassModel.fromMap).toList();
+  }
+
+  Future<List<ParentNotification>> getParentNotifications(int parentUserId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'parent_notifications',
+      where: 'parent_user_id = ?',
+      whereArgs: [parentUserId],
+      orderBy: 'created_at DESC',
+    );
+    return rows.map(_notificationFromRow).toList();
+  }
+
+  ParentNotification _notificationFromRow(Map<String, Object?> row) {
+    return ParentNotification(
+      id: row['id'] as int,
+      parentUserId: row['parent_user_id'] as int,
+      learnerUserId: row['learner_user_id'] as int?,
+      childName: row['child_name'] as String,
+      alertType: ParentNotification.alertTypeFromKey(
+        row['alert_type'] as String,
+      ),
+      title: row['title'] as String,
+      body: row['body'] as String,
+      createdAt: DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int),
+      isRead: (row['is_read'] as int) == 1,
+    );
+  }
+
+  Future<void> markNotificationRead(int notificationId) async {
+    final db = await _dbHelper.database;
+    await db.update(
+      'parent_notifications',
+      {'is_read': 1},
+      where: 'id = ?',
+      whereArgs: [notificationId],
+    );
+  }
+
+  Future<void> markAllNotificationsRead(int parentUserId) async {
+    final db = await _dbHelper.database;
+    await db.update(
+      'parent_notifications',
+      {'is_read': 1},
+      where: 'parent_user_id = ? AND is_read = 0',
+      whereArgs: [parentUserId],
+    );
+  }
+
+  Future<void> seedParentNotificationsIfEmpty({
+    required int parentUserId,
+    required String childName,
+    int? learnerUserId,
+    required bool filipino,
+  }) async {
+    final db = await _dbHelper.database;
+    final existing = await db.query(
+      'parent_notifications',
+      where: 'parent_user_id = ?',
+      whereArgs: [parentUserId],
+      limit: 1,
+    );
+    if (existing.isNotEmpty) return;
+
+    final now = DateTime.now();
+    final samples = filipino
+        ? _filipinoNotificationSamples(childName)
+        : _englishNotificationSamples(childName);
+
+    for (final sample in samples) {
+      await db.insert('parent_notifications', {
+        'parent_user_id': parentUserId,
+        'learner_user_id': learnerUserId,
+        'child_name': childName,
+        'alert_type': sample.$1.name,
+        'title': sample.$2,
+        'body': sample.$3,
+        'created_at': now.subtract(sample.$4).millisecondsSinceEpoch,
+        'is_read': sample.$5 ? 1 : 0,
+      });
+    }
+  }
+
+  List<(ParentAlertType, String, String, Duration, bool)> _englishNotificationSamples(
+    String child,
+  ) {
+    return [
+      (
+        ParentAlertType.teacherAlert,
+        'Teacher alert — $child',
+        'Ms. Reyes sent an urgent alert: $child needs a parent at school as soon as possible.',
+        const Duration(minutes: 18),
+        false,
+      ),
+      (
+        ParentAlertType.distress,
+        '$child may need calming support',
+        'TapTalk logged repeated distress phrases. $child may be upset or having a difficult moment.',
+        const Duration(hours: 2, minutes: 5),
+        false,
+      ),
+      (
+        ParentAlertType.needsAttention,
+        'Attention needed for $child',
+        '$child used urgent phrases several times in a short period. Please check in when you can.',
+        const Duration(hours: 5, minutes: 40),
+        true,
+      ),
+      (
+        ParentAlertType.schoolNeeded,
+        'School follow-up for $child',
+        'The teacher noted $child had a hard transition after break. Your presence or a call may help.',
+        const Duration(days: 1, hours: 3),
+        true,
+      ),
+      (
+        ParentAlertType.teacherAlert,
+        'Classroom support requested',
+        'Teacher alert: $child became overwhelmed during group work and may need parent support.',
+        const Duration(days: 2, hours: 10),
+        true,
+      ),
+      (
+        ParentAlertType.distress,
+        'Elevated distress signals',
+        'Multiple “I feel sad” and help phrases were used today. Consider a calm check-in with $child.',
+        const Duration(days: 4, hours: 6),
+        true,
+      ),
+    ];
+  }
+
+  Future<bool> _teacherOwnsClass(int teacherUserId, int classId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'teacher_classes',
+      where: 'id = ? AND teacher_user_id = ?',
+      whereArgs: [classId, teacherUserId],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
+  Future<bool> _teacherOwnsLesson(int teacherUserId, int lessonId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT cl.id
+      FROM class_lessons cl
+      INNER JOIN teacher_classes tc ON tc.id = cl.class_id
+      WHERE cl.id = ? AND tc.teacher_user_id = ?
+      LIMIT 1
+    ''', [lessonId, teacherUserId]);
+    return rows.isNotEmpty;
+  }
+
+  Future<List<ClassLesson>> getClassLessons({
+    required int teacherUserId,
+    required int classId,
+  }) async {
+    if (!await _teacherOwnsClass(teacherUserId, classId)) return [];
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT
+        cl.id,
+        cl.class_id,
+        cl.title,
+        cl.created_at,
+        (SELECT COUNT(*) FROM lesson_phrases lp WHERE lp.lesson_id = cl.id) AS phrase_count
+      FROM class_lessons cl
+      WHERE cl.class_id = ?
+      ORDER BY cl.sort_order ASC, cl.created_at DESC
+    ''', [classId]);
+    return rows
+        .map(
+          (row) => ClassLesson(
+            id: row['id'] as int,
+            classId: row['class_id'] as int,
+            title: row['title'] as String,
+            createdAt: DateTime.fromMillisecondsSinceEpoch(
+              row['created_at'] as int,
+            ),
+            phraseCount: row['phrase_count'] as int? ?? 0,
+          ),
+        )
+        .toList();
+  }
+
+  Future<ClassLesson?> createClassLesson({
+    required int teacherUserId,
+    required int classId,
+    required String title,
+  }) async {
+    if (!await _teacherOwnsClass(teacherUserId, classId)) return null;
+    final trimmed = title.trim();
+    if (trimmed.isEmpty) return null;
+    final db = await _dbHelper.database;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final id = await db.insert('class_lessons', {
+      'class_id': classId,
+      'title': trimmed,
+      'created_at': now,
+      'sort_order': now,
+    });
+    return ClassLesson(
+      id: id,
+      classId: classId,
+      title: trimmed,
+      createdAt: DateTime.fromMillisecondsSinceEpoch(now),
+    );
+  }
+
+  Future<bool> deleteClassLesson({
+    required int teacherUserId,
+    required int lessonId,
+  }) async {
+    if (!await _teacherOwnsLesson(teacherUserId, lessonId)) return false;
+    final db = await _dbHelper.database;
+    await db.delete(
+      'lesson_phrases',
+      where: 'lesson_id = ?',
+      whereArgs: [lessonId],
+    );
+    await db.delete(
+      'class_lessons',
+      where: 'id = ?',
+      whereArgs: [lessonId],
+    );
+    return true;
+  }
+
+  Future<List<LessonPhrase>> getLessonPhrases({
+    required int teacherUserId,
+    required int lessonId,
+  }) async {
+    if (!await _teacherOwnsLesson(teacherUserId, lessonId)) return [];
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'lesson_phrases',
+      where: 'lesson_id = ?',
+      whereArgs: [lessonId],
+      orderBy: 'sort_order ASC, id ASC',
+    );
+    return rows
+        .map(
+          (row) => LessonPhrase(
+            id: row['id'] as int,
+            lessonId: row['lesson_id'] as int,
+            text: row['phrase_text'] as String,
+            imagePath: row['image_path'] as String?,
+          ),
+        )
+        .toList();
+  }
+
+  Future<LessonPhrase?> addLessonPhrase({
+    required int teacherUserId,
+    required int lessonId,
+    required String text,
+    String? imagePath,
+  }) async {
+    if (!await _teacherOwnsLesson(teacherUserId, lessonId)) return null;
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return null;
+    final db = await _dbHelper.database;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final id = await db.insert('lesson_phrases', {
+      'lesson_id': lessonId,
+      'phrase_text': trimmed,
+      'image_path': imagePath,
+      'sort_order': now,
+      'created_at': now,
+    });
+    return LessonPhrase(
+      id: id,
+      lessonId: lessonId,
+      text: trimmed,
+      imagePath: imagePath,
+    );
+  }
+
+  Future<bool> deleteLessonPhrase({
+    required int teacherUserId,
+    required int phraseId,
+  }) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT lp.id
+      FROM lesson_phrases lp
+      INNER JOIN class_lessons cl ON cl.id = lp.lesson_id
+      INNER JOIN teacher_classes tc ON tc.id = cl.class_id
+      WHERE lp.id = ? AND tc.teacher_user_id = ?
+      LIMIT 1
+    ''', [phraseId, teacherUserId]);
+    if (rows.isEmpty) return false;
+    await db.delete('lesson_phrases', where: 'id = ?', whereArgs: [phraseId]);
+    return true;
+  }
+
+  List<(ParentAlertType, String, String, Duration, bool)> _filipinoNotificationSamples(
+    String child,
+  ) {
+    return [
+      (
+        ParentAlertType.teacherAlert,
+        'Alert mula sa guro — $child',
+        'Pinadalhan ni Ms. Reyes ng urgent alert: kailangan ng $child ng magulang sa paaralan sa lalong madaling panahon.',
+        const Duration(minutes: 18),
+        false,
+      ),
+      (
+        ParentAlertType.distress,
+        'Maaaring kailangan ng $child ng pagpapakalma',
+        'Naitala ng TapTalk ang paulit-ulit na distress phrases. Maaaring upset o nahihirapan ang $child.',
+        const Duration(hours: 2, minutes: 5),
+        false,
+      ),
+      (
+        ParentAlertType.needsAttention,
+        'Kailangan ng atensyon si $child',
+        'Ginamit ni $child ang urgent phrases nang maraming beses sa maikling panahon. Pakitingnan kapag pwede.',
+        const Duration(hours: 5, minutes: 40),
+        true,
+      ),
+      (
+        ParentAlertType.schoolNeeded,
+        'Follow-up sa paaralan para kay $child',
+        'Napansin ng guro na nahirapan si $child pagkatapos ng break. Maaaring makatulong ang pagdalo o tawag.',
+        const Duration(days: 1, hours: 3),
+        true,
+      ),
+      (
+        ParentAlertType.teacherAlert,
+        'Hiniling ang suporta sa silid-aralan',
+        'Alert ng guro: na-overwhelm si $child sa group work at maaaring kailangan ng suporta ng magulang.',
+        const Duration(days: 2, hours: 10),
+        true,
+      ),
+      (
+        ParentAlertType.distress,
+        'Mataas na distress signals',
+        'Maraming “I feel sad” at help phrases ang ginamit ngayon. Isaalang-alang ang calm check-in kay $child.',
+        const Duration(days: 4, hours: 6),
+        true,
+      ),
+    ];
   }
 }

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
+import '../core/theme/theme_tokens.dart';
 import '../data/models/category_model.dart';
 import '../providers/app_state.dart';
 import '../widgets/add_category_dialog.dart';
@@ -29,25 +30,9 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
   }
 
   Future<void> _showAddCategoryDialog() async {
-    final app = context.read<AppState>();
-    final name = await AddCategoryDialog.show(context);
-    if (!mounted || name == null) return;
-
-    final error = await app.addCategory(name);
-    if (!mounted) return;
-
-    if (error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(error, style: GoogleFonts.poppins()),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return;
-    }
-
-    final selected = context.read<AppState>().selectedCategoryKey;
-    setState(() => _selected = selected);
+    final selectedKey = await AddCategoryDialog.show(context);
+    if (!mounted || selectedKey == null) return;
+    setState(() => _selected = selectedKey);
   }
 
   @override
@@ -154,6 +139,7 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
                 return _CategoryCard(
                   category: cat,
                   label: app.localizedCategoryName(cat),
+                  theme: theme,
                   selected: _selected == cat.key,
                   onTap: () => setState(() => _selected = cat.key),
                 );
@@ -197,12 +183,14 @@ class _CategoryCard extends StatefulWidget {
   const _CategoryCard({
     required this.category,
     required this.label,
+    required this.theme,
     required this.selected,
     required this.onTap,
   });
 
   final CategoryModel category;
   final String label;
+  final TapTalkThemeToken theme;
   final bool selected;
   final VoidCallback onTap;
 
@@ -216,7 +204,7 @@ class _CategoryCardState extends State<_CategoryCard> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.watch<AppState>().theme;
+    final theme = widget.theme;
     final scale = _pressed ? 0.97 : (_hovering ? 1.02 : 1.0);
 
     return AnimatedScale(

@@ -16,6 +16,8 @@ class LearnerScaffold extends StatelessWidget {
     this.onMicTap,
     this.micActive = false,
     this.showBottomNav = true,
+    this.showBackButton = false,
+    this.onBack,
   });
 
   final String title;
@@ -24,6 +26,8 @@ class LearnerScaffold extends StatelessWidget {
   final VoidCallback? onMicTap;
   final bool micActive;
   final bool showBottomNav;
+  final bool showBackButton;
+  final VoidCallback? onBack;
 
   @override
   Widget build(BuildContext context) {
@@ -32,14 +36,18 @@ class LearnerScaffold extends StatelessWidget {
 
     return TapTalkShell(
       child: Stack(
-          children: [
+        children: [
             Column(
               children: [
                 AppHeader(
                   title: title,
-                  onMenu: () => app.toggleDrawer(),
-                  showProfile: !isParent,
-                  showNotifications: isParent,
+                  showBackButton: showBackButton,
+                  onBack: onBack,
+                  onMenu: showBackButton ? null : () => app.toggleDrawer(),
+                  showProfile: !isParent && !showBackButton,
+                  showNotifications: isParent && !showBackButton,
+                  notificationBadgeCount: app.unreadNotificationCount,
+                  onNotifications: () => app.setRoute(AppRoute.notifications),
                   onProfile: () => app.setRoute(AppRoute.profile),
                 ),
                 Expanded(child: body),

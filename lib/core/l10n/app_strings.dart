@@ -218,6 +218,157 @@ abstract final class AppStrings {
   static String classes(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Mga Klase' : 'Classes';
 
+  static String myClasses(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Mga Klase Ko' : 'My Classes';
+
+  static String dashboard(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Dashboard' : 'Dashboard';
+
+  static String monitoring(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Monitoring' : 'Monitoring';
+
+  static String teacherDashboardSubtitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Mabilis na buod ng iyong mga klase at mag-aaral.'
+          : 'A quick overview of your classes and students.';
+
+  static String teacherMyClassesSubtitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Pamahalaan ang class codes at ibahagi sa mga mag-aaral.'
+          : 'Manage class codes and share them with learners.';
+
+  static String teacherMonitoringSubtitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Pindutin ang pangalan ng mag-aaral para makita ang paggamit ng parirala.'
+          : "Tap a student's name to view their phrase usage.";
+
+  static String totalStudents(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Mag-aaral' : 'Students';
+
+  static String totalClasses(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Klase' : 'Classes';
+
+  static String noTeacherStudents(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Walang naka-enroll na mag-aaral. Ibahagi ang class code sa mga bata.'
+      : 'No enrolled students yet. Share your class code with learners.';
+
+  static String noTeacherClasses(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Wala pang klase. Pindutin ang + para gumawa ng bago.'
+      : 'No classes yet. Tap + to create one.';
+
+  static String createClass(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Gumawa ng klase'
+      : 'Create class';
+
+  static String create(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Gumawa' : 'Create';
+
+  static String createClassHint(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Ilagay ang pangalan ng subject at section, hal. English 1 - Sampaguita.'
+      : 'Enter subject and section name, e.g. English 1 - Sampaguita.';
+
+  static String classNameExample(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'hal. English 1-Sampaguita'
+      : 'e.g. English 1-Sampaguita';
+
+  static String enterClassName(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Maglagay ng pangalan ng klase.'
+      : 'Please enter a class name.';
+
+  static String deleteClass(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Burahin ang klase'
+      : 'Delete class';
+
+  static String deleteClassConfirm(AppLanguage lang, String className) =>
+      lang == AppLanguage.filipino
+          ? 'Burahin ang "$className"? Maaalis din ang mga naka-enroll na mag-aaral sa klaseng ito.'
+          : 'Delete "$className"? Enrolled students will be removed from this class.';
+
+  static String classCreated(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Nalikha ang klase.'
+      : 'Class created.';
+
+  static String classDeleted(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Nabura ang klase.'
+      : 'Class deleted.';
+
+  static String lessons(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Mga Aralin' : 'Lessons';
+
+  static String createLesson(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Gumawa ng aralin'
+      : 'Create lesson';
+
+  static String createLessonHint(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Hal. Unit 1 - Mga Pakiramdam'
+      : 'e.g. Unit 1 - Feelings';
+
+  static String enterLessonTitle(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Maglagay ng pamagat ng aralin.'
+      : 'Please enter a lesson title.';
+
+  static String lessonCreated(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Nalikha ang aralin.'
+      : 'Lesson created.';
+
+  static String noLessons(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Wala pang aralin. Pindutin ang + para gumawa.'
+      : 'No lessons yet. Tap + to create one.';
+
+  static String phrasesInLesson(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Mga parirala sa aralin'
+      : 'Phrases in this lesson';
+
+  static String lessonPhrasesSubtitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Magdagdag ng parirala at larawan — tulad ng home screen.'
+          : 'Add phrases and images — just like the home screen.';
+
+  static String phrasesCount(int count, AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? '$count parirala'
+          : '$count phrases';
+
+  static String deleteLesson(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Burahin ang aralin'
+      : 'Delete lesson';
+
+  static String deleteLessonConfirm(AppLanguage lang, String title) =>
+      lang == AppLanguage.filipino
+          ? 'Burahin ang "$title"? Mabubura rin ang lahat ng parirala dito.'
+          : 'Delete "$title"? All phrases in this lesson will be removed.';
+
+  static String unableAddPhrase(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Hindi maidagdag ang parirala.'
+      : 'Could not add phrase.';
+
+  static String openClass(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Buksan ang klase'
+      : 'Open class';
+
+  static String studentsInClass(int count, AppLanguage lang) {
+    if (lang == AppLanguage.filipino) {
+      return count == 1 ? '1 mag-aaral' : '$count mag-aaral';
+    }
+    return count == 1 ? '1 student' : '$count students';
+  }
+
+  static String alertStudent(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Alert' : 'Alert';
+
+  static String alertStudentSoon(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Paparating na ang alert sa magulang.'
+      : 'Parent alert coming soon.';
+
+  static String viewMonitoring(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Tingnan'
+      : 'View';
+
+  static String enrolledIn(AppLanguage lang, String className) =>
+      lang == AppLanguage.filipino
+          ? 'Naka-enroll sa $className'
+          : 'Enrolled in $className';
+
   static String myChild(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Aking Anak' : 'My child';
 
@@ -225,8 +376,29 @@ abstract final class AppStrings {
       lang == AppLanguage.filipino ? 'Mga Abiso' : 'Notifications';
 
   static String noNotifications(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Walang bagong abiso.'
-      : 'No new notifications.';
+      ? 'Walang abiso sa ngayon.'
+      : 'No notifications yet.';
+
+  static String notificationsSubtitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Mahahalagang alert mula sa paaralan at paggamit ng anak.'
+          : 'Urgent alerts from school and your child\'s app use.';
+
+  static String todayLabel(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Ngayon' : 'Today';
+
+  static String yesterdayLabel(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Kahapon' : 'Yesterday';
+
+  static String markAllRead(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Markahan lahat na nabasa'
+      : 'Mark all as read';
+
+  static String newAlertBadge(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Bago' : 'New';
+
+  static String urgentLabel(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Apurahan' : 'Urgent';
 
   static String parents(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Mga Magulang' : 'Parents';
@@ -326,6 +498,13 @@ abstract final class AppStrings {
   static String add(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Idagdag' : 'Add';
 
+  static String join(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Sumali' : 'Join';
+
+  static String joinClass(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Sumali sa klase'
+      : 'Join class';
+
   static String cancel(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Kanselahin' : 'Cancel';
 
@@ -408,8 +587,8 @@ abstract final class AppStrings {
       : 'Please add at least one emergency contact.';
 
   static String myChildSubtitle(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Subaybayan ang mga madalas gamiting parirala ng iyong anak.'
-      : "Track your child's frequently used phrases.";
+      ? 'Pindutin ang pangalan ng anak para makita ang paggamit ng parirala.'
+      : "Tap your child's name to view their phrase usage.";
 
   static String linkChildCode(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'I-link ang code ng anak'
@@ -436,11 +615,112 @@ abstract final class AppStrings {
   static String month(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Buwan' : 'Month';
 
+  static String selectMonthPeriod(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Pumili ng buwan'
+      : 'Select month';
+
+  static String vocabularyGrowth(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Paglago ng bokabularyo'
+      : 'Vocabulary growth';
+
+  static String vocabularyGrowthSubtitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Mga bagong salita at kategoryang ginagamit ng anak mo.'
+          : 'New words and categories your child is building.';
+
+  static String totalVocabulary(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Kabuuang salita'
+      : 'Total words';
+
+  static String newWordsThisWeek(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Bago ngayong linggo'
+      : 'New this week';
+
+  static String newWordsThisMonth(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Bago ngayong buwan'
+      : 'New this month';
+
+  static String newWordsTrend(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Bagong salita sa paglipas ng panahon'
+      : 'New words over time';
+
+  static String categoriesUsed(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Mga kategorya'
+      : 'Categories used';
+
+  static String trendByWeek(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Linggo' : 'Weeks';
+
+  static String trendByMonth(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Buwan' : 'Months';
+
+  static String noVocabularyData(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Wala pang naitalang salita. Gagamit ang anak ng app para makita ang paglago dito.'
+      : 'No words recorded yet. Usage will appear here as your child taps phrases.';
+
+  static String vocabularyWords(int count, AppLanguage lang) =>
+      lang == AppLanguage.filipino ? '$count salita' : '$count words';
+
   static String frequentlyUsed(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Madalas gamitin'
       : 'Frequently used';
 
-  static String timesUsed(int count) => '${count}x';
+  static String sessionActivity(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Oras ng paggamit'
+      : 'Session activity';
+
+  static String sessionActivitySubtitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Tinatantya mula sa mga pagkakataong ginamit ang app.'
+          : 'Estimated from app usage patterns.';
+
+  static String totalSessionTime(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Kabuuan'
+      : 'Total';
+
+  static String sessionsCount(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Sesyon'
+      : 'Sessions';
+
+  static String avgSession(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Avg/sesyon'
+      : 'Avg/session';
+
+  static String noSessionData(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Walang naitalang sesyon sa panahong ito.'
+      : 'No sessions recorded for this period.';
+
+  static String sessionInProgress(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'May aktibong sesyon'
+      : 'Session in progress';
+
+  static String sessionInProgressDetail(double minutes, AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? '${formatDurationMinutes(minutes, lang)} at tumataas pa'
+          : '${formatDurationMinutes(minutes, lang)} and counting';
+
+  static String liveUpdating(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Live · ina-update bawat 30s'
+      : 'Live · updates every 30s';
+
+  static String formatDurationMinutes(double minutes, AppLanguage lang) {
+    final total = minutes.round();
+    if (total < 1) {
+      return lang == AppLanguage.filipino ? '<1 min' : '<1 min';
+    }
+    if (total < 60) return '${total}m';
+    final hours = total ~/ 60;
+    final mins = total % 60;
+    if (mins == 0) return '${hours}h';
+    return '${hours}h ${mins}m';
+  }
+
+  static String timesUsed(int count, AppLanguage lang) {
+    if (lang == AppLanguage.filipino) {
+      return count == 1 ? '1 beses' : '$count beses';
+    }
+    return count == 1 ? '1 time' : '$count times';
+  }
 
   static String invalidProfileCode(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Hindi wasto ang profile code.'
@@ -461,6 +741,10 @@ abstract final class AppStrings {
   static String childLinked(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Matagumpay na na-link ang anak.'
       : 'Child linked successfully.';
+
+  static String childUnlinked(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Naalis na ang link sa anak.'
+      : 'Child unlinked.';
 
   static String unlinkChild(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Alisin ang link'
@@ -487,8 +771,8 @@ abstract final class AppStrings {
       : 'Enter class code (e.g. CLS-AB12CD34)';
 
   static String noEnrolledClasses(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Wala ka pang naka-enroll na klase. Pindutin ang + para maglagay ng code.'
-      : 'No classes enrolled yet. Tap + to enter a class code.';
+      ? 'Wala ka pang naka-enroll na klase. Pindutin ang + para sumali gamit ang class code.'
+      : 'No classes enrolled yet. Tap + to join with a class code.';
 
   static String invalidClassCode(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Hindi wasto ang class code.'
@@ -505,6 +789,10 @@ abstract final class AppStrings {
   static String classEnrolled(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Matagumpay na na-enroll sa klase.'
       : 'Successfully enrolled in class.';
+
+  static String leftClass(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Umalis ka na sa klase.'
+      : 'You left the class.';
 
   static String leaveClass(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Umalis sa klase' : 'Leave class';

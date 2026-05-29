@@ -3,7 +3,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
-import '../core/l10n/app_strings.dart';
 import '../providers/app_state.dart';
 
 class AppHeader extends StatelessWidget {
@@ -11,18 +10,24 @@ class AppHeader extends StatelessWidget {
     super.key,
     required this.title,
     this.onMenu,
+    this.onBack,
     this.onProfile,
     this.onNotifications,
     this.showProfile = true,
     this.showNotifications = false,
+    this.showBackButton = false,
+    this.notificationBadgeCount = 0,
   });
 
   final String title;
   final VoidCallback? onMenu;
+  final VoidCallback? onBack;
   final VoidCallback? onProfile;
   final VoidCallback? onNotifications;
   final bool showProfile;
   final bool showNotifications;
+  final bool showBackButton;
+  final int notificationBadgeCount;
 
   @override
   Widget build(BuildContext context) {
@@ -39,8 +44,10 @@ class AppHeader extends StatelessWidget {
       child: Row(
         children: [
           _CircleIconButton(
-            icon: Icons.menu_rounded,
-            onTap: onMenu,
+            icon: showBackButton ? Icons.arrow_back_rounded : Icons.menu_rounded,
+            onTap: showBackButton
+                ? (onBack ?? () => Navigator.maybePop(context))
+                : onMenu,
             accent: theme.bgAccent,
           ),
           Expanded(
@@ -55,18 +62,44 @@ class AppHeader extends StatelessWidget {
             ),
           ),
           if (showNotifications)
-            _CircleIconButton(
-              icon: Icons.notifications_outlined,
-              onTap: onNotifications ??
-                  () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(AppStrings.noNotifications(app.language)),
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                _CircleIconButton(
+                  icon: Icons.notifications_outlined,
+                  onTap: onNotifications ??
+                      () => app.setRoute(AppRoute.notifications),
+                  accent: theme.bgAccent,
+                  filled: true,
+                ),
+                if (notificationBadgeCount > 0)
+                  Positioned(
+                    right: -2,
+                    top: -2,
+                    child: Container(
+                      constraints: const BoxConstraints(minWidth: 18),
+                      padding: const EdgeInsets.symmetric(horizontal: 5),
+                      height: 18,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE53935),
+                        borderRadius: BorderRadius.circular(9),
+                        border: Border.all(color: theme.bgLight, width: 2),
                       ),
-                    );
-                  },
-              accent: theme.bgAccent,
-              filled: true,
+                      child: Text(
+                        notificationBadgeCount > 9
+                            ? '9+'
+                            : '$notificationBadgeCount',
+                        style: GoogleFonts.poppins(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                          height: 1,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             )
           else if (showProfile)
             _CircleIconButton(

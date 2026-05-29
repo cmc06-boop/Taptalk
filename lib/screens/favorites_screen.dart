@@ -25,7 +25,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     final app = context.watch<AppState>();
     final lang = app.language;
     final theme = app.theme;
-    final columns = AppSpacing.phraseGridColumns(context);
+    final denseGrid = AppSpacing.phraseGridIsDense(context);
     final filterKey = _filterCategoryKey ?? app.selectedCategoryKey;
 
     final phrases = app.favorites
@@ -173,19 +173,13 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                 child: GridView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: columns,
-                    crossAxisSpacing: AppSpacing.sm,
-                    mainAxisSpacing: AppSpacing.sm,
-                    childAspectRatio: 0.86,
-                  ),
+                  gridDelegate: AppSpacing.phraseGridDelegate(context),
                   itemCount: phrases.length,
                   itemBuilder: (context, i) {
                     final phrase = phrases[i];
-                    return Align(
-                      alignment: Alignment.topCenter,
-                      child: PhraseCard(
+                    return PhraseCard(
                         phrase: phrase,
+                        dense: denseGrid,
                         isFavorite: true,
                         onTap: () => speakWithFeedback(
                               context,
@@ -199,7 +193,6 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                             ),
                         onFavorite: () => app.toggleFavorite(phrase),
                         onDelete: () {},
-                      ),
                     );
                   },
                 ),

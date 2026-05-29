@@ -5,88 +5,63 @@ import 'package:provider/provider.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../providers/app_state.dart';
+import '../widgets/enroll_class_dialog.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/panel_card.dart';
 
-class ClassesScreen extends StatefulWidget {
+class ClassesScreen extends StatelessWidget {
   const ClassesScreen({super.key});
 
-  @override
-  State<ClassesScreen> createState() => _ClassesScreenState();
-}
+  Future<void> _showEnrollDialog(BuildContext context) async {
+    final joined = await EnrollClassDialog.show(context);
+    if (!context.mounted || joined != true) return;
 
-class _ClassesScreenState extends State<ClassesScreen> {
-  Future<void> _showEnrollDialog() async {
     final app = context.read<AppState>();
     final lang = app.language;
-    final theme = app.theme;
-    final controller = TextEditingController();
-    var busy = false;
+    app.notifyEnrolledClassesChanged();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(AppStrings.classEnrolled(lang))),
+    );
+  }
 
-    await showDialog<void>(
+  Future<void> _confirmLeaveClass(
+    BuildContext context, {
+    required String className,
+    required int classId,
+  }) async {
+    final app = context.read<AppState>();
+    final lang = app.language;
+
+    final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: Text(
-            AppStrings.enrollClassCode(lang),
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
+      builder: (ctx) => AlertDialog(
+        content: Text(AppStrings.leaveClassConfirm(lang, className)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(AppStrings.cancel(lang)),
           ),
-          content: TextField(
-            controller: controller,
-            textCapitalization: TextCapitalization.characters,
-            decoration: InputDecoration(
-              hintText: AppStrings.enterClassCodeHint(lang),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-              ),
-            ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(AppStrings.leaveClass(lang)),
           ),
-          actions: [
-            TextButton(
-              onPressed: busy ? null : () => Navigator.pop(ctx),
-              child: Text(AppStrings.cancel(lang)),
-            ),
-            FilledButton(
-              onPressed: busy
-                  ? null
-                  : () async {
-                      setDialogState(() => busy = true);
-                      final err = await app.enrollByClassCode(
-                        controller.text.trim(),
-                      );
-                      if (!ctx.mounted) return;
-                      if (err != null) {
-                        setDialogState(() => busy = false);
-                        if (ctx.mounted) {
-                          ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(content: Text(err)),
-                          );
-                        }
-                        return;
-                      }
-                      Navigator.pop(ctx);
-                      if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(AppStrings.classEnrolled(lang))),
-                      );
-                      setState(() {});
-                    },
-              style: FilledButton.styleFrom(
-                backgroundColor: theme.bgAccent,
-              ),
-              child: busy
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Text(AppStrings.add(lang)),
-            ),
-          ],
-        ),
+        ],
       ),
     );
-    controller.dispose();
+    if (confirm != true || !context.mounted) return;
+
+    final err = await app.leaveClass(classId);
+    if (!context.mounted) return;
+    if (err != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(err)),
+      );
+      return;
+    }
+    app.notifyEnrolledClassesChanged();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(AppStrings.leftClass(lang))),
+    );
   }
 
   @override
@@ -197,35 +172,11 @@ class _ClassesScreenState extends State<ClassesScreen> {
                             Align(
                               alignment: Alignment.centerRight,
                               child: TextButton(
-                                onPressed: () async {
-                                  final confirm = await showDialog<bool>(
-                                    context: context,
-                                    builder: (ctx) => AlertDialog(
-                                      content: Text(
-                                        AppStrings.leaveClassConfirm(
-                                          lang,
-                                          enrolled.className,
-                                        ),
-                                      ),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () =>
-                                              Navigator.pop(ctx, false),
-                                          child: Text(AppStrings.cancel(lang)),
-                                        ),
-                                        FilledButton(
-                                          onPressed: () =>
-                                              Navigator.pop(ctx, true),
-                                          child: Text(
-                                            AppStrings.leaveClass(lang),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                  if (confirm != true || !mounted) return;
-                                  await app.leaveClass(enrolled.classId);
-                                },
+                                onPressed: () => _confirmLeaveClass(
+                                  context,
+                                  className: enrolled.className,
+                                  classId: enrolled.classId,
+                                ),
                                 child: Text(
                                   AppStrings.leaveClass(lang),
                                   style: GoogleFonts.poppins(
@@ -248,10 +199,11 @@ class _ClassesScreenState extends State<ClassesScreen> {
             right: AppSpacing.lg,
             bottom: AppSpacing.md,
             child: FloatingActionButton(
-              onPressed: _showEnrollDialog,
+              onPressed: () => _showEnrollDialog(context),
               backgroundColor: theme.bgAccent,
               foregroundColor: Colors.white,
-              child: const Icon(Icons.add_rounded),
+              tooltip: AppStrings.joinClass(lang),
+              child: const Icon(Icons.group_add_rounded),
             ),
           ),
         ],

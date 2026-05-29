@@ -14,6 +14,8 @@ abstract final class AppSpacing {
   static const double radiusLg = 22;
   static const double radiusXl = 55;
 
+  static const Duration drawerAnimation = Duration(milliseconds: 300);
+
   static const double phoneMaxWidth = 390;
   static const double tabletMaxWidth = 720;
   static const double desktopMaxWidth = 960;
@@ -36,11 +38,33 @@ abstract final class AppSpacing {
     return phoneMaxWidth;
   }
 
+  /// Phrase grids: 4 columns on phone, scaling up on wider screens.
   static int phraseGridColumns(BuildContext context) {
     final w = MediaQuery.sizeOf(context).width;
-    if (w >= 1100) return 3;
-    if (w >= 600) return 3;
-    return 2;
+    if (w >= 1100) return 5;
+    if (w >= 600) return 4;
+    return 4;
+  }
+
+  static bool phraseGridIsDense(BuildContext context) =>
+      phraseGridColumns(context) >= 4;
+
+  static double phraseGridChildAspectRatio(BuildContext context) {
+    final w = MediaQuery.sizeOf(context).width;
+    if (w >= 1100) return 0.84;
+    if (w >= 600) return 0.80;
+    return 0.76;
+  }
+
+  static SliverGridDelegateWithFixedCrossAxisCount phraseGridDelegate(
+    BuildContext context,
+  ) {
+    return SliverGridDelegateWithFixedCrossAxisCount(
+      crossAxisCount: phraseGridColumns(context),
+      crossAxisSpacing: sm,
+      mainAxisSpacing: sm,
+      childAspectRatio: phraseGridChildAspectRatio(context),
+    );
   }
 
   /// Category picker grid: 3 columns on phone, 5 on tablet and wider.

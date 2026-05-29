@@ -153,20 +153,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _showAddCategoryDialog() async {
-    final app = context.read<AppState>();
-    final name = await AddCategoryDialog.show(context);
-    if (!mounted || name == null) return;
-
-    final err = await app.addCategory(name);
-    if (!mounted) return;
-    if (err != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(err, style: GoogleFonts.poppins()),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
+    await AddCategoryDialog.show(context);
   }
 
   @override
@@ -175,7 +162,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final theme = app.theme;
     final lang = app.language;
     final userName = app.user?.fullName ?? AppStrings.defaultLearnerName(lang);
-    final columns = AppSpacing.phraseGridColumns(context);
+    final denseGrid = AppSpacing.phraseGridIsDense(context);
     final highlightController = _textController;
     if (highlightController is _HighlightingTextController) {
       highlightController.updateHighlight(
@@ -205,10 +192,10 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 Text(
                   AppStrings.welcomeUser(userName, lang),
-                  style: GoogleFonts.tiltWarp(
+                  style: GoogleFonts.poppins(
                     fontSize: 22,
                     color: theme.textMain,
-                    fontWeight: FontWeight.w400,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
                 const SizedBox(height: AppSpacing.xs),
@@ -480,25 +467,19 @@ class _HomeScreenState extends State<HomeScreen> {
             child: GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: columns,
-                crossAxisSpacing: AppSpacing.md,
-                mainAxisSpacing: AppSpacing.md,
-                childAspectRatio: 0.86,
-              ),
+              gridDelegate: AppSpacing.phraseGridDelegate(context),
               itemCount: app.phrasesForCategory.length,
               itemBuilder: (context, i) {
                 final phrase = app.phrasesForCategory[i];
-                return Align(
-                  alignment: Alignment.topCenter,
-                  child: PhraseCard(
-                    phrase: phrase,
-                    isFavorite: app.isFavorite(phrase),
-                    onTap: () => _appendPhrase(app.localizedPhraseText(phrase)),
-                    onSpeak: () =>
-                        _appendPhrase(app.localizedPhraseText(phrase), speak: true),
-                    onFavorite: () => app.toggleFavorite(phrase),
-                    onDelete: () async {
+                return PhraseCard(
+                  phrase: phrase,
+                  dense: denseGrid,
+                  isFavorite: app.isFavorite(phrase),
+                  onTap: () => _appendPhrase(app.localizedPhraseText(phrase)),
+                  onSpeak: () =>
+                      _appendPhrase(app.localizedPhraseText(phrase), speak: true),
+                  onFavorite: () => app.toggleFavorite(phrase),
+                  onDelete: () async {
                     final confirm = await showDialog<bool>(
                       context: context,
                       builder: (ctx) => AlertDialog(
@@ -516,8 +497,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     );
                     if (confirm == true) await app.deletePhrase(phrase);
-                    },
-                  ),
+                  },
                 );
               },
             ),

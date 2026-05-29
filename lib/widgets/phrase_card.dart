@@ -17,6 +17,8 @@ class PhraseCard extends StatelessWidget {
     required this.onDelete,
     required this.onFavorite,
     required this.isFavorite,
+    this.showFavorite = true,
+    this.dense = false,
   });
 
   final PhraseModel phrase;
@@ -25,31 +27,40 @@ class PhraseCard extends StatelessWidget {
   final VoidCallback onDelete;
   final VoidCallback onFavorite;
   final bool isFavorite;
+  final bool showFavorite;
+  final bool dense;
 
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final theme = app.theme;
     final lang = app.language;
+    final cardRadius = dense ? AppSpacing.radiusMd : AppSpacing.radiusLg;
+    final edgePad = dense ? AppSpacing.xs : AppSpacing.sm;
+    final imageAspect = dense ? 1.15 : 1.45;
+    final actionHeight = dense ? 28.0 : 34.0;
+    final actionIcon = dense ? 14.0 : 16.0;
+    final labelSize = dense ? 9.0 : 11.0;
+    final titleSize = dense ? 10.0 : 12.0;
 
     return Material(
       color: theme.bgMid,
       elevation: 0,
       shadowColor: theme.textMain.withValues(alpha: 0.12),
-      borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+      borderRadius: BorderRadius.circular(cardRadius),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+        borderRadius: BorderRadius.circular(cardRadius),
         child: Ink(
           decoration: BoxDecoration(
             color: theme.bgMid,
-            borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+            borderRadius: BorderRadius.circular(cardRadius),
             boxShadow: [
               BoxShadow(
-                color: theme.textMain.withValues(alpha: 0.1),
-                blurRadius: 14,
-                offset: const Offset(0, 5),
+                color: theme.textMain.withValues(alpha: dense ? 0.08 : 0.1),
+                blurRadius: dense ? 8 : 14,
+                offset: Offset(0, dense ? 3 : 5),
               ),
             ],
           ),
@@ -58,59 +69,54 @@ class PhraseCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.sm,
-                  AppSpacing.xs,
-                  AppSpacing.sm,
-                  0,
-                ),
+                padding: EdgeInsets.fromLTRB(edgePad, edgePad, edgePad, 0),
                 child: Stack(
                   children: [
                     ClipRRect(
-                      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                      borderRadius: BorderRadius.circular(
+                        dense ? AppSpacing.radiusSm : AppSpacing.radiusMd,
+                      ),
                       child: PhraseImage(
                         imagePath: phrase.imagePath,
                         theme: theme,
-                        aspectRatio: 1.45,
+                        aspectRatio: imageAspect,
                       ),
                     ),
-                    Positioned(
-                      top: 6,
-                      right: 6,
-                      child: _StarButton(
-                        active: isFavorite,
-                        onTap: onFavorite,
+                    if (showFavorite)
+                      Positioned(
+                        top: dense ? 4 : 6,
+                        right: dense ? 4 : 6,
+                        child: _StarButton(
+                          active: isFavorite,
+                          onTap: onFavorite,
+                          size: dense ? 22 : 28,
+                          iconSize: dense ? 14 : 17,
+                        ),
                       ),
-                    ),
                   ],
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.sm,
-                  AppSpacing.xs,
-                  AppSpacing.sm,
-                  0,
-                ),
+                padding: EdgeInsets.fromLTRB(edgePad, AppSpacing.xs, edgePad, 0),
                 child: Text(
                   app.localizedPhraseText(phrase),
                   textAlign: TextAlign.center,
-                  maxLines: 2,
+                  maxLines: dense ? 2 : 2,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.poppins(
-                    fontSize: 12,
+                    fontSize: titleSize,
                     fontWeight: FontWeight.w800,
                     color: theme.textMain,
-                    height: 1.1,
+                    height: 1.05,
                   ),
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.sm,
+                padding: EdgeInsets.fromLTRB(
+                  edgePad,
                   AppSpacing.xs,
-                  AppSpacing.sm,
-                  AppSpacing.sm,
+                  edgePad,
+                  edgePad,
                 ),
                 child: Row(
                   children: [
@@ -120,41 +126,49 @@ class PhraseCard extends StatelessWidget {
                         style: FilledButton.styleFrom(
                           backgroundColor: theme.bgAccent,
                           foregroundColor: Colors.white,
-                          minimumSize: const Size(0, 34),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.xs,
-                            vertical: AppSpacing.xs,
+                          minimumSize: Size(0, actionHeight),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: dense ? 2 : AppSpacing.xs,
+                            vertical: dense ? 2 : AppSpacing.xs,
                           ),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                            borderRadius: BorderRadius.circular(
+                              dense ? 8 : AppSpacing.radiusSm,
+                            ),
                           ),
                           elevation: 0,
                         ),
-                        icon: const Icon(Icons.volume_up_rounded, size: 16),
-                        label: Text(
-                          AppStrings.speak(lang),
-                          style: GoogleFonts.poppins(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
+                        icon: Icon(Icons.volume_up_rounded, size: actionIcon),
+                        label: dense
+                            ? const SizedBox.shrink()
+                            : Text(
+                                AppStrings.speak(lang),
+                                style: GoogleFonts.poppins(
+                                  fontSize: labelSize,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                       ),
                     ),
-                    const SizedBox(width: AppSpacing.sm),
+                    SizedBox(width: dense ? AppSpacing.xs : AppSpacing.sm),
                     Material(
                       color: Colors.white,
-                      borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                      borderRadius: BorderRadius.circular(
+                        dense ? 8 : AppSpacing.radiusSm,
+                      ),
                       elevation: 0,
                       child: InkWell(
                         onTap: onDelete,
-                        borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                        child: const SizedBox(
-                          width: 34,
-                          height: 34,
+                        borderRadius: BorderRadius.circular(
+                          dense ? 8 : AppSpacing.radiusSm,
+                        ),
+                        child: SizedBox(
+                          width: actionHeight,
+                          height: actionHeight,
                           child: Icon(
                             Icons.delete_outline_rounded,
-                            size: 18,
-                            color: Color(0xFF5C3D2E),
+                            size: dense ? 15 : 18,
+                            color: const Color(0xFF5C3D2E),
                           ),
                         ),
                       ),
@@ -171,10 +185,17 @@ class PhraseCard extends StatelessWidget {
 }
 
 class _StarButton extends StatelessWidget {
-  const _StarButton({required this.active, required this.onTap});
+  const _StarButton({
+    required this.active,
+    required this.onTap,
+    this.size = 28,
+    this.iconSize = 17,
+  });
 
   final bool active;
   final VoidCallback onTap;
+  final double size;
+  final double iconSize;
 
   @override
   Widget build(BuildContext context) {
@@ -185,11 +206,11 @@ class _StarButton extends StatelessWidget {
         customBorder: const CircleBorder(),
         onTap: onTap,
         child: SizedBox(
-          width: 28,
-          height: 28,
+          width: size,
+          height: size,
           child: Icon(
             active ? Icons.star_rounded : Icons.star_border_rounded,
-            size: 17,
+            size: iconSize,
             color: active ? const Color(0xFFF9B509) : const Color(0xFF9E9E9E),
           ),
         ),
