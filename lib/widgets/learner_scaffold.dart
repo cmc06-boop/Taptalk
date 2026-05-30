@@ -29,10 +29,21 @@ class LearnerScaffold extends StatelessWidget {
   final bool showBackButton;
   final VoidCallback? onBack;
 
+  bool _forMeShowsBottomNav(AppRoute route) {
+    return route == AppRoute.home ||
+        route == AppRoute.favorites ||
+        route == AppRoute.history ||
+        route == AppRoute.settings;
+  }
+
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final isParent = app.user?.isParent ?? false;
+    final isTeacher = app.user?.isTeacher ?? false;
+    final forMeOnlyNav = isParent || isTeacher;
+    final effectiveShowBottomNav =
+        showBottomNav && (!forMeOnlyNav || _forMeShowsBottomNav(currentRoute));
 
     return TapTalkShell(
       child: Stack(
@@ -44,14 +55,17 @@ class LearnerScaffold extends StatelessWidget {
                   showBackButton: showBackButton,
                   onBack: onBack,
                   onMenu: showBackButton ? null : () => app.toggleDrawer(),
-                  showProfile: !isParent && !showBackButton,
+                  showProfile:
+                      !isParent && !isTeacher && !showBackButton,
+                  showAlerts: isTeacher && !showBackButton,
                   showNotifications: isParent && !showBackButton,
                   notificationBadgeCount: app.unreadNotificationCount,
                   onNotifications: () => app.setRoute(AppRoute.notifications),
+                  onAlerts: () => app.setRoute(AppRoute.teacherMonitoring),
                   onProfile: () => app.setRoute(AppRoute.profile),
                 ),
                 Expanded(child: body),
-                if (showBottomNav)
+                if (effectiveShowBottomNav)
                   TapTalkBottomNav(
                     current: currentRoute,
                     onMicTap: onMicTap,

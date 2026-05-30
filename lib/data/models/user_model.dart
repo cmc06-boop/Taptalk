@@ -6,6 +6,7 @@ class UserModel {
     required this.role,
     this.themeKey,
     this.passwordHash,
+    this.firebaseUid,
   });
 
   final int id;
@@ -14,6 +15,10 @@ class UserModel {
   final String role;
   final String? themeKey;
   final String? passwordHash;
+  final String? firebaseUid;
+
+  bool get isOnlineAccount =>
+      firebaseUid != null && firebaseUid!.trim().isNotEmpty;
 
   bool get isLearner => role == 'learner';
   bool get isParent => role == 'parent';
@@ -27,6 +32,7 @@ class UserModel {
     String? role,
     String? themeKey,
     String? passwordHash,
+    String? firebaseUid,
   }) {
     return UserModel(
       id: id ?? this.id,
@@ -35,6 +41,7 @@ class UserModel {
       role: role ?? this.role,
       themeKey: themeKey ?? this.themeKey,
       passwordHash: passwordHash ?? this.passwordHash,
+      firebaseUid: firebaseUid ?? this.firebaseUid,
     );
   }
 
@@ -45,6 +52,7 @@ class UserModel {
         'role': role,
         'theme': themeKey,
         'password_hash': passwordHash,
+        'firebase_uid': firebaseUid,
       };
 
   factory UserModel.fromMap(Map<String, Object?> map) {
@@ -55,6 +63,7 @@ class UserModel {
       role: map['role'] as String,
       themeKey: map['theme'] as String?,
       passwordHash: map['password_hash'] as String?,
+      firebaseUid: map['firebase_uid'] as String?,
     );
   }
 }

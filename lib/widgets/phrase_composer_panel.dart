@@ -8,7 +8,6 @@ import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
-import '../core/theme/theme_tokens.dart';
 import '../providers/app_state.dart';
 
 /// Home-style phrase text box with image attach and add button.

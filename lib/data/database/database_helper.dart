@@ -28,7 +28,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE users (
@@ -38,7 +38,8 @@ class DatabaseHelper {
             full_name TEXT NOT NULL,
             role TEXT NOT NULL,
             theme TEXT,
-            settings_json TEXT
+            settings_json TEXT,
+            firebase_uid TEXT UNIQUE
           )
         ''');
         await db.execute('''
@@ -105,6 +106,13 @@ class DatabaseHelper {
         }
         if (oldVersion < 8) {
           await _createLessonTables(db);
+        }
+        if (oldVersion < 9) {
+          await db.execute('ALTER TABLE users ADD COLUMN firebase_uid TEXT');
+          await db.execute(
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_firebase_uid '
+            'ON users(firebase_uid) WHERE firebase_uid IS NOT NULL',
+          );
         }
       },
     );

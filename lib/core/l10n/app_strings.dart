@@ -315,6 +315,18 @@ abstract final class AppStrings {
       ? 'Wala pang aralin. Pindutin ang + para gumawa.'
       : 'No lessons yet. Tap + to create one.';
 
+  static String noLessonsLearner(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Wala pang aralin sa klaseng ito.'
+      : 'No lessons in this class yet.';
+
+  static String noPhrasesInLesson(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Wala pang salita o phrase sa araling ito.'
+      : 'No words or phrases in this lesson yet.';
+
+  static String classLessonsSubtitle(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Pindutin ang aralin para makita ang mga salita at phrase.'
+      : 'Tap a lesson to see its words and phrases.';
+
   static String phrasesInLesson(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Mga parirala sa aralin'
       : 'Phrases in this lesson';
@@ -422,6 +434,51 @@ abstract final class AppStrings {
 
   static String loginTitle(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Mag-login' : 'Log in';
+
+  static String forgotPassword(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Nakalimutan ang password?'
+      : 'Forgot password?';
+
+  static String forgotPasswordTitle(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'I-reset ang Password'
+      : 'Reset Password';
+
+  static String forgotPasswordHint(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Ilagay ang email ng account mo para mag-set ng bagong password.'
+      : 'Enter your account email to set a new password.';
+
+  static String sendResetLink(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Magpatuloy'
+      : 'Continue';
+
+  static String backToLogin(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Bumalik sa login'
+      : 'Back to login';
+
+  static String passwordResetEmailSent(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Naipadala na ang reset link sa email mo. Suriin ang inbox (at spam folder).'
+      : 'Reset link sent to your email. Check your inbox (and spam folder).';
+
+  static String emailNotRegistered(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Walang account na nakarehistro sa email na ito.'
+      : 'No account is registered with this email.';
+
+  static String setNewPasswordHint(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Maglagay ng bagong password para sa account mo.'
+      : 'Enter a new password for your account.';
+
+  static String saveNewPassword(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'I-save ang bagong password'
+      : 'Save new password';
+
+  static String passwordResetSuccess(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Na-update na ang password. Puwede ka nang mag-login.'
+      : 'Password updated. You can log in now.';
+
+  static String localPasswordResetUnavailable(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Hindi ma-reset ang account na ito dito. Gumawa ng bagong account.'
+          : 'This account cannot be reset here. Please create a new account.';
 
   static String signUp(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Mag-sign up' : 'Sign up';
@@ -801,6 +858,17 @@ abstract final class AppStrings {
       lang == AppLanguage.filipino
           ? 'Umalis sa $className?'
           : 'Leave $className?';
+
+  static String unenroll(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Mag-unenroll' : 'Unenroll';
+
+  static String unenrollConfirm(AppLanguage lang, String className) =>
+      lang == AppLanguage.filipino
+          ? 'Mag-unenroll sa $className?'
+          : 'Unenroll from $className?';
+
+  static String gradeAndSection(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Baitang at section' : 'Grade and section';
 
   static String teacherLabel(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Guro' : 'Teacher';

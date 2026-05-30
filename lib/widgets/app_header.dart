@@ -13,8 +13,10 @@ class AppHeader extends StatelessWidget {
     this.onBack,
     this.onProfile,
     this.onNotifications,
+    this.onAlerts,
     this.showProfile = true,
     this.showNotifications = false,
+    this.showAlerts = false,
     this.showBackButton = false,
     this.notificationBadgeCount = 0,
   });
@@ -24,8 +26,10 @@ class AppHeader extends StatelessWidget {
   final VoidCallback? onBack;
   final VoidCallback? onProfile;
   final VoidCallback? onNotifications;
+  final VoidCallback? onAlerts;
   final bool showProfile;
   final bool showNotifications;
+  final bool showAlerts;
   final bool showBackButton;
   final int notificationBadgeCount;
 
@@ -100,6 +104,14 @@ class AppHeader extends StatelessWidget {
                     ),
                   ),
               ],
+            )
+          else if (showAlerts)
+            _CircleIconButton(
+              icon: Icons.campaign_outlined,
+              onTap: onAlerts ??
+                  () => app.setRoute(AppRoute.teacherMonitoring),
+              accent: theme.bgAccent,
+              filled: true,
             )
           else if (showProfile)
             _CircleIconButton(

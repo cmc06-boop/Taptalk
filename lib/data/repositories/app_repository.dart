@@ -85,28 +85,55 @@ class AppRepository {
     return UserModel.fromMap(rows.first);
   }
 
+  Future<UserModel?> findUserByFirebaseUid(String firebaseUid) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'users',
+      where: 'firebase_uid = ?',
+      whereArgs: [firebaseUid],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return UserModel.fromMap(rows.first);
+  }
+
+  Future<void> linkFirebaseUid(int userId, String firebaseUid) async {
+    final db = await _dbHelper.database;
+    await db.update(
+      'users',
+      {'firebase_uid': firebaseUid},
+      where: 'id = ?',
+      whereArgs: [userId],
+    );
+  }
+
   Future<UserModel> registerUser({
     required String fullName,
     required String email,
     required String password,
     required String role,
+    String? firebaseUid,
   }) async {
     final db = await _dbHelper.database;
     final settings = <String, dynamic>{
       'language': 'English',
-      'tts_speed': 1.0,
+      'tts_speed': 0.25,
     };
     if (role == 'learner') {
       settings['profile_code'] = generateProfileCode();
     }
-    final id = await db.insert('users', {
+    final row = <String, Object?>{
       'email': email.trim().toLowerCase(),
-      'password_hash': hashPassword(password),
+      'password_hash': firebaseUid != null ? '' : hashPassword(password),
       'full_name': fullName.trim(),
       'role': role,
       'theme': role == 'learner' ? null : 'mint_green',
       'settings_json': jsonEncode(settings),
-    });
+    };
+    if (firebaseUid != null) {
+      row['firebase_uid'] = firebaseUid;
+    }
+    final id = await db.insert('users', row);
     final user = (await findUserById(id))!;
     if (role == 'learner' || role == 'parent') {
       await seedLearnerData(user.id);
@@ -116,7 +143,10 @@ class AppRepository {
 
   Future<bool> verifyLogin(String email, String password) async {
     final user = await findUserByEmail(email);
-    if (user == null || user.passwordHash == null) return false;
+    if (user == null || user.passwordHash == null || user.passwordHash!.isEmpty) {
+      return false;
+    }
+    if (user.isOnlineAccount) return false;
     return user.passwordHash == hashPassword(password);
   }
 
@@ -133,6 +163,19 @@ class AppRepository {
       where: 'id = ?',
       whereArgs: [userId],
     );
+  }
+
+  Future<bool> resetPasswordByEmail(String email, String newPassword) async {
+    final user = await findUserByEmail(email);
+    if (user == null || user.isOnlineAccount) return false;
+    final db = await _dbHelper.database;
+    await db.update(
+      'users',
+      {'password_hash': hashPassword(newPassword)},
+      where: 'id = ?',
+      whereArgs: [user.id],
+    );
+    return true;
   }
 
   Future<bool> updateUserPassword(int userId, String currentPassword, String newPassword) async {
@@ -213,7 +256,7 @@ class AppRepository {
     final db = await _dbHelper.database;
     final rows = await db.query('users', where: 'id = ?', whereArgs: [userId], limit: 1);
     if (rows.isEmpty || rows.first['settings_json'] == null) {
-      return {'language': 'English', 'tts_speed': 1.0};
+      return {'language': 'English', 'tts_speed': 0.25};
     }
     return jsonDecode(rows.first['settings_json'] as String) as Map<String, dynamic>;
   }
@@ -854,6 +897,74 @@ class AppRepository {
             id: row['id'] as int,
             name: row['class_name'] as String,
             code: row['class_code'] as String,
+          ),
+        )
+        .toList();
+  }
+
+  Future<bool> _isLearnerEnrolledInLesson(int learnerUserId, int lessonId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT ce.id
+      FROM class_enrollments ce
+      INNER JOIN class_lessons cl ON cl.class_id = ce.class_id
+      WHERE ce.learner_user_id = ? AND cl.id = ?
+      LIMIT 1
+    ''', [learnerUserId, lessonId]);
+    return rows.isNotEmpty;
+  }
+
+  Future<List<ClassLesson>> getEnrolledClassLessons({
+    required int learnerUserId,
+    required int classId,
+  }) async {
+    if (!await isLearnerEnrolled(learnerUserId, classId)) return [];
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT
+        cl.id,
+        cl.class_id,
+        cl.title,
+        cl.created_at,
+        (SELECT COUNT(*) FROM lesson_phrases lp WHERE lp.lesson_id = cl.id) AS phrase_count
+      FROM class_lessons cl
+      WHERE cl.class_id = ?
+      ORDER BY cl.sort_order ASC, cl.created_at DESC
+    ''', [classId]);
+    return rows
+        .map(
+          (row) => ClassLesson(
+            id: row['id'] as int,
+            classId: row['class_id'] as int,
+            title: row['title'] as String,
+            createdAt: DateTime.fromMillisecondsSinceEpoch(
+              row['created_at'] as int,
+            ),
+            phraseCount: row['phrase_count'] as int? ?? 0,
+          ),
+        )
+        .toList();
+  }
+
+  Future<List<LessonPhrase>> getEnrolledLessonPhrases({
+    required int learnerUserId,
+    required int lessonId,
+  }) async {
+    if (!await _isLearnerEnrolledInLesson(learnerUserId, lessonId)) return [];
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'lesson_phrases',
+      where: 'lesson_id = ?',
+      whereArgs: [lessonId],
+      orderBy: 'sort_order ASC, id ASC',
+    );
+    return rows
+        .map(
+          (row) => LessonPhrase(
+            id: row['id'] as int,
+            lessonId: row['lesson_id'] as int,
+            text: row['phrase_text'] as String,
+            imagePath: row['image_path'] as String?,
           ),
         )
         .toList();

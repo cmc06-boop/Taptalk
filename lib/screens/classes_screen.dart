@@ -4,10 +4,14 @@ import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
+import '../core/theme/theme_tokens.dart';
+import '../core/utils/class_display_name.dart';
+import '../data/models/enrolled_class_model.dart';
 import '../providers/app_state.dart';
 import '../widgets/enroll_class_dialog.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/panel_card.dart';
+import 'learner_class_detail_screen.dart';
 
 class ClassesScreen extends StatelessWidget {
   const ClassesScreen({super.key});
@@ -24,7 +28,7 @@ class ClassesScreen extends StatelessWidget {
     );
   }
 
-  Future<void> _confirmLeaveClass(
+  Future<void> _confirmUnenroll(
     BuildContext context, {
     required String className,
     required int classId,
@@ -35,7 +39,7 @@ class ClassesScreen extends StatelessWidget {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        content: Text(AppStrings.leaveClassConfirm(lang, className)),
+        content: Text(AppStrings.unenrollConfirm(lang, className)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -43,7 +47,7 @@ class ClassesScreen extends StatelessWidget {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(AppStrings.leaveClass(lang)),
+            child: Text(AppStrings.unenroll(lang)),
           ),
         ],
       ),
@@ -64,6 +68,16 @@ class ClassesScreen extends StatelessWidget {
     );
   }
 
+  void _openClass(BuildContext context, EnrolledClassModel enrolled) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => LearnerClassDetailScreen(
+          enrolledClass: enrolled,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
@@ -74,6 +88,7 @@ class ClassesScreen extends StatelessWidget {
     return LearnerScaffold(
       title: AppStrings.appName(lang),
       currentRoute: AppRoute.classes,
+      showBottomNav: false,
       body: Stack(
         children: [
           ListView(
@@ -131,68 +146,18 @@ class ClassesScreen extends StatelessWidget {
                   ),
                 )
               else
-                ...classes.map((enrolled) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          AppSpacing.lg,
-                          AppSpacing.md,
-                          AppSpacing.lg,
-                          AppSpacing.sm,
-                        ),
-                        child: Text(
-                          enrolled.className,
-                          style: GoogleFonts.poppins(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: theme.textMain,
-                          ),
-                        ),
-                      ),
-                      PanelCard(
-                        margin: const EdgeInsets.only(
-                          left: AppSpacing.lg,
-                          right: AppSpacing.lg,
-                          bottom: AppSpacing.sm,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text(
-                              '${AppStrings.teacherLabel(lang)}: ${enrolled.teacherName}',
-                              style: GoogleFonts.poppins(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: theme.textMain.withValues(alpha: 0.85),
-                              ),
-                            ),
-                            const SizedBox(height: AppSpacing.sm),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton(
-                                onPressed: () => _confirmLeaveClass(
-                                  context,
-                                  className: enrolled.className,
-                                  classId: enrolled.classId,
-                                ),
-                                child: Text(
-                                  AppStrings.leaveClass(lang),
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: theme.bgAccent,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  );
-                }),
+                for (final enrolled in classes)
+                  _EnrolledClassCard(
+                    enrolled: enrolled,
+                    theme: theme,
+                    lang: lang,
+                    onOpen: () => _openClass(context, enrolled),
+                    onUnenroll: () => _confirmUnenroll(
+                      context,
+                      className: enrolled.className,
+                      classId: enrolled.classId,
+                    ),
+                  ),
             ],
           ),
           Positioned(
@@ -205,6 +170,98 @@ class ClassesScreen extends StatelessWidget {
               tooltip: AppStrings.joinClass(lang),
               child: const Icon(Icons.group_add_rounded),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EnrolledClassCard extends StatelessWidget {
+  const _EnrolledClassCard({
+    required this.enrolled,
+    required this.theme,
+    required this.lang,
+    required this.onOpen,
+    required this.onUnenroll,
+  });
+
+  final EnrolledClassModel enrolled;
+  final TapTalkThemeToken theme;
+  final AppLanguage lang;
+  final VoidCallback onOpen;
+  final VoidCallback onUnenroll;
+
+  @override
+  Widget build(BuildContext context) {
+    final parsed = parseClassDisplayName(enrolled.className);
+
+    return PanelCard(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: onOpen,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        parsed.subject,
+                        style: GoogleFonts.poppins(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: theme.textMain,
+                        ),
+                      ),
+                      if (parsed.gradeSection.isNotEmpty) ...[
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          parsed.gradeSection,
+                          style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: theme.textMain.withValues(alpha: 0.75),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: AppSpacing.md),
+                      Text(
+                        enrolled.teacherName,
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: theme.textMain.withValues(alpha: 0.65),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          PopupMenuButton<String>(
+            icon: Icon(
+              Icons.more_vert_rounded,
+              color: theme.textMain.withValues(alpha: 0.55),
+            ),
+            onSelected: (value) {
+              if (value == 'unenroll') onUnenroll();
+            },
+            itemBuilder: (ctx) => [
+              PopupMenuItem(
+                value: 'unenroll',
+                child: Text(
+                  AppStrings.unenroll(lang),
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
           ),
         ],
       ),

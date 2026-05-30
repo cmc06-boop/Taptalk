@@ -140,6 +140,31 @@ class _LoginScreenState extends State<LoginScreen> {
                             onToggleObscure: () =>
                                 setState(() => _obscurePassword = !_obscurePassword),
                           ),
+                          SizedBox(height: compactHeight ? 6 : 8),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: _busy
+                                  ? null
+                                  : () => app.setRoute(AppRoute.forgotPassword),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 0,
+                                ),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              child: Text(
+                                AppStrings.forgotPassword(lang),
+                                style: GoogleFonts.poppins(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFF5BB88A),
+                                ),
+                              ),
+                            ),
+                          ),
                           const Spacer(),
                           FilledButton(
                             onPressed: _busy ? null : _submit,

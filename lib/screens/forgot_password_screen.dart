@@ -1,0 +1,403 @@
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+
+import '../core/constants/app_spacing.dart';
+import '../core/l10n/app_strings.dart';
+import '../providers/app_state.dart';
+import '../widgets/taptalk_logo.dart';
+import '../widgets/taptalk_shell.dart';
+
+enum _ForgotStep { enterEmail, setPassword, done }
+
+class ForgotPasswordScreen extends StatefulWidget {
+  const ForgotPasswordScreen({super.key});
+
+  @override
+  State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
+}
+
+class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
+  final _email = TextEditingController();
+  final _password = TextEditingController();
+  final _confirmPassword = TextEditingController();
+  _ForgotStep _step = _ForgotStep.enterEmail;
+  String? _error;
+  bool _busy = false;
+  bool _obscurePassword = true;
+  bool _obscureConfirm = true;
+
+  @override
+  void dispose() {
+    _email.dispose();
+    _password.dispose();
+    _confirmPassword.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submitEmail() async {
+    final lang = context.read<AppState>().language;
+    final email = _email.text.trim();
+    if (email.isEmpty || !email.contains('@')) {
+      setState(() => _error = AppStrings.invalidEmail(lang));
+      return;
+    }
+
+    setState(() {
+      _error = null;
+      _busy = true;
+    });
+
+    final err = await context.read<AppState>().beginPasswordReset(email);
+    if (!mounted) return;
+
+    if (err != null) {
+      setState(() {
+        _busy = false;
+        _error = err;
+      });
+      return;
+    }
+
+    setState(() {
+      _busy = false;
+      _step = _ForgotStep.setPassword;
+    });
+  }
+
+  Future<void> _submitNewPassword() async {
+    final lang = context.read<AppState>().language;
+    if (_password.text.length < 6) {
+      setState(() => _error = AppStrings.passwordTooShort(lang));
+      return;
+    }
+    if (_password.text != _confirmPassword.text) {
+      setState(() => _error = AppStrings.passwordsDoNotMatch(lang));
+      return;
+    }
+
+    setState(() {
+      _error = null;
+      _busy = true;
+    });
+
+    final err = await context.read<AppState>().completeLocalPasswordReset(
+          _email.text,
+          _password.text,
+        );
+    if (!mounted) return;
+
+    if (err != null) {
+      setState(() {
+        _busy = false;
+        _error = err;
+      });
+      return;
+    }
+
+    setState(() {
+      _busy = false;
+      _step = _ForgotStep.done;
+    });
+  }
+
+  String _subtitle(AppLanguage lang) {
+    switch (_step) {
+      case _ForgotStep.enterEmail:
+        return AppStrings.forgotPasswordHint(lang);
+      case _ForgotStep.setPassword:
+        return AppStrings.setNewPasswordHint(lang);
+      case _ForgotStep.done:
+        return AppStrings.passwordResetSuccess(lang);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final app = context.watch<AppState>();
+    final lang = app.language;
+
+    return TapTalkShell(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 500;
+          final compactHeight = constraints.maxHeight < 760;
+          final headerHeight = isWide ? 180.0 : (compactHeight ? 150.0 : 190.0);
+          final logoSize = compactHeight ? 70.0 : 86.0;
+          final contentHorizontal = isWide ? 36.0 : 24.0;
+          final contentTop = compactHeight ? 16.0 : 22.0;
+          final sectionGap = compactHeight ? 12.0 : 16.0;
+          final fieldGap = compactHeight ? 10.0 : 14.0;
+
+          return Column(
+            children: [
+              Container(
+                width: double.infinity,
+                height: headerHeight,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0xFF3ECF8E), Color(0xFFB3E6CC)],
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  'TapTalk',
+                  style: GoogleFonts.poppins(
+                    fontSize: compactHeight ? 34 : 38,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                    letterSpacing: 0.4,
+                    shadows: const [
+                      Shadow(
+                        color: Color(0x22000000),
+                        blurRadius: 6,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Transform.translate(
+                  offset: Offset(0, isWide ? -34 : -50),
+                  child: Material(
+                    color: Colors.white,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(52),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        contentHorizontal,
+                        contentTop,
+                        contentHorizontal,
+                        compactHeight ? 14 : 18,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: IconButton(
+                              onPressed: _busy
+                                  ? null
+                                  : () {
+                                      if (_step == _ForgotStep.setPassword) {
+                                        setState(() {
+                                          _step = _ForgotStep.enterEmail;
+                                          _error = null;
+                                          _password.clear();
+                                          _confirmPassword.clear();
+                                        });
+                                      } else {
+                                        app.setRoute(AppRoute.login);
+                                      }
+                                    },
+                              icon: const Icon(Icons.arrow_back_rounded),
+                              color: const Color(0xFF2F5E48),
+                            ),
+                          ),
+                          Center(child: TapTalkLogo(size: logoSize)),
+                          SizedBox(height: sectionGap),
+                          Text(
+                            AppStrings.forgotPasswordTitle(lang),
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.poppins(
+                              fontSize: compactHeight ? 22 : 24,
+                              fontWeight: FontWeight.w700,
+                              color: const Color(0xFF5BB88A),
+                            ),
+                          ),
+                          SizedBox(height: compactHeight ? 8 : 10),
+                          Text(
+                            _subtitle(lang),
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.poppins(
+                              fontSize: 13,
+                              color: _step == _ForgotStep.done
+                                  ? const Color(0xFF2E7D32)
+                                  : const Color(0xFF5A6B63),
+                              height: 1.45,
+                              fontWeight: _step == _ForgotStep.done
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                            ),
+                          ),
+                          if (_error != null) ...[
+                            const SizedBox(height: AppSpacing.md),
+                            Text(
+                              _error!,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(color: Color(0xFFC62828)),
+                            ),
+                          ],
+                          if (_step == _ForgotStep.enterEmail) ...[
+                            SizedBox(height: sectionGap),
+                            _field(
+                              AppStrings.email(lang),
+                              _email,
+                              keyboard: TextInputType.emailAddress,
+                            ),
+                          ],
+                          if (_step == _ForgotStep.setPassword) ...[
+                            SizedBox(height: sectionGap),
+                            _field(
+                              AppStrings.newPassword(lang),
+                              _password,
+                              obscure: _obscurePassword,
+                              onToggleObscure: () => setState(
+                                () => _obscurePassword = !_obscurePassword,
+                              ),
+                            ),
+                            SizedBox(height: fieldGap),
+                            _field(
+                              AppStrings.confirmPassword(lang),
+                              _confirmPassword,
+                              obscure: _obscureConfirm,
+                              onToggleObscure: () => setState(
+                                () => _obscureConfirm = !_obscureConfirm,
+                              ),
+                            ),
+                          ],
+                          const Spacer(),
+                          if (_step == _ForgotStep.enterEmail)
+                            FilledButton(
+                              onPressed: _busy ? null : _submitEmail,
+                              style: _primaryButtonStyle(compactHeight),
+                              child: _buttonChild(
+                                busy: _busy,
+                                label: AppStrings.sendResetLink(lang),
+                              ),
+                            ),
+                          if (_step == _ForgotStep.setPassword)
+                            FilledButton(
+                              onPressed: _busy ? null : _submitNewPassword,
+                              style: _primaryButtonStyle(compactHeight),
+                              child: _buttonChild(
+                                busy: _busy,
+                                label: AppStrings.saveNewPassword(lang),
+                              ),
+                            ),
+                          if (_step == _ForgotStep.done)
+                            FilledButton(
+                              onPressed: () => app.setRoute(AppRoute.login),
+                              style: _primaryButtonStyle(compactHeight),
+                              child: Text(
+                                AppStrings.backToLogin(lang),
+                                style: GoogleFonts.poppins(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ),
+                          SizedBox(height: compactHeight ? 10 : 14),
+                          if (_step != _ForgotStep.done)
+                            TextButton(
+                              onPressed: _busy
+                                  ? null
+                                  : () => app.setRoute(AppRoute.login),
+                              child: Text(
+                                AppStrings.backToLogin(lang),
+                                style: GoogleFonts.poppins(
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFF5BB88A),
+                                ),
+                              ),
+                            ),
+                          SizedBox(height: compactHeight ? 4 : 6),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  ButtonStyle _primaryButtonStyle(bool compactHeight) {
+    return FilledButton.styleFrom(
+      backgroundColor: Colors.black,
+      padding: EdgeInsets.symmetric(vertical: compactHeight ? 14 : 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    );
+  }
+
+  Widget _buttonChild({required bool busy, required String label}) {
+    if (busy) {
+      return const SizedBox(
+        height: 22,
+        width: 22,
+        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+      );
+    }
+    return Text(
+      label,
+      style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 16),
+    );
+  }
+
+  Widget _field(
+    String label,
+    TextEditingController controller, {
+    TextInputType? keyboard,
+    bool obscure = false,
+    VoidCallback? onToggleObscure,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        TextField(
+          controller: controller,
+          obscureText: obscure,
+          keyboardType: keyboard,
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: const Color(0xFFEFF8F3),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            suffixIcon: onToggleObscure == null
+                ? null
+                : IconButton(
+                    icon: Icon(
+                      obscure
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      color: const Color(0xFF5A6B63),
+                      size: 19,
+                    ),
+                    onPressed: onToggleObscure,
+                    constraints:
+                        const BoxConstraints(minWidth: 38, minHeight: 38),
+                  ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFDCECE4)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFDCECE4)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(
+                color: const Color(0xFF5BB88A).withValues(alpha: 0.65),
+                width: 1.6,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}

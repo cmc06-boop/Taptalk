@@ -49,8 +49,10 @@ class SourceDrawer extends StatelessWidget {
                 duration: AppSpacing.drawerAnimation,
                 curve: Curves.easeOutCubic,
                 opacity: app.drawerOpen ? 1 : 0,
-                child: Container(
+                child: SizedBox(
+                  height: MediaQuery.sizeOf(context).height,
                   width: 238,
+                  child: Container(
                   decoration: BoxDecoration(
                     color: theme.bgMid,
                     borderRadius: const BorderRadius.horizontal(
@@ -169,6 +171,13 @@ class SourceDrawer extends StatelessWidget {
                               active: _isForMeRoute(app.route),
                               onTap: () => app.setRoute(AppRoute.home),
                             ),
+                            _DrawerItem(
+                              theme: theme,
+                              icon: Icons.person_outline_rounded,
+                              label: AppStrings.profile(lang),
+                              active: app.route == AppRoute.profile,
+                              onTap: () => app.setRoute(AppRoute.profile),
+                            ),
                           ] else ...[
                             _DrawerItem(
                               theme: theme,
@@ -178,10 +187,18 @@ class SourceDrawer extends StatelessWidget {
                               onTap: () => app.setRoute(AppRoute.profile),
                             ),
                           ],
+                          const Spacer(),
+                          _DrawerItem(
+                            theme: theme,
+                            icon: Icons.logout_rounded,
+                            label: AppStrings.logout(lang),
+                            onTap: app.logout,
+                          ),
                         ],
                       ),
                     ),
                   ),
+                ),
                 ),
               ),
             ),

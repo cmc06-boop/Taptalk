@@ -34,6 +34,7 @@ enum AppRoute {
   welcome,
   login,
   register,
+  forgotPassword,
   chooseRole,
   chooseTheme,
   chooseCategory,
@@ -64,7 +65,7 @@ class AppState extends ChangeNotifier {
   AppRoute _route = AppRoute.welcome;
   TapTalkThemeToken _theme = TapTalkThemes.appDefault;
   AppLanguage _language = AppLanguage.english;
-  double _ttsSpeed = 1.0;
+  double _ttsSpeed = TtsSpeedOptions.defaultSpeed;
   String _selectedCategoryKey = 'feelings';
   bool _drawerOpen = false;
   bool _isSpeaking = false;
@@ -173,7 +174,9 @@ class AppState extends ChangeNotifier {
     final ranges = _wordRanges(_speakingText);
     if (ranges.isEmpty) return;
     _readAlongWordIndex = 0;
-    final tick = Duration(milliseconds: (360 / _ttsSpeed).clamp(180, 700).round());
+    final tick = Duration(
+      milliseconds: (360 / _ttsSpeed).clamp(180, 700).round(),
+    );
     _readAlongTimer = Timer.periodic(tick, (timer) {
       if (!_isSpeaking || ranges.isEmpty) {
         timer.cancel();
@@ -210,17 +213,13 @@ class AppState extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getInt('user_id');
-      _language = prefs.getString('lang') == 'fil'
-          ? AppLanguage.filipino
-          : AppLanguage.english;
-      _ttsSpeed = TtsSpeedOptions.snap(
-        prefs.getDouble('tts_speed') ?? TtsSpeedOptions.defaultSpeed,
-      );
       await tts.init();
 
       if (userId != null) {
         _user = await _repo.findUserById(userId);
-        if (_user != null) {
+      }
+
+      if (_user != null) {
           if (_user!.needsTheme) {
             _theme = TapTalkThemes.appDefault;
           } else {
@@ -245,7 +244,6 @@ class AppState extends ChangeNotifier {
             _route = AppRoute.login;
           }
         }
-      }
     } catch (e, st) {
       debugPrint('TapTalk init failed: $e\n$st');
       _route = AppRoute.welcome;
@@ -256,6 +254,10 @@ class AppState extends ChangeNotifier {
   }
 
   String _categoryOnboardingKey(int userId) => 'category_onboarding_$userId';
+
+  String _languagePrefKey(int userId) => 'lang_$userId';
+
+  String _ttsSpeedPrefKey(int userId) => 'tts_speed_$userId';
 
   Future<bool> _isCategoryOnboardingDone(int userId) async {
     final prefs = await SharedPreferences.getInstance();
@@ -277,23 +279,11 @@ class AppState extends ChangeNotifier {
     if (_user == null) return;
     final settings = await _repo.getUserSettings(_user!.id);
     _ttsSpeed = TtsSpeedOptions.snap(
-      (settings['tts_speed'] as num?)?.toDouble() ?? _ttsSpeed,
+      (settings['tts_speed'] as num?)?.toDouble() ?? TtsSpeedOptions.defaultSpeed,
     );
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.containsKey('lang')) {
-      _language = prefs.getString('lang') == 'fil'
-          ? AppLanguage.filipino
-          : AppLanguage.english;
-    } else {
-      _applyLanguageFromSettings(settings);
-    }
+    _applyLanguageFromSettings(settings);
     await _syncLanguagePref();
-    if (_user != null) {
-      await _repo.updateUserSettings(
-        _user!.id,
-        language: _language == AppLanguage.filipino ? 'Filipino' : 'English',
-      );
-    }
+    await _syncTtsSpeedPref();
     final contacts = settings['emergency_contacts'];
     if (contacts is List) {
       _emergencyContacts = contacts
@@ -380,8 +370,18 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _syncLanguagePref() async {
+    if (_user == null) return;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('lang', AppStrings.langCode(_language));
+    await prefs.setString(
+      _languagePrefKey(_user!.id),
+      AppStrings.langCode(_language),
+    );
+  }
+
+  Future<void> _syncTtsSpeedPref() async {
+    if (_user == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_ttsSpeedPrefKey(_user!.id), _ttsSpeed);
   }
 
   Future<void> setLanguage(AppLanguage lang) async {
@@ -398,8 +398,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> setTtsSpeed(double speed) async {
     _ttsSpeed = TtsSpeedOptions.snap(speed);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble('tts_speed', _ttsSpeed);
+    await _syncTtsSpeedPref();
     if (_user != null) {
       await _repo.updateUserSettings(_user!.id, ttsSpeed: _ttsSpeed);
     }
@@ -446,10 +445,12 @@ class AppState extends ChangeNotifier {
       ContentLocalization.themeName(themeKey, storedName, _language);
 
   Future<String?> login(String email, String password) async {
-    final ok = await _repo.verifyLogin(email, password);
+    final normalizedEmail = email.trim().toLowerCase();
+    final ok = await _repo.verifyLogin(normalizedEmail, password);
     if (!ok) return AppStrings.invalidEmailPassword(_language);
-    _user = await _repo.findUserByEmail(email);
+    _user = await _repo.findUserByEmail(normalizedEmail);
     if (_user == null) return AppStrings.loginFailed(_language);
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('user_id', _user!.id);
     if (_user!.needsTheme) {
@@ -490,14 +491,17 @@ class AppState extends ChangeNotifier {
     required String password,
     required String role,
   }) async {
-    final existing = await _repo.findUserByEmail(email);
+    final normalizedEmail = email.trim().toLowerCase();
+    final existing = await _repo.findUserByEmail(normalizedEmail);
     if (existing != null) return AppStrings.emailInUse(_language);
+
     _user = await _repo.registerUser(
       fullName: fullName,
-      email: email,
+      email: normalizedEmail,
       password: password,
       role: role,
     );
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('user_id', _user!.id);
     await _repo.updateUserSettings(
@@ -528,9 +532,39 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  Future<String?> beginPasswordReset(String email) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail.isEmpty || !normalizedEmail.contains('@')) {
+      return AppStrings.invalidEmail(_language);
+    }
+    final user = await _repo.findUserByEmail(normalizedEmail);
+    if (user == null) {
+      return AppStrings.emailNotRegistered(_language);
+    }
+    if (user.isOnlineAccount) {
+      return AppStrings.localPasswordResetUnavailable(_language);
+    }
+    return null;
+  }
+
+  Future<String?> completeLocalPasswordReset(
+    String email,
+    String newPassword,
+  ) async {
+    if (newPassword.length < 6) {
+      return AppStrings.passwordTooShort(_language);
+    }
+    final normalizedEmail = email.trim().toLowerCase();
+    final ok = await _repo.resetPasswordByEmail(normalizedEmail, newPassword);
+    if (!ok) return AppStrings.emailNotRegistered(_language);
+    return null;
+  }
+
   Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('user_id');
+    _language = AppLanguage.english;
+    _ttsSpeed = TtsSpeedOptions.defaultSpeed;
     _user = null;
     _categories = [];
     _phrases = [];
@@ -812,6 +846,22 @@ class AppState extends ChangeNotifier {
     );
   }
 
+  Future<List<ClassLesson>> getEnrolledClassLessons(int classId) async {
+    if (_user == null || !_user!.isLearner) return [];
+    return _repo.getEnrolledClassLessons(
+      learnerUserId: _user!.id,
+      classId: classId,
+    );
+  }
+
+  Future<List<LessonPhrase>> getEnrolledLessonPhrases(int lessonId) async {
+    if (_user == null || !_user!.isLearner) return [];
+    return _repo.getEnrolledLessonPhrases(
+      learnerUserId: _user!.id,
+      lessonId: lessonId,
+    );
+  }
+
   Future<ClassLesson?> createClassLesson(int classId, String title) async {
     if (_user == null || !_user!.isTeacher) return null;
     return _repo.createClassLesson(
@@ -895,8 +945,14 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  /// Reload enrolled classes from DB and refresh listeners.
+  Future<void> refreshEnrolledClasses() async {
+    await _loadEnrolledClasses();
+    notifyListeners();
+  }
+
   /// Call after UI that triggered enroll has closed (avoids rebuild during dialog).
-  void notifyEnrolledClassesChanged() => notifyListeners();
+  Future<void> notifyEnrolledClassesChanged() => refreshEnrolledClasses();
 
   Future<String?> leaveClass(int classId) async {
     if (_user == null || !_user!.isLearner) {
@@ -1088,7 +1144,7 @@ class AppState extends ChangeNotifier {
     _spokenWordEnd = -1;
     _startReadAlongFallback();
     notifyListeners();
-    final ok = await tts.speak(spoken, rate: _ttsSpeed, lang: _language);
+    final ok = await tts.speak(spoken, rate: ttsSpeed, lang: _language);
     if (!ok) {
       _resetSpeechTracking();
       notifyListeners();

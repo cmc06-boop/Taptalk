@@ -18,6 +18,7 @@ class PhraseCard extends StatelessWidget {
     required this.onFavorite,
     required this.isFavorite,
     this.showFavorite = true,
+    this.showDelete = true,
     this.dense = false,
   });
 
@@ -28,6 +29,7 @@ class PhraseCard extends StatelessWidget {
   final VoidCallback onFavorite;
   final bool isFavorite;
   final bool showFavorite;
+  final bool showDelete;
   final bool dense;
 
   @override
@@ -150,29 +152,31 @@ class PhraseCard extends StatelessWidget {
                               ),
                       ),
                     ),
-                    SizedBox(width: dense ? AppSpacing.xs : AppSpacing.sm),
-                    Material(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(
-                        dense ? 8 : AppSpacing.radiusSm,
-                      ),
-                      elevation: 0,
-                      child: InkWell(
-                        onTap: onDelete,
+                    if (showDelete) ...[
+                      SizedBox(width: dense ? AppSpacing.xs : AppSpacing.sm),
+                      Material(
+                        color: Colors.white,
                         borderRadius: BorderRadius.circular(
                           dense ? 8 : AppSpacing.radiusSm,
                         ),
-                        child: SizedBox(
-                          width: actionHeight,
-                          height: actionHeight,
-                          child: Icon(
-                            Icons.delete_outline_rounded,
-                            size: dense ? 15 : 18,
-                            color: const Color(0xFF5C3D2E),
+                        elevation: 0,
+                        child: InkWell(
+                          onTap: onDelete,
+                          borderRadius: BorderRadius.circular(
+                            dense ? 8 : AppSpacing.radiusSm,
+                          ),
+                          child: SizedBox(
+                            width: actionHeight,
+                            height: actionHeight,
+                            child: Icon(
+                              Icons.delete_outline_rounded,
+                              size: dense ? 15 : 18,
+                              color: const Color(0xFF5C3D2E),
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ),

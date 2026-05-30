@@ -14,6 +14,7 @@ import 'screens/notifications_screen.dart';
 import 'screens/teacher_dashboard_screen.dart';
 import 'screens/teacher_monitoring_screen.dart';
 import 'screens/teacher_my_classes_screen.dart';
+import 'screens/forgot_password_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/register_screen.dart';
@@ -75,6 +76,8 @@ class TapTalkApp extends StatelessWidget {
         return const WelcomeScreen();
       case AppRoute.login:
         return const LoginScreen();
+      case AppRoute.forgotPassword:
+        return const ForgotPasswordScreen();
       case AppRoute.register:
       case AppRoute.chooseRole:
         return const RegisterScreen();
