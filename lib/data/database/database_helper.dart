@@ -28,7 +28,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 9,
+      version: 10,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE users (
@@ -114,6 +114,15 @@ class DatabaseHelper {
             'ON users(firebase_uid) WHERE firebase_uid IS NOT NULL',
           );
         }
+        if (oldVersion < 10) {
+          await db.execute(
+            'ALTER TABLE parent_notifications ADD COLUMN remote_id TEXT',
+          );
+          await db.execute(
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_parent_notifications_remote_id '
+            'ON parent_notifications(remote_id) WHERE remote_id IS NOT NULL',
+          );
+        }
       },
     );
   }
@@ -173,7 +182,8 @@ class DatabaseHelper {
         title TEXT NOT NULL,
         body TEXT NOT NULL,
         created_at INTEGER NOT NULL,
-        is_read INTEGER NOT NULL DEFAULT 0
+        is_read INTEGER NOT NULL DEFAULT 0,
+        remote_id TEXT
       )
     ''');
   }

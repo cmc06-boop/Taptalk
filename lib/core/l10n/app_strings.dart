@@ -1,3 +1,5 @@
+import '../../data/models/parent_notification.dart';
+
 enum AppLanguage { english, filipino }
 
 abstract final class AppStrings {
@@ -368,6 +370,124 @@ abstract final class AppStrings {
   static String alertStudent(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Alert' : 'Alert';
 
+  static String alertStudentConfirm(AppLanguage lang, String studentName) =>
+      lang == AppLanguage.filipino
+          ? 'Magpadala ng urgent alert sa mga magulang ni $studentName?'
+          : 'Send an urgent alert to $studentName\'s linked parents?';
+
+  static String alertSent(AppLanguage lang, String studentName) =>
+      lang == AppLanguage.filipino
+          ? 'Naipadala ang alert sa mga magulang ni $studentName.'
+          : 'Alert sent to $studentName\'s linked parents.';
+
+  static String alertNoLinkedParents(AppLanguage lang, String studentName) =>
+      lang == AppLanguage.filipino
+          ? 'Walang naka-link na magulang si $studentName.'
+          : 'No linked parents found for $studentName.';
+
+  static String alertNotAuthorized(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Hindi mo maaaring mag-alert sa mag-aaral na ito.'
+          : 'You cannot alert this student.';
+
+  static String loginNeedsInternet(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Kailangan ng internet para mag-log in sa online account na ito.'
+      : 'Internet is required to sign in to this online account.';
+
+  static String loginFailedTryAgain(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Hindi makapag-log in. Subukan muli o mag-sign up gamit ang bagong email.'
+      : 'Could not sign in. Try again or sign up with a new email on this phone.';
+
+  static String signUpFailedTryAgain(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Hindi makapag-sign up. Subukan muli o gumamit ng ibang email.'
+      : 'Could not sign up. Try again or use a different email.';
+
+  static String accountNotOnThisDevice(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'May Firebase account ang email na ito pero wala pa sa teleponong ito. Mag-sign up dito gamit ang parehong email at password.'
+      : 'This email has a cloud account but is not set up on this phone yet. Sign up here with the same email and password.';
+
+  static String smsSignInRequired(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Mag-log out at mag-log in muli para makapagpadala ng SMS alert.'
+      : 'Sign out and sign in again to send SMS alerts.';
+
+  static String smsEnrollmentSyncRequired(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Hindi naka-sync ang enrollment sa cloud. Mag-log in ang learner gamit internet, tapos i-enroll ulit sa class.'
+          : 'Enrollment is not synced to cloud. Learner must log in online and enroll in the class again.';
+
+  static String smsNoEmergencyContacts(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Walang emergency contact ang learner. Idagdag sa profile ng learner.'
+      : 'Learner has no emergency contacts. Add them in the learner profile.';
+
+  static String inAppNeedsInternet(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Kailangan ng internet ang in-app alert sa magulang. Naipadala (o inihanda) ang SMS sa emergency contacts.'
+      : 'In-app parent alerts need internet. SMS was sent (or opened) for emergency contacts.';
+
+  static String smsSentViaPhone(AppLanguage lang, int sent, int attempted) =>
+      lang == AppLanguage.filipino
+          ? 'SMS (cellular, walang internet): $sent/$attempted'
+          : 'SMS via phone signal (no internet): $sent/$attempted';
+
+  static String chooseAlertType(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Piliin ang uri ng alert'
+      : 'Choose alert type';
+
+  static String alertTypeLabel(AppLanguage lang, ParentAlertType type) =>
+      switch (type) {
+        ParentAlertType.needsAttention =>
+          lang == AppLanguage.filipino ? 'Needs attention' : 'Needs attention',
+        ParentAlertType.distress =>
+          lang == AppLanguage.filipino ? 'Behavior / Tantrums' : 'Behavior / Tantrums',
+        ParentAlertType.schoolNeeded => lang == AppLanguage.filipino
+            ? 'Need parent at school'
+            : 'Need parent at school',
+        ParentAlertType.teacherAlert =>
+          lang == AppLanguage.filipino ? 'General classroom concern' : 'General classroom concern',
+      };
+
+  static String teacherAlertTitle(
+    AppLanguage lang,
+    String teacherName,
+    String childName,
+    ParentAlertType type,
+  ) =>
+      switch (type) {
+        ParentAlertType.needsAttention => lang == AppLanguage.filipino
+            ? 'Kailangan ng atensyon si $childName'
+            : '$childName needs attention',
+        ParentAlertType.distress => lang == AppLanguage.filipino
+            ? 'Behavior concern para kay $childName'
+            : 'Behavior concern for $childName',
+        ParentAlertType.schoolNeeded => lang == AppLanguage.filipino
+            ? 'Kailangan sa paaralan si $childName'
+            : '$childName needs parent presence at school',
+        ParentAlertType.teacherAlert => lang == AppLanguage.filipino
+            ? 'Alert mula kay $teacherName — $childName'
+            : 'Alert from $teacherName — $childName',
+      };
+
+  static String teacherAlertBody(
+    AppLanguage lang,
+    String teacherName,
+    String className,
+    String childName,
+    ParentAlertType type,
+  ) =>
+      switch (type) {
+        ParentAlertType.needsAttention => lang == AppLanguage.filipino
+            ? '$teacherName reports na kailangan ng agarang atensyon si $childName sa $className. Pakicheck in agad.'
+            : '$teacherName reports that $childName needs immediate attention in $className. Please check in soon.',
+        ParentAlertType.distress => lang == AppLanguage.filipino
+            ? '$teacherName reports behavior/tantrum concerns for $childName sa $className. Kailangan ng support ninyo.'
+            : '$teacherName reports behavior/tantrum concerns for $childName in $className and needs your support.',
+        ParentAlertType.schoolNeeded => lang == AppLanguage.filipino
+            ? '$teacherName requests parent presence for $childName sa $className. Pakiusap na pumunta o tumawag agad.'
+            : '$teacherName requests parent presence for $childName in $className. Please come to school or call as soon as possible.',
+        ParentAlertType.teacherAlert => lang == AppLanguage.filipino
+            ? 'Nagpadala si $teacherName ng urgent alert para kay $childName sa $className. Pakitingnan agad.'
+            : '$teacherName sent an urgent alert for $childName in $className. Please check in as soon as you can.',
+      };
+
   static String alertStudentSoon(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Paparating na ang alert sa magulang.'
       : 'Parent alert coming soon.';
@@ -477,8 +597,64 @@ abstract final class AppStrings {
 
   static String localPasswordResetUnavailable(AppLanguage lang) =>
       lang == AppLanguage.filipino
-          ? 'Hindi ma-reset ang account na ito dito. Gumawa ng bagong account.'
-          : 'This account cannot be reset here. Please create a new account.';
+          ? 'Kailangan ng internet para magpadala ng reset link sa email.'
+          : 'Internet is required to send a reset link to your email.';
+
+  static String passwordResetEmailFailed(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Hindi maipadala ang reset link. Suriin ang email at subukan muli.'
+          : 'Could not send reset link. Check the email and try again.';
+
+  static String ok(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'OK' : 'OK';
+
+  static String successTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Tagumpay' : 'Success';
+
+  static String somethingWentWrong(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'May nangyaring mali'
+          : 'Something went wrong';
+
+  static String profileUpdatedTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Na-update ang profile' : 'Profile updated';
+
+  static String passwordUpdatedTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Na-update ang password'
+          : 'Password updated';
+
+  static String classEnrolledTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Naka-enroll na' : 'Enrolled';
+
+  static String leftClassTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Umalis sa class' : 'Left class';
+
+  static String classCreatedTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Nagawa ang class' : 'Class created';
+
+  static String classDeletedTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Natanggal ang class' : 'Class deleted';
+
+  static String childLinkedTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Naka-link na' : 'Child linked';
+
+  static String childUnlinkedTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Na-unlink na' : 'Child unlinked';
+
+  static String lessonCreatedTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Nagawa ang lesson' : 'Lesson created';
+
+  static String copiedTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Nakopya' : 'Copied';
+
+  static String alertSentTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Naipadala ang alert' : 'Alert sent';
+
+  static String alertFailedTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Hindi maipadala'
+          : 'Unable to send';
 
   static String signUp(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Mag-sign up' : 'Sign up';
@@ -508,6 +684,14 @@ abstract final class AppStrings {
 
   static String hereWeGo(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Tara na!' : 'Here we go!';
+
+  static String welcomeHeadline(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Maligayang pagdating'
+      : 'Welcome';
+
+  static String welcomeTagline(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Ang iyong boses — isang tap lang.'
+      : 'Your voice — just one tap away.';
 
   static String profile(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Profile' : 'Profile';

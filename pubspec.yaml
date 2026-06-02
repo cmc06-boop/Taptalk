@@ -23,6 +23,15 @@ dependencies:
   crypto: ^3.0.6
   uuid: ^4.5.1
   intl: ^0.20.2
+  firebase_core: ^4.9.0
+  firebase_auth: ^6.5.1
+  cloud_firestore: ^6.4.1
+  cloud_functions: ^6.3.1
+  http: ^1.2.2
+  connectivity_plus: ^6.1.4
+  telephony: ^0.2.0
+  permission_handler: ^11.4.0
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:

@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
-import '../core/utils/class_display_name.dart';
 import '../data/models/class_lesson.dart';
 import '../data/models/enrolled_class_model.dart';
 import '../providers/app_state.dart';
@@ -68,7 +67,6 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
     final theme = app.theme;
     final lang = app.language;
     final enrolled = widget.enrolledClass;
-    final parsed = parseClassDisplayName(enrolled.className);
 
     return LearnerScaffold(
       title: AppStrings.appName(lang),
@@ -89,24 +87,15 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  parsed.subject,
+                  enrolled.className,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.poppins(
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
                     color: theme.textMain,
                   ),
                 ),
-                if (parsed.gradeSection.isNotEmpty) ...[
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    parsed.gradeSection,
-                    style: GoogleFonts.poppins(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: theme.textMain.withValues(alpha: 0.75),
-                    ),
-                  ),
-                ],
                 const SizedBox(height: AppSpacing.md),
                 Text(
                   enrolled.teacherName,

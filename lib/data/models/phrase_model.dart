@@ -1,3 +1,11 @@
+bool _readBoolFlag(Object? value, {required bool defaultValue}) {
+  if (value == null) return defaultValue;
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  if (value is String) return value == '1' || value.toLowerCase() == 'true';
+  return defaultValue;
+}
+
 class PhraseModel {
   const PhraseModel({
     required this.id,
@@ -54,8 +62,8 @@ class PhraseModel {
       text: map['phrase_text'] as String,
       categoryKey: map['category_key'] as String,
       imagePath: map['image_path'] as String?,
-      isBuiltin: (map['is_builtin'] as int? ?? 0) == 1,
-      isActive: (map['is_active'] as int? ?? 1) == 1,
+      isBuiltin: _readBoolFlag(map['is_builtin'], defaultValue: false),
+      isActive: _readBoolFlag(map['is_active'], defaultValue: true),
     );
   }
 }

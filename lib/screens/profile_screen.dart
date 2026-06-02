@@ -9,6 +9,7 @@ import '../core/theme/theme_tokens.dart';
 import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/panel_card.dart';
+import '../widgets/taptalk_result_dialog.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -126,7 +127,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (!mounted) return;
     setState(() => _saving = false);
     if (err != null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+      await TapTalkResultDialog.showError(
+        context,
+        title: AppStrings.somethingWentWrong(lang),
+        message: err,
+      );
       return;
     }
     _savedName = _nameController.text.trim();
@@ -134,10 +139,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _savedEmergencyContacts = List.from(contacts);
     }
     _editing = false;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(AppStrings.profileUpdated(lang))),
-    );
     setState(() {});
+    await TapTalkResultDialog.showSuccess(
+      context,
+      title: AppStrings.profileUpdatedTitle(lang),
+      message: AppStrings.profileUpdated(lang),
+    );
   }
 
   Future<void> _showEditPassword(AppState app, AppLanguage lang) async {
@@ -146,8 +153,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       builder: (ctx) => _EditPasswordDialog(app: app, lang: lang),
     );
     if (!mounted || updated != true) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(AppStrings.passwordUpdated(lang))),
+    await TapTalkResultDialog.showSuccess(
+      context,
+      title: AppStrings.passwordUpdatedTitle(lang),
+      message: AppStrings.passwordUpdated(lang),
     );
   }
 
@@ -358,12 +367,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       FilledButton(
                         onPressed: app.profileCode.isEmpty
                             ? null
-                            : () {
-                                Clipboard.setData(
+                            : () async {
+                                await Clipboard.setData(
                                   ClipboardData(text: app.profileCode),
                                 );
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text(AppStrings.copied(lang))),
+                                if (!context.mounted) return;
+                                await TapTalkResultDialog.showSuccess(
+                                  context,
+                                  title: AppStrings.copiedTitle(lang),
+                                  message: AppStrings.copied(lang),
                                 );
                               },
                         style: FilledButton.styleFrom(
@@ -390,82 +402,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(height: AppSpacing.sm),
                   Text(
                     AppStrings.profileCodeHint(lang),
-                    style: GoogleFonts.poppins(
-                      fontSize: 11,
-                      color: theme.textMain.withValues(alpha: 0.62),
-                      height: 1.4,
-                    ),
-                  ),
-                ],
-                if (user?.isTeacher ?? false) ...[
-                  const SizedBox(height: AppSpacing.md),
-                  Text(
-                    AppStrings.classCode(lang),
-                    style: GoogleFonts.poppins(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.6,
-                      color: theme.textMain.withValues(alpha: 0.65),
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  for (final teacherClass in app.teacherClasses) ...[
-                    Text(
-                      teacherClass.name,
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: theme.textMain.withValues(alpha: 0.8),
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            teacherClass.code,
-                            style: GoogleFonts.poppins(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                              color: theme.textMain,
-                            ),
-                          ),
-                        ),
-                        FilledButton(
-                          onPressed: () {
-                            Clipboard.setData(
-                              ClipboardData(text: teacherClass.code),
-                            );
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text(AppStrings.copied(lang))),
-                            );
-                          },
-                          style: FilledButton.styleFrom(
-                            backgroundColor: theme.bgAccent,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.lg,
-                              vertical: AppSpacing.sm,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.circular(AppSpacing.radiusSm),
-                            ),
-                          ),
-                          child: Text(
-                            AppStrings.copy(lang),
-                            style: GoogleFonts.poppins(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                  ],
-                  Text(
-                    AppStrings.classCodeHint(lang),
                     style: GoogleFonts.poppins(
                       fontSize: 11,
                       color: theme.textMain.withValues(alpha: 0.62),

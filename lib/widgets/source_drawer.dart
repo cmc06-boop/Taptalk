@@ -227,10 +227,14 @@ class _DrawerItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = theme.bgAccent;
-    final textColor = active ? accent : theme.textMain;
+    final accentStrong = theme.accentEmphasis;
+    final textColor = active ? accentStrong : theme.textMain.withValues(alpha: 0.78);
     final iconBg = active
-        ? accent.withValues(alpha: 0.20)
+        ? Color.lerp(Colors.white, accent, 0.48)!
         : Colors.white.withValues(alpha: 0.22);
+    final rowHighlight = active
+        ? Color.lerp(Colors.white, accent, 0.34)!
+        : Colors.transparent;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -264,13 +268,11 @@ class _DrawerItem extends StatelessWidget {
                     vertical: AppSpacing.md,
                   ),
                   decoration: BoxDecoration(
-                    color: active
-                        ? accent.withValues(alpha: 0.14)
-                        : Colors.transparent,
+                    color: rowHighlight,
                     borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
                     border: Border.all(
                       color: active
-                          ? accent.withValues(alpha: 0.35)
+                          ? accent.withValues(alpha: 0.55)
                           : Colors.transparent,
                       width: 1,
                     ),
@@ -284,6 +286,11 @@ class _DrawerItem extends StatelessWidget {
                           color: iconBg,
                           borderRadius:
                               BorderRadius.circular(AppSpacing.radiusSm),
+                          border: active
+                              ? Border.all(
+                                  color: Colors.white.withValues(alpha: 0.75),
+                                )
+                              : null,
                         ),
                         child: Icon(
                           icon,
@@ -298,7 +305,7 @@ class _DrawerItem extends StatelessWidget {
                           style: GoogleFonts.poppins(
                             fontSize: 14,
                             fontWeight:
-                                active ? FontWeight.w700 : FontWeight.w600,
+                                active ? FontWeight.w800 : FontWeight.w600,
                             color: textColor,
                           ),
                         ),

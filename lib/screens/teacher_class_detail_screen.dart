@@ -9,6 +9,7 @@ import '../core/theme/theme_tokens.dart';
 import '../data/models/class_lesson.dart';
 import '../providers/app_state.dart';
 import '../widgets/create_lesson_dialog.dart';
+import '../widgets/taptalk_result_dialog.dart';
 import '../widgets/learner_scaffold.dart';
 import 'lesson_editor_screen.dart';
 
@@ -52,15 +53,16 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
 
   Future<void> _createLesson() async {
     final lang = context.read<AppState>().language;
-    final messenger = ScaffoldMessenger.of(context);
     final created = await CreateLessonDialog.show(
       context,
       classId: widget.classId,
     );
     if (!mounted || created != true) return;
     await _load();
-    messenger.showSnackBar(
-      SnackBar(content: Text(AppStrings.lessonCreated(lang))),
+    await TapTalkResultDialog.showSuccess(
+      context,
+      title: AppStrings.lessonCreatedTitle(lang),
+      message: AppStrings.lessonCreated(lang),
     );
   }
 
@@ -107,11 +109,14 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
     ).then((_) => _load());
   }
 
-  void _copyCode() {
+  Future<void> _copyCode() async {
     final lang = context.read<AppState>().language;
-    Clipboard.setData(ClipboardData(text: widget.classCode));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(AppStrings.copied(lang))),
+    await Clipboard.setData(ClipboardData(text: widget.classCode));
+    if (!mounted) return;
+    await TapTalkResultDialog.showSuccess(
+      context,
+      title: AppStrings.copiedTitle(lang),
+      message: AppStrings.copied(lang),
     );
   }
 
@@ -142,6 +147,8 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
                   Expanded(
                     child: Text(
                       widget.className,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.poppins(
                         fontSize: 22,
                         fontWeight: FontWeight.w800,

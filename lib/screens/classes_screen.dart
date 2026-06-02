@@ -5,10 +5,10 @@ import 'package:provider/provider.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
-import '../core/utils/class_display_name.dart';
 import '../data/models/enrolled_class_model.dart';
 import '../providers/app_state.dart';
 import '../widgets/enroll_class_dialog.dart';
+import '../widgets/taptalk_result_dialog.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/panel_card.dart';
 import 'learner_class_detail_screen.dart';
@@ -23,8 +23,10 @@ class ClassesScreen extends StatelessWidget {
     final app = context.read<AppState>();
     final lang = app.language;
     app.notifyEnrolledClassesChanged();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(AppStrings.classEnrolled(lang))),
+    await TapTalkResultDialog.showSuccess(
+      context,
+      title: AppStrings.classEnrolledTitle(lang),
+      message: AppStrings.classEnrolled(lang),
     );
   }
 
@@ -57,14 +59,18 @@ class ClassesScreen extends StatelessWidget {
     final err = await app.leaveClass(classId);
     if (!context.mounted) return;
     if (err != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(err)),
+      await TapTalkResultDialog.showError(
+        context,
+        title: AppStrings.somethingWentWrong(lang),
+        message: err,
       );
       return;
     }
     app.notifyEnrolledClassesChanged();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(AppStrings.leftClass(lang))),
+    await TapTalkResultDialog.showSuccess(
+      context,
+      title: AppStrings.leftClassTitle(lang),
+      message: AppStrings.leftClass(lang),
     );
   }
 
@@ -194,8 +200,6 @@ class _EnrolledClassCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final parsed = parseClassDisplayName(enrolled.className);
-
     return PanelCard(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -212,24 +216,15 @@ class _EnrolledClassCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        parsed.subject,
+                        enrolled.className,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.poppins(
                           fontSize: 16,
                           fontWeight: FontWeight.w800,
                           color: theme.textMain,
                         ),
                       ),
-                      if (parsed.gradeSection.isNotEmpty) ...[
-                        const SizedBox(height: AppSpacing.xs),
-                        Text(
-                          parsed.gradeSection,
-                          style: GoogleFonts.poppins(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: theme.textMain.withValues(alpha: 0.75),
-                          ),
-                        ),
-                      ],
                       const SizedBox(height: AppSpacing.md),
                       Text(
                         enrolled.teacherName,

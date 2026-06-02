@@ -6,9 +6,10 @@ import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../providers/app_state.dart';
 import '../widgets/taptalk_logo.dart';
+import '../widgets/taptalk_result_dialog.dart';
 import '../widgets/taptalk_shell.dart';
 
-enum _ForgotStep { enterEmail, setPassword, done }
+enum _ForgotStep { enterEmail, setPassword, checkEmail }
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -48,20 +49,25 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       _busy = true;
     });
 
-    final err = await context.read<AppState>().beginPasswordReset(email);
+    final outcome =
+        await context.read<AppState>().beginPasswordReset(email);
     if (!mounted) return;
 
-    if (err != null) {
+    if (outcome.error != null) {
       setState(() {
         _busy = false;
-        _error = err;
+        _error = outcome.error;
       });
       return;
     }
 
     setState(() {
       _busy = false;
-      _step = _ForgotStep.setPassword;
+      if (outcome.emailSent) {
+        _step = _ForgotStep.checkEmail;
+      } else {
+        _step = _ForgotStep.setPassword;
+      }
     });
   }
 
@@ -95,10 +101,14 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       return;
     }
 
-    setState(() {
-      _busy = false;
-      _step = _ForgotStep.done;
-    });
+    setState(() => _busy = false);
+    await TapTalkResultDialog.showSuccess(
+      context,
+      title: AppStrings.passwordUpdatedTitle(lang),
+      message: AppStrings.passwordResetSuccess(lang),
+    );
+    if (!mounted) return;
+    context.read<AppState>().setRoute(AppRoute.login);
   }
 
   String _subtitle(AppLanguage lang) {
@@ -107,8 +117,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         return AppStrings.forgotPasswordHint(lang);
       case _ForgotStep.setPassword:
         return AppStrings.setNewPasswordHint(lang);
-      case _ForgotStep.done:
-        return AppStrings.passwordResetSuccess(lang);
+      case _ForgotStep.checkEmail:
+        return AppStrings.passwordResetEmailSent(lang);
     }
   }
 
@@ -128,6 +138,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
           final contentTop = compactHeight ? 16.0 : 22.0;
           final sectionGap = compactHeight ? 12.0 : 16.0;
           final fieldGap = compactHeight ? 10.0 : 14.0;
+          final isCheckEmail = _step == _ForgotStep.checkEmail;
 
           return Column(
             children: [
@@ -200,6 +211,24 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                             ),
                           ),
                           Center(child: TapTalkLogo(size: logoSize)),
+                          if (isCheckEmail) ...[
+                            const SizedBox(height: AppSpacing.md),
+                            Center(
+                              child: Container(
+                                width: 54,
+                                height: 54,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFFE8F7EE),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.mark_email_read_outlined,
+                                  size: 30,
+                                  color: Color(0xFF2E7D32),
+                                ),
+                              ),
+                            ),
+                          ],
                           SizedBox(height: sectionGap),
                           Text(
                             AppStrings.forgotPasswordTitle(lang),
@@ -216,13 +245,12 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                             textAlign: TextAlign.center,
                             style: GoogleFonts.poppins(
                               fontSize: 13,
-                              color: _step == _ForgotStep.done
+                              color: isCheckEmail
                                   ? const Color(0xFF2E7D32)
                                   : const Color(0xFF5A6B63),
                               height: 1.45,
-                              fontWeight: _step == _ForgotStep.done
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
+                              fontWeight:
+                                  isCheckEmail ? FontWeight.w600 : FontWeight.w400,
                             ),
                           ),
                           if (_error != null) ...[
@@ -280,7 +308,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                                 label: AppStrings.saveNewPassword(lang),
                               ),
                             ),
-                          if (_step == _ForgotStep.done)
+                          if (isCheckEmail)
                             FilledButton(
                               onPressed: () => app.setRoute(AppRoute.login),
                               style: _primaryButtonStyle(compactHeight),
@@ -293,7 +321,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                               ),
                             ),
                           SizedBox(height: compactHeight ? 10 : 14),
-                          if (_step != _ForgotStep.done)
+                          if (_step != _ForgotStep.checkEmail)
                             TextButton(
                               onPressed: _busy
                                   ? null

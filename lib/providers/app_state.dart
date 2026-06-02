@@ -20,14 +20,23 @@ import '../data/models/favorite_model.dart';
 import '../data/models/history_model.dart';
 import '../data/models/enrolled_class_model.dart';
 import '../data/models/linked_child_model.dart';
+import '../data/models/password_reset_outcome.dart';
 import '../data/models/parent_notification.dart';
 import '../data/models/phrase_model.dart';
 import '../data/models/phrase_usage_stat.dart';
 import '../data/models/class_lesson.dart';
 import '../data/models/lesson_phrase.dart';
+import '../data/models/sms_alert_result.dart';
+import '../data/models/teacher_alert_result.dart';
 import '../data/models/teacher_class_student.dart';
 import '../data/models/user_model.dart';
 import '../data/repositories/app_repository.dart';
+import '../services/firebase_service.dart';
+import '../services/firestore_notification_backend.dart';
+import '../services/notification_sync_service.dart';
+import '../services/device_sms_service.dart';
+import '../services/network_status.dart';
+import '../services/sms_alert_service.dart';
 import '../services/tts_service.dart';
 
 enum AppRoute {
@@ -59,6 +68,12 @@ class AppState extends ChangeNotifier {
 
   final AppRepository _repo = AppRepository(DatabaseHelper.instance);
   final TtsService tts = TtsService();
+  final SmsAlertService _smsAlert = SmsAlertService();
+  final DeviceSmsService _deviceSms = DeviceSmsService();
+  late final NotificationSyncService _notificationSync = NotificationSyncService(
+    repository: _repo,
+    cloudBackend: FirestoreNotificationBackend(),
+  );
 
   bool _loading = true;
   UserModel? _user;
@@ -109,6 +124,7 @@ class AppState extends ChangeNotifier {
       List.unmodifiable(_notifications);
   int get unreadNotificationCount =>
       _notifications.where((n) => !n.isRead).length;
+  bool get isCloudNotificationsAvailable => _notificationSync.isCloudAvailable;
   List<EnrolledClassModel> get enrolledClasses => _enrolledClasses;
   List<({int id, String name, String code})> get teacherClasses =>
       _teacherClasses;
@@ -211,12 +227,18 @@ class AppState extends ChangeNotifier {
 
   Future<void> _init() async {
     try {
+      await FirebaseService.instance.initialize();
+      await _notificationSync.initialize();
       final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getInt('user_id');
       await tts.init();
 
       if (userId != null) {
         _user = await _repo.findUserById(userId);
+      }
+
+      if (_user != null) {
+        await _syncFirebaseSessionAfterRestore();
       }
 
       if (_user != null) {
@@ -246,8 +268,11 @@ class AppState extends ChangeNotifier {
         }
     } catch (e, st) {
       debugPrint('TapTalk init failed: $e\n$st');
-      _route = AppRoute.welcome;
+      if (_user == null) _route = AppRoute.welcome;
     } finally {
+      if (_user == null) {
+        _route = AppRoute.welcome;
+      }
       _loading = false;
       notifyListeners();
     }
@@ -275,7 +300,7 @@ class AppState extends ChangeNotifier {
     await prefs.setBool(_categoryOnboardingKey(userId), done);
   }
 
-  Future<void> _loadLearnerData() async {
+  Future<void> _loadLearnerData({bool cloudSyncInBackground = false}) async {
     if (_user == null) return;
     final settings = await _repo.getUserSettings(_user!.id);
     _ttsSpeed = TtsSpeedOptions.snap(
@@ -298,7 +323,12 @@ class AppState extends ChangeNotifier {
 
     if (_user!.isLearner) {
       _profileCode = await _repo.ensureLearnerProfileCode(_user!.id);
-      await _loadEnrolledClasses();
+      _enrolledClasses = await _repo.getEnrolledClasses(_user!.id);
+      if (cloudSyncInBackground) {
+        unawaited(_syncLearnerCloudData());
+      } else {
+        await _syncLearnerCloudData();
+      }
     } else {
       _profileCode = '';
       _enrolledClasses = [];
@@ -312,6 +342,25 @@ class AppState extends ChangeNotifier {
     if (_categories.isNotEmpty &&
         !_categories.any((c) => c.key == _selectedCategoryKey)) {
       _selectedCategoryKey = _categories.first.key;
+    }
+  }
+
+  Future<void> _syncLearnerCloudData() async {
+    if (_user == null || !_user!.isLearner) return;
+    try {
+      final learnerFirebaseUid =
+          _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+      if (learnerFirebaseUid != null && learnerFirebaseUid.isNotEmpty) {
+        await _notificationSync.syncLearnerEmergencyContacts(
+          learnerUserId: _user!.id,
+          learnerName: _user!.fullName,
+          learnerFirebaseUid: learnerFirebaseUid,
+          contacts: _emergencyContacts,
+        );
+      }
+      await _resyncLearnerEnrollmentsToCloud();
+    } catch (e, st) {
+      debugPrint('Learner cloud sync failed: $e\n$st');
     }
   }
 
@@ -445,10 +494,78 @@ class AppState extends ChangeNotifier {
       ContentLocalization.themeName(themeKey, storedName, _language);
 
   Future<String?> login(String email, String password) async {
+    try {
+      return await _loginImpl(email, password);
+    } catch (e, st) {
+      debugPrint('Login error: $e\n$st');
+      return AppStrings.loginFailedTryAgain(_language);
+    }
+  }
+
+  Future<String?> _loginImpl(String email, String password) async {
     final normalizedEmail = email.trim().toLowerCase();
-    final ok = await _repo.verifyLogin(normalizedEmail, password);
-    if (!ok) return AppStrings.invalidEmailPassword(_language);
-    _user = await _repo.findUserByEmail(normalizedEmail);
+    var user = await _repo.findUserByEmail(normalizedEmail);
+    if (user == null) {
+      // Account may exist only in Firebase (e.g. from another device).
+      if (FirebaseService.instance.isAvailable) {
+        final uid = await FirebaseService.instance.signIn(
+          email: normalizedEmail,
+          password: password,
+        );
+        if (uid != null) {
+          return AppStrings.accountNotOnThisDevice(_language);
+        }
+      }
+      return AppStrings.invalidEmailPassword(_language);
+    }
+
+    final hasLocalPassword =
+        user.passwordHash != null && user.passwordHash!.isNotEmpty;
+
+    if (!hasLocalPassword || user.isOnlineAccount) {
+      if (!FirebaseService.instance.isAvailable) {
+        return AppStrings.loginNeedsInternet(_language);
+      }
+      final uid = await FirebaseService.instance.signIn(
+        email: normalizedEmail,
+        password: password,
+      );
+      if (uid == null) {
+        return AppStrings.invalidEmailPassword(_language);
+      }
+      if (!hasLocalPassword) {
+        await _repo.updatePasswordHash(user.id, password);
+        user = user.copyWith(passwordHash: AppRepository.hashPassword(password));
+      }
+      if (user.firebaseUid != uid) {
+        await _repo.linkFirebaseUid(user.id, uid);
+        user = user.copyWith(firebaseUid: uid);
+      }
+    } else {
+      final ok = await _repo.verifyLogin(normalizedEmail, password);
+      if (!ok) return AppStrings.invalidEmailPassword(_language);
+      if (FirebaseService.instance.isAvailable) {
+        final uid = await FirebaseService.instance.signIn(
+          email: normalizedEmail,
+          password: password,
+        );
+        if (uid != null && user.firebaseUid != uid) {
+          await _repo.linkFirebaseUid(user.id, uid);
+          user = user.copyWith(firebaseUid: uid);
+        } else if (uid == null &&
+            (user.firebaseUid == null || user.firebaseUid!.isEmpty)) {
+          unawaited(
+            _linkFirebaseAccountIfAvailable(
+              user: user,
+              email: normalizedEmail,
+              password: password,
+            ),
+          );
+        }
+      }
+    }
+
+    _user = user;
     if (_user == null) return AppStrings.loginFailed(_language);
 
     final prefs = await SharedPreferences.getInstance();
@@ -459,7 +576,6 @@ class AppState extends ChangeNotifier {
       _theme = TapTalkThemes.byKey(_user!.themeKey);
     }
     if (_user!.isLearner) {
-      await _loadLearnerData();
       if (_user!.needsTheme) {
         _route = AppRoute.chooseTheme;
       } else {
@@ -467,21 +583,34 @@ class AppState extends ChangeNotifier {
         _route = categoryDone ? AppRoute.home : AppRoute.chooseCategory;
       }
     } else if (_user!.isParent) {
-      await _loadLearnerData();
-      await _ensureStarterData();
-      await _loadLinkedChildren();
       _route = AppRoute.home;
     } else if (_user!.isTeacher) {
       _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
-      await _loadLearnerData();
-      await _ensureStarterData();
-      await _loadTeacherClasses();
       _route = AppRoute.teacherDashboard;
     } else {
       _route = AppRoute.login;
       return AppStrings.parentTeacherComingSoon(_language);
     }
+
     notifyListeners();
+
+    try {
+      if (_user!.isLearner) {
+        await _loadLearnerData(cloudSyncInBackground: true);
+      } else if (_user!.isParent) {
+        await _loadLearnerData(cloudSyncInBackground: true);
+        await _ensureStarterData();
+        await _loadLinkedChildren(syncCloudInBackground: true);
+      } else if (_user!.isTeacher) {
+        await _loadLearnerData(cloudSyncInBackground: true);
+        await _ensureStarterData();
+        await _loadTeacherClasses();
+      }
+      notifyListeners();
+    } catch (e, st) {
+      debugPrint('Post-login data load failed (session is saved): $e\n$st');
+    }
+
     return null;
   }
 
@@ -491,16 +620,67 @@ class AppState extends ChangeNotifier {
     required String password,
     required String role,
   }) async {
+    try {
+      return await _registerImpl(
+        fullName: fullName,
+        email: email,
+        password: password,
+        role: role,
+      );
+    } catch (e, st) {
+      debugPrint('Register error: $e\n$st');
+      return AppStrings.signUpFailedTryAgain(_language);
+    }
+  }
+
+  Future<String?> _registerImpl({
+    required String fullName,
+    required String email,
+    required String password,
+    required String role,
+  }) async {
     final normalizedEmail = email.trim().toLowerCase();
     final existing = await _repo.findUserByEmail(normalizedEmail);
     if (existing != null) return AppStrings.emailInUse(_language);
 
-    _user = await _repo.registerUser(
-      fullName: fullName,
-      email: normalizedEmail,
-      password: password,
-      role: role,
-    );
+    String? firebaseUid;
+    if (FirebaseService.instance.isAvailable) {
+      firebaseUid = await FirebaseService.instance.createAccount(
+        email: normalizedEmail,
+        password: password,
+      );
+      firebaseUid ??= await FirebaseService.instance.signIn(
+        email: normalizedEmail,
+        password: password,
+      );
+    }
+
+    try {
+      _user = await _repo.registerUser(
+        fullName: fullName,
+        email: normalizedEmail,
+        password: password,
+        role: role,
+        firebaseUid: firebaseUid,
+      );
+    } catch (e) {
+      debugPrint('registerUser database error: $e');
+      final msg = e.toString().toLowerCase();
+      if (msg.contains('unique') || msg.contains('constraint')) {
+        return AppStrings.emailInUse(_language);
+      }
+      rethrow;
+    }
+
+    if (firebaseUid == null && FirebaseService.instance.isAvailable) {
+      unawaited(
+        _linkFirebaseAccountIfAvailable(
+          user: _user!,
+          email: normalizedEmail,
+          password: password,
+        ),
+      );
+    }
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('user_id', _user!.id);
@@ -508,43 +688,81 @@ class AppState extends ChangeNotifier {
       _user!.id,
       language: _language == AppLanguage.filipino ? 'Filipino' : 'English',
     );
+
     if (role == 'learner') {
       _theme = TapTalkThemes.appDefault;
       await _setCategoryOnboardingDone(_user!.id, false);
-      await _loadLearnerData();
       _route = AppRoute.chooseTheme;
     } else if (role == 'parent') {
       _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
-      await _loadLearnerData();
-      await _ensureStarterData();
-      await _loadLinkedChildren();
       _route = AppRoute.home;
     } else if (role == 'teacher') {
       _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
-      await _loadLearnerData();
-      await _ensureStarterData();
-      await _loadTeacherClasses();
       _route = AppRoute.teacherDashboard;
     } else {
       _route = AppRoute.login;
     }
+
     notifyListeners();
+
+    try {
+      if (role == 'learner') {
+        await _loadLearnerData(cloudSyncInBackground: true);
+      } else if (role == 'parent') {
+        await _loadLearnerData(cloudSyncInBackground: true);
+        await _ensureStarterData();
+        await _loadLinkedChildren(syncCloudInBackground: true);
+      } else if (role == 'teacher') {
+        await _loadLearnerData(cloudSyncInBackground: true);
+        await _ensureStarterData();
+        await _loadTeacherClasses();
+      }
+      notifyListeners();
+    } catch (e, st) {
+      debugPrint('Post-register data load failed (account is saved): $e\n$st');
+    }
+
     return null;
   }
 
-  Future<String?> beginPasswordReset(String email) async {
+  Future<PasswordResetStartOutcome> beginPasswordReset(String email) async {
     final normalizedEmail = email.trim().toLowerCase();
     if (normalizedEmail.isEmpty || !normalizedEmail.contains('@')) {
-      return AppStrings.invalidEmail(_language);
+      return PasswordResetStartOutcome.error(
+        AppStrings.invalidEmail(_language),
+      );
     }
     final user = await _repo.findUserByEmail(normalizedEmail);
     if (user == null) {
-      return AppStrings.emailNotRegistered(_language);
+      return PasswordResetStartOutcome.error(
+        AppStrings.emailNotRegistered(_language),
+      );
     }
+
+    if (FirebaseService.instance.isAvailable) {
+      final sent = await FirebaseService.instance.sendPasswordResetEmail(
+        email: normalizedEmail,
+      );
+      if (sent) {
+        return PasswordResetStartOutcome.emailSent();
+      }
+      final hasLocalPassword =
+          user.passwordHash != null && user.passwordHash!.isNotEmpty;
+      if (hasLocalPassword) {
+        return PasswordResetStartOutcome.localPasswordStep();
+      }
+      return PasswordResetStartOutcome.error(
+        AppStrings.passwordResetEmailFailed(_language),
+      );
+    }
+
     if (user.isOnlineAccount) {
-      return AppStrings.localPasswordResetUnavailable(_language);
+      return PasswordResetStartOutcome.error(
+        AppStrings.localPasswordResetUnavailable(_language),
+      );
     }
-    return null;
+
+    return PasswordResetStartOutcome.localPasswordStep();
   }
 
   Future<String?> completeLocalPasswordReset(
@@ -561,6 +779,8 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    await _notificationSync.stopParentSync();
+    await FirebaseService.instance.signOut();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('user_id');
     _language = AppLanguage.english;
@@ -579,7 +799,7 @@ class AppState extends ChangeNotifier {
     _emergencyContacts = [];
     _profileCode = '';
     _resetSpeechTracking();
-    _route = AppRoute.login;
+    _route = AppRoute.welcome;
     _drawerOpen = false;
     notifyListeners();
   }
@@ -696,7 +916,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _loadLinkedChildren() async {
+  Future<void> _loadLinkedChildren({bool syncCloudInBackground = false}) async {
     if (_user == null || !_user!.isParent) {
       _linkedChildren = [];
       _selectedChildId = null;
@@ -710,6 +930,39 @@ class AppState extends ChangeNotifier {
       _selectedChildId = _linkedChildren.first.learnerId;
     }
     await _loadNotifications();
+    if (syncCloudInBackground) {
+      unawaited(_syncParentCloudAfterLogin());
+    } else {
+      await _syncLinkedChildrenToCloud();
+      await _startParentNotificationSync();
+    }
+  }
+
+  Future<void> _syncParentCloudAfterLogin() async {
+    try {
+      await _syncLinkedChildrenToCloud();
+      await _startParentNotificationSync();
+    } catch (e, st) {
+      debugPrint('Parent cloud sync after login failed: $e\n$st');
+    }
+  }
+
+  Future<void> _syncLinkedChildrenToCloud() async {
+    if (_user == null || !_user!.isParent || _linkedChildren.isEmpty) return;
+    final parentFirebaseUid =
+        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (parentFirebaseUid == null || parentFirebaseUid.isEmpty) return;
+    for (final child in _linkedChildren) {
+      final learner = await _repo.findUserById(child.learnerId);
+      final learnerFirebaseUid = learner?.firebaseUid;
+      if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) continue;
+      await _notificationSync.syncParentChildLink(
+        parentUserId: _user!.id,
+        learnerUserId: child.learnerId,
+        parentFirebaseUid: parentFirebaseUid,
+        learnerFirebaseUid: learnerFirebaseUid,
+      );
+    }
   }
 
   Future<void> _loadNotifications() async {
@@ -717,21 +970,72 @@ class AppState extends ChangeNotifier {
       _notifications = [];
       return;
     }
-    final childName = _linkedChildren.isNotEmpty
-        ? _linkedChildren.first.fullName
-        : (_language == AppLanguage.filipino ? 'ang iyong anak' : 'your child');
-    await _repo.seedParentNotificationsIfEmpty(
-      parentUserId: _user!.id,
-      childName: childName,
-      learnerUserId:
-          _linkedChildren.isNotEmpty ? _linkedChildren.first.learnerId : null,
-      filipino: _language == AppLanguage.filipino,
-    );
     _notifications = await _repo.getParentNotifications(_user!.id);
   }
 
+  Future<void> _startParentNotificationSync() async {
+    if (_user == null || !_user!.isParent) return;
+    final firebaseUid =
+        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (firebaseUid == null || firebaseUid.isEmpty) return;
+    await _notificationSync.startParentSync(
+      parentUserId: _user!.id,
+      parentFirebaseUid: firebaseUid,
+      onChanged: () async {
+        await _loadNotifications();
+        notifyListeners();
+      },
+    );
+  }
+
+  Future<void> _syncFirebaseSessionAfterRestore() async {
+    if (_user == null || !FirebaseService.instance.isAvailable) return;
+    final needsCloud = _user!.isTeacher ||
+        _user!.isParent ||
+        _user!.isOnlineAccount;
+    if (!needsCloud) return;
+
+    final restoredUid = await FirebaseService.instance.waitForAuthUid();
+    final expected = _user!.firebaseUid;
+    if (expected != null &&
+        expected.isNotEmpty &&
+        restoredUid != null &&
+        restoredUid != expected) {
+      debugPrint(
+        'Firebase UID mismatch after restore (db=$expected, auth=$restoredUid).',
+      );
+    }
+    if (expected != null &&
+        expected.isNotEmpty &&
+        restoredUid == null &&
+        (_user!.isTeacher || _user!.isParent)) {
+      debugPrint(
+        'No Firebase session for ${_user!.role}; SMS/cloud need sign-in again.',
+      );
+    }
+  }
+
+  Future<UserModel> _linkFirebaseAccountIfAvailable({
+    required UserModel user,
+    required String email,
+    required String password,
+  }) async {
+    if (!FirebaseService.instance.isAvailable) return user;
+    final uid = await FirebaseService.instance.signInOrCreateAccount(
+      email: email,
+      password: password,
+    );
+    if (uid == null || user.firebaseUid == uid) return user;
+    await _repo.linkFirebaseUid(user.id, uid);
+    return user.copyWith(firebaseUid: uid);
+  }
+
   Future<void> markNotificationRead(int notificationId) async {
+    final remoteId = await _repo.notificationRemoteId(notificationId);
     await _repo.markNotificationRead(notificationId);
+    if (remoteId != null) {
+      unawaited(_notificationSync.markRemoteNotificationRead(remoteId));
+    }
     final index = _notifications.indexWhere((n) => n.id == notificationId);
     if (index >= 0) {
       _notifications[index] =
@@ -742,7 +1046,12 @@ class AppState extends ChangeNotifier {
 
   Future<void> markAllNotificationsRead() async {
     if (_user == null || !_user!.isParent) return;
+    final remoteIds =
+        await _repo.unreadNotificationRemoteIds(_user!.id);
     await _repo.markAllNotificationsRead(_user!.id);
+    if (remoteIds.isNotEmpty) {
+      unawaited(_notificationSync.markAllRemoteNotificationsRead(remoteIds));
+    }
     _notifications = [
       for (final n in _notifications) n.copyWith(isRead: true),
     ];
@@ -780,6 +1089,20 @@ class AppState extends ChangeNotifier {
       return AppStrings.childAlreadyLinked(_language);
     }
     await _repo.linkParentToChild(_user!.id, learner.id);
+    final parentFirebaseUid =
+        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    final learnerFirebaseUid = learner.firebaseUid;
+    if (parentFirebaseUid != null &&
+        parentFirebaseUid.isNotEmpty &&
+        learnerFirebaseUid != null &&
+        learnerFirebaseUid.isNotEmpty) {
+      await _notificationSync.syncParentChildLink(
+        parentUserId: _user!.id,
+        learnerUserId: learner.id,
+        parentFirebaseUid: parentFirebaseUid,
+        learnerFirebaseUid: learnerFirebaseUid,
+      );
+    }
     await _loadLinkedChildren();
     _selectedChildId = learner.id;
     notifyListeners();
@@ -790,7 +1113,20 @@ class AppState extends ChangeNotifier {
     if (_user == null || !_user!.isParent) {
       return AppStrings.notSignedIn(_language);
     }
+    final learner = await _repo.findUserById(learnerId);
+    final parentFirebaseUid =
+        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    final learnerFirebaseUid = learner?.firebaseUid;
     await _repo.unlinkParentChild(_user!.id, learnerId);
+    if (parentFirebaseUid != null &&
+        parentFirebaseUid.isNotEmpty &&
+        learnerFirebaseUid != null &&
+        learnerFirebaseUid.isNotEmpty) {
+      await _notificationSync.unsyncParentChildLink(
+        parentFirebaseUid: parentFirebaseUid,
+        learnerFirebaseUid: learnerFirebaseUid,
+      );
+    }
     await _loadLinkedChildren();
     notifyListeners();
     return null;
@@ -911,9 +1247,252 @@ class AppState extends ChangeNotifier {
     );
   }
 
+  /// Local SQLite roster only — never blocks on Firestore (used by teacher UI).
+  Future<List<TeacherClassStudent>> getTeacherClassStudentsForClass(
+    int classId,
+  ) async {
+    if (_user == null || !_user!.isTeacher) return [];
+    return _repo.getTeacherClassStudentsForClass(
+      teacherUserId: _user!.id,
+      classId: classId,
+    );
+  }
+
   Future<List<TeacherClassStudent>> getTeacherClassStudents() async {
     if (_user == null || !_user!.isTeacher) return [];
-    return _repo.getTeacherClassStudents(_user!.id);
+    final local = await _repo.getTeacherClassStudents(_user!.id);
+    _scheduleTeacherEnrollmentCloudSync(local);
+    if (local.isNotEmpty) return local;
+
+    final teacherFirebaseUid =
+        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) {
+      return local;
+    }
+    try {
+      return await _notificationSync
+          .getTeacherClassStudentsFromCloud(teacherFirebaseUid)
+          .timeout(const Duration(seconds: 12));
+    } catch (e, st) {
+      debugPrint('Cloud teacher roster fetch failed: $e\n$st');
+      return local;
+    }
+  }
+
+  /// Background Firestore sync for SMS authorization (does not block UI).
+  void scheduleTeacherEnrollmentCloudSyncForClass(int classId) {
+    if (_user == null || !_user!.isTeacher) return;
+    unawaited(() async {
+      final students = await _repo.getTeacherClassStudentsForClass(
+        teacherUserId: _user!.id,
+        classId: classId,
+      );
+      _scheduleTeacherEnrollmentCloudSync(students);
+    }());
+  }
+
+  void _scheduleTeacherEnrollmentCloudSync(List<TeacherClassStudent> students) {
+    if (students.isEmpty) return;
+    final teacherFirebaseUid =
+        _user?.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) return;
+    unawaited(
+      _syncLocalEnrollmentsToCloud(
+        students,
+        teacherFirebaseUid: teacherFirebaseUid,
+      ),
+    );
+  }
+
+  Future<void> _syncLocalEnrollmentsToCloud(
+    List<TeacherClassStudent> students, {
+    required String teacherFirebaseUid,
+  }) async {
+    if (!_notificationSync.isCloudAvailable) return;
+    try {
+      for (final student in students) {
+        final learnerFirebaseUid =
+            await _repo.getFirebaseUidForUser(student.learnerId);
+        if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) continue;
+        await _notificationSync.syncClassEnrollment(
+          classId: student.classId,
+          classCode: student.classCode,
+          className: student.className,
+          teacherFirebaseUid: teacherFirebaseUid,
+          learnerUserId: student.learnerId,
+          learnerName: student.fullName,
+          learnerFirebaseUid: learnerFirebaseUid,
+        );
+      }
+    } catch (e, st) {
+      debugPrint('Cloud enrollment sync failed: $e\n$st');
+    }
+  }
+
+  Future<bool> _ensureClassEnrollmentSyncedForAlert({
+    required String teacherFirebaseUid,
+    required int learnerUserId,
+    required String learnerName,
+    required String learnerFirebaseUid,
+    required int classId,
+    required String className,
+  }) async {
+    if (!_notificationSync.isCloudAvailable) return false;
+    final classRow = await _repo.findClassById(classId);
+    if (classRow == null) return false;
+    final teacherUserId = classRow['teacher_user_id'] as int?;
+    if (_user == null || teacherUserId != _user!.id) return false;
+
+    await _notificationSync.syncClassEnrollment(
+      classId: classId,
+      classCode: (classRow['class_code'] as String?) ?? '',
+      className: (classRow['class_name'] as String?) ?? className,
+      teacherFirebaseUid: teacherFirebaseUid,
+      learnerUserId: learnerUserId,
+      learnerName: learnerName,
+      learnerFirebaseUid: learnerFirebaseUid,
+    );
+    return true;
+  }
+
+  Future<TeacherAlertDeliveryResult> sendTeacherAlert({
+    required int learnerUserId,
+    required String learnerName,
+    required int classId,
+    required String className,
+    required ParentAlertType alertType,
+  }) async {
+    if (_user == null || !_user!.isTeacher) {
+      return TeacherAlertDeliveryResult(
+        inAppError: AppStrings.notSignedIn(_language),
+        sms: SmsAlertResult.empty,
+      );
+    }
+
+    final title = AppStrings.teacherAlertTitle(
+      _language,
+      _user!.fullName,
+      learnerName,
+      alertType,
+    );
+    final body = AppStrings.teacherAlertBody(
+      _language,
+      _user!.fullName,
+      className,
+      learnerName,
+      alertType,
+    );
+
+    final result = await _notificationSync.sendTeacherAlert(
+      teacherUserId: _user!.id,
+      teacherName: _user!.fullName,
+      learnerUserId: learnerUserId,
+      learnerName: learnerName,
+      classId: classId,
+      className: className,
+      alertType: alertType,
+      title: title,
+      body: body,
+    );
+
+    final inAppError = switch (result.status) {
+      TeacherAlertStatus.sent => null,
+      TeacherAlertStatus.noLinkedParents =>
+        AppStrings.alertNoLinkedParents(_language, learnerName),
+      TeacherAlertStatus.notAuthorized =>
+        AppStrings.alertNotAuthorized(_language),
+    };
+
+    final contacts = await _repo.getEmergencyContactsForLearner(learnerUserId);
+    final smsText =
+        '[TapTalk] $title\n$body\nLearner: $learnerName\nClass: $className';
+
+    if (contacts.isEmpty) {
+      return TeacherAlertDeliveryResult(
+        inAppError: inAppError,
+        sms: SmsAlertResult(
+          attempted: 0,
+          sent: 0,
+          failed: 0,
+          errorMessage: AppStrings.smsNoEmergencyContacts(_language),
+        ),
+      );
+    }
+
+    final offline = await NetworkStatus.isOffline();
+    if (offline) {
+      final sms = await _deviceSms.sendEmergencyAlert(
+        rawContacts: contacts,
+        message: smsText,
+      );
+      return TeacherAlertDeliveryResult(
+        inAppError: inAppError ?? AppStrings.inAppNeedsInternet(_language),
+        sms: SmsAlertResult(
+          attempted: sms.attempted,
+          sent: sms.sent,
+          failed: sms.failed,
+          invalidContacts: sms.invalidContacts,
+          errorMessage: sms.errorMessage,
+          sentViaDevice: true,
+        ),
+      );
+    }
+
+    final learnerFirebaseUid = await _repo.getFirebaseUidForUser(learnerUserId);
+    SmsAlertResult sms = const SmsAlertResult(attempted: 0, sent: 0, failed: 0);
+
+    if (learnerFirebaseUid != null && learnerFirebaseUid.isNotEmpty) {
+      final authedUid = await FirebaseService.instance.ensureCallableAuth();
+      if (authedUid != null) {
+        await _ensureClassEnrollmentSyncedForAlert(
+          teacherFirebaseUid: authedUid,
+          learnerUserId: learnerUserId,
+          learnerName: learnerName,
+          learnerFirebaseUid: learnerFirebaseUid,
+          classId: classId,
+          className: className,
+        );
+        sms = await _smsAlert.sendTeacherSmsAlert(
+          learnerUserId: learnerUserId,
+          learnerName: learnerName,
+          learnerFirebaseUid: learnerFirebaseUid,
+          classId: classId,
+          className: className,
+          alertType: alertType.name,
+          title: title,
+          body: body,
+        );
+      } else {
+        sms = SmsAlertResult(
+          attempted: 0,
+          sent: 0,
+          failed: 0,
+          errorMessage: AppStrings.smsSignInRequired(_language),
+        );
+      }
+    }
+
+    if (!sms.isSuccess) {
+      final deviceSms = await _deviceSms.sendEmergencyAlert(
+        rawContacts: contacts,
+        message: smsText,
+      );
+      if (deviceSms.sent > 0 || deviceSms.errorMessage == null) {
+        sms = SmsAlertResult(
+          attempted: deviceSms.attempted,
+          sent: deviceSms.sent,
+          failed: deviceSms.failed,
+          invalidContacts: deviceSms.invalidContacts,
+          errorMessage: deviceSms.errorMessage,
+          sentViaDevice: true,
+        );
+      }
+    }
+
+    return TeacherAlertDeliveryResult(
+      inAppError: inAppError,
+      sms: sms,
+    );
   }
 
   Future<void> _loadEnrolledClasses() async {
@@ -922,6 +1501,31 @@ class AppState extends ChangeNotifier {
       return;
     }
     _enrolledClasses = await _repo.getEnrolledClasses(_user!.id);
+    await _resyncLearnerEnrollmentsToCloud();
+  }
+
+  Future<void> _resyncLearnerEnrollmentsToCloud() async {
+    if (_user == null || !_user!.isLearner || !_notificationSync.isCloudAvailable) {
+      return;
+    }
+    final learnerFirebaseUid =
+        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) return;
+
+    for (final enrolled in _enrolledClasses) {
+      final teacherFirebaseUid =
+          await _repo.getFirebaseUidForUser(enrolled.teacherId);
+      if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) continue;
+      await _notificationSync.syncClassEnrollment(
+        classId: enrolled.classId,
+        classCode: enrolled.classCode,
+        className: enrolled.className,
+        teacherFirebaseUid: teacherFirebaseUid,
+        learnerUserId: _user!.id,
+        learnerName: _user!.fullName,
+        learnerFirebaseUid: learnerFirebaseUid,
+      );
+    }
   }
 
   Future<String?> enrollByClassCode(String code) async {
@@ -941,6 +1545,26 @@ class AppState extends ChangeNotifier {
       return AppStrings.classAlreadyEnrolled(_language);
     }
     await _repo.enrollLearnerInClass(_user!.id, classId);
+    final learnerFirebaseUid =
+        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    final teacherUserId = classRow['teacher_user_id'] as int?;
+    final teacherFirebaseUid = teacherUserId == null
+        ? null
+        : await _repo.getFirebaseUidForUser(teacherUserId);
+    if (learnerFirebaseUid != null &&
+        learnerFirebaseUid.isNotEmpty &&
+        teacherFirebaseUid != null &&
+        teacherFirebaseUid.isNotEmpty) {
+      await _notificationSync.syncClassEnrollment(
+        classId: classId,
+        classCode: (classRow['class_code'] as String?) ?? '',
+        className: (classRow['class_name'] as String?) ?? '',
+        teacherFirebaseUid: teacherFirebaseUid,
+        learnerUserId: _user!.id,
+        learnerName: _user!.fullName,
+        learnerFirebaseUid: learnerFirebaseUid,
+      );
+    }
     await _loadEnrolledClasses();
     return null;
   }
@@ -958,7 +1582,19 @@ class AppState extends ChangeNotifier {
     if (_user == null || !_user!.isLearner) {
       return AppStrings.notSignedIn(_language);
     }
+    final classRow = await _repo.findClassById(classId);
+    final classCode = (classRow?['class_code'] as String?) ?? '';
+    final learnerFirebaseUid =
+        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
     await _repo.unenrollLearnerFromClass(_user!.id, classId);
+    if (classCode.isNotEmpty &&
+        learnerFirebaseUid != null &&
+        learnerFirebaseUid.isNotEmpty) {
+      await _notificationSync.unsyncClassEnrollment(
+        classCode: classCode,
+        learnerFirebaseUid: learnerFirebaseUid,
+      );
+    }
     await _loadEnrolledClasses();
     return null;
   }
@@ -1113,6 +1749,18 @@ class AppState extends ChangeNotifier {
         .toList();
     await _repo.updateEmergencyContacts(_user!.id, cleaned);
     _emergencyContacts = cleaned;
+    if (_user!.isLearner) {
+      final learnerFirebaseUid =
+          _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+      if (learnerFirebaseUid != null && learnerFirebaseUid.isNotEmpty) {
+        await _notificationSync.syncLearnerEmergencyContacts(
+          learnerUserId: _user!.id,
+          learnerName: _user!.fullName,
+          learnerFirebaseUid: learnerFirebaseUid,
+          contacts: cleaned,
+        );
+      }
+    }
     notifyListeners();
     return null;
   }

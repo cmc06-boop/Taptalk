@@ -5,9 +5,9 @@ import 'package:provider/provider.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../providers/app_state.dart';
+import 'taptalk_result_dialog.dart';
 
 /// Parent enters a child's profile code to link accounts.
-/// Owns its [TextEditingController] and performs linking before closing.
 class LinkChildDialog extends StatefulWidget {
   const LinkChildDialog({super.key});
 
@@ -63,63 +63,104 @@ class _LinkChildDialogState extends State<LinkChildDialog> {
       return;
     }
 
-    Navigator.of(context).pop(true);
+    if (!mounted) return;
+    final rootNav = Navigator.of(context, rootNavigator: true);
+    final rootContext = rootNav.context;
+    rootNav.pop(true);
+    if (!rootContext.mounted) return;
+    await TapTalkResultDialog.showSuccess(
+      rootContext,
+      title: AppStrings.childLinkedTitle(lang),
+      message: AppStrings.childLinked(lang),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final app = context.read<AppState>();
+    final app = context.watch<AppState>();
     final lang = app.language;
     final theme = app.theme;
 
-    return AlertDialog(
-      title: Text(
-        AppStrings.linkChildCode(lang),
-        style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
-      ),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TextField(
-              controller: _controller,
-              enabled: !_busy,
-              textCapitalization: TextCapitalization.characters,
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => _submit(),
-              onChanged: (_) {
-                if (_error != null) setState(() => _error = null);
-              },
-              decoration: InputDecoration(
-                hintText: AppStrings.enterChildCodeHint(lang),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+    return TapTalkDialogShell(
+      theme: theme,
+      title: AppStrings.linkChildCode(lang),
+      message: AppStrings.enterChildCodeHint(lang),
+      showMessage: false,
+      content: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            AppStrings.enterChildCodeHint(lang),
+            style: GoogleFonts.poppins(
+              fontSize: 13,
+              color: theme.textMain.withValues(alpha: 0.72),
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          TextField(
+            controller: _controller,
+            enabled: !_busy,
+            textCapitalization: TextCapitalization.characters,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _submit(),
+            onChanged: (_) {
+              if (_error != null) setState(() => _error = null);
+            },
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+            decoration: InputDecoration(
+              hintText: 'TT-XXXXXXXX',
+              filled: true,
+              fillColor: TapTalkDialogShell.sheetFill,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 12,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: TapTalkDialogShell.fieldBorder),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: TapTalkDialogShell.fieldBorder),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(
+                  color: theme.bgAccent.withValues(alpha: 0.7),
+                  width: 1.6,
                 ),
               ),
             ),
-            if (_error != null) ...[
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                _error!,
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  color: const Color(0xFFC62828),
-                ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              _error!,
+              style: GoogleFonts.poppins(
+                fontSize: 12,
+                color: TapTalkDialogShell.errorIcon,
               ),
-            ],
+            ),
           ],
-        ),
+        ],
       ),
       actions: [
         TextButton(
           onPressed: _busy ? null : () => Navigator.of(context).pop(),
-          child: Text(AppStrings.cancel(lang)),
+          child: Text(
+            AppStrings.cancel(lang),
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+          ),
         ),
         FilledButton(
           onPressed: _busy ? null : _submit,
           style: FilledButton.styleFrom(
-            backgroundColor: theme.bgAccent,
+            backgroundColor: Colors.black,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
           child: _busy
               ? const SizedBox(
@@ -130,7 +171,10 @@ class _LinkChildDialogState extends State<LinkChildDialog> {
                     color: Colors.white,
                   ),
                 )
-              : Text(AppStrings.add(lang)),
+              : Text(
+                  AppStrings.add(lang),
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
+                ),
         ),
       ],
     );

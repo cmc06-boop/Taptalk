@@ -28,6 +28,9 @@ class TapTalkThemeToken {
         error: const Color(0xFFC62828),
         onError: Colors.white,
       );
+
+  /// Darker accent for readable labels/icons on tinted surfaces (e.g. drawer).
+  Color get accentEmphasis => Color.lerp(bgAccent, textMain, 0.58)!;
 }
 
 abstract final class TapTalkThemes {

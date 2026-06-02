@@ -10,19 +10,14 @@ import '../data/models/monitored_learner.dart';
 import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/link_child_dialog.dart';
+import '../widgets/taptalk_result_dialog.dart';
 import 'child_monitoring_screen.dart';
 
 class MyChildScreen extends StatelessWidget {
   const MyChildScreen({super.key});
 
   Future<void> _showLinkChildDialog(BuildContext context) async {
-    final lang = context.read<AppState>().language;
-    final linked = await LinkChildDialog.show(context);
-    if (!context.mounted || linked != true) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(AppStrings.childLinked(lang))),
-    );
+    await LinkChildDialog.show(context);
   }
 
   void _openMonitoring(BuildContext context, LinkedChildModel child) {
@@ -60,8 +55,10 @@ class MyChildScreen extends StatelessWidget {
     if (confirm != true || !context.mounted) return;
     await app.unlinkChild(child.learnerId);
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(AppStrings.childUnlinked(lang))),
+    await TapTalkResultDialog.showSuccess(
+      context,
+      title: AppStrings.childUnlinkedTitle(lang),
+      message: AppStrings.childUnlinked(lang),
     );
   }
 
@@ -190,82 +187,75 @@ class _LinkedChildTile extends StatelessWidget {
         ],
       ),
       clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: onOpen,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.md,
-                  AppSpacing.md,
-                  AppSpacing.sm,
-                  AppSpacing.md,
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: theme.bgAccent.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          AppSpacing.md,
+          AppSpacing.sm,
+          AppSpacing.md,
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: onOpen,
+                  borderRadius: BorderRadius.circular(10),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: theme.bgAccent.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.child_care_outlined,
+                          color: theme.bgAccent,
+                          size: 22,
+                        ),
                       ),
-                      child: Icon(
-                        Icons.child_care_outlined,
-                        color: theme.bgAccent,
-                        size: 22,
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            child.fullName,
-                            style: GoogleFonts.poppins(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              color: theme.textMain,
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              child.fullName,
+                              style: GoogleFonts.poppins(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: theme.textMain,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            AppStrings.viewMonitoring(lang),
-                            style: GoogleFonts.poppins(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                              color: theme.bgAccent,
+                            const SizedBox(height: 2),
+                            Text(
+                              AppStrings.viewMonitoring(lang),
+                              style: GoogleFonts.poppins(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                                color: theme.bgAccent,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                    Icon(
-                      Icons.chevron_right_rounded,
-                      color: theme.textMain.withValues(alpha: 0.45),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-          Divider(
-            height: 1,
-            color: theme.textMain.withValues(alpha: 0.08),
-          ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
+            TextButton(
               onPressed: onUnlink,
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.md,
-                  vertical: AppSpacing.xs,
+                  horizontal: AppSpacing.sm,
+                  vertical: AppSpacing.sm,
                 ),
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -279,8 +269,16 @@ class _LinkedChildTile extends StatelessWidget {
                 ),
               ),
             ),
-          ),
-        ],
+            GestureDetector(
+              onTap: onOpen,
+              behavior: HitTestBehavior.opaque,
+              child: Icon(
+                Icons.chevron_right_rounded,
+                color: theme.textMain.withValues(alpha: 0.45),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

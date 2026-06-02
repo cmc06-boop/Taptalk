@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1001855891765",
+    "project_id": "taptalk-2d809",
+    "storage_bucket": "taptalk-2d809.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1001855891765:android:79d4a1d5a27fc152a5747c",
+        "android_client_info": {
+          "package_name": "com.example.flutter_application_1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC78hfq5hRC1f9i3jUpL3nHYCz5ONnRFx0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

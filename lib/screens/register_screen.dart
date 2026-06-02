@@ -52,17 +52,26 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _error = null;
       _busy = true;
     });
-    final err = await context.read<AppState>().register(
-          fullName: _name.text,
-          email: _email.text,
-          password: _password.text,
-          role: _role,
-        );
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      _error = err;
-    });
+    try {
+      final err = await context.read<AppState>().register(
+            fullName: _name.text,
+            email: _email.text,
+            password: _password.text,
+            role: _role,
+          );
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = err;
+      });
+    } catch (e) {
+      debugPrint('Register screen error: $e');
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = AppStrings.signUpFailedTryAgain(lang);
+      });
+    }
   }
 
   @override

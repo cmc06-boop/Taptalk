@@ -1,0 +1,248 @@
+/// Payload pushed to a cloud backend when a teacher alerts linked parents.
+class TeacherAlertCloudEvent {
+  const TeacherAlertCloudEvent({
+    required this.localNotificationId,
+    required this.parentUserId,
+    required this.parentFirebaseUid,
+    required this.learnerUserId,
+    required this.childName,
+    required this.teacherUserId,
+    required this.teacherName,
+    required this.classId,
+    required this.className,
+    required this.alertType,
+    required this.title,
+    required this.body,
+    required this.createdAt,
+  });
+
+  final int localNotificationId;
+  final int parentUserId;
+  final String parentFirebaseUid;
+  final int learnerUserId;
+  final String childName;
+  final int teacherUserId;
+  final String teacherName;
+  final int classId;
+  final String className;
+  final String alertType;
+  final String title;
+  final String body;
+  final DateTime createdAt;
+
+  Map<String, Object?> toFirestoreMap() => {
+        'localNotificationId': localNotificationId,
+        'parentUserId': parentUserId,
+        'learnerUserId': learnerUserId,
+        'childName': childName,
+        'teacherUserId': teacherUserId,
+        'teacherName': teacherName,
+        'classId': classId,
+        'className': className,
+        'title': title,
+        'body': body,
+        'alertType': alertType,
+        'createdAt': createdAt.toUtc().toIso8601String(),
+        'isRead': false,
+      };
+}
+
+class ClassEnrollmentCloudEvent {
+  const ClassEnrollmentCloudEvent({
+    required this.classId,
+    required this.classCode,
+    required this.className,
+    required this.teacherFirebaseUid,
+    required this.learnerUserId,
+    required this.learnerName,
+    required this.learnerFirebaseUid,
+    required this.enrolledAt,
+  });
+
+  final int classId;
+  final String classCode;
+  final String className;
+  final String teacherFirebaseUid;
+  final int learnerUserId;
+  final String learnerName;
+  final String learnerFirebaseUid;
+  final DateTime enrolledAt;
+
+  Map<String, Object?> toFirestoreMap() => {
+        'classId': classId,
+        'classCode': classCode,
+        'className': className,
+        'teacherFirebaseUid': teacherFirebaseUid,
+        'learnerUserId': learnerUserId,
+        'learnerName': learnerName,
+        'learnerFirebaseUid': learnerFirebaseUid,
+        'enrolledAt': enrolledAt.toUtc().toIso8601String(),
+      };
+}
+
+class RemoteClassEnrollment {
+  const RemoteClassEnrollment({
+    required this.classId,
+    required this.classCode,
+    required this.className,
+    required this.learnerUserId,
+    required this.learnerName,
+    required this.learnerFirebaseUid,
+    required this.enrolledAt,
+  });
+
+  final int classId;
+  final String classCode;
+  final String className;
+  final int learnerUserId;
+  final String learnerName;
+  final String learnerFirebaseUid;
+  final DateTime enrolledAt;
+}
+
+/// Remote notification pulled from the cloud into local SQLite.
+class RemoteParentNotification {
+  const RemoteParentNotification({
+    required this.remoteId,
+    required this.parentUserId,
+    required this.learnerUserId,
+    required this.childName,
+    required this.title,
+    required this.body,
+    required this.alertType,
+    required this.createdAt,
+    required this.isRead,
+  });
+
+  final String remoteId;
+  final int parentUserId;
+  final int? learnerUserId;
+  final String childName;
+  final String title;
+  final String body;
+  final String alertType;
+  final DateTime createdAt;
+  final bool isRead;
+}
+
+/// Cloud backend for cross-device in-app notifications.
+///
+/// Implement with Firebase Firestore once [FirebaseService] is configured.
+/// Firestore collection: `parent_notifications`
+/// Parent listener query: `where('parentUserId', isEqualTo: <parent local id>)`
+abstract class CloudNotificationBackend {
+  Future<void> initialize();
+
+  bool get isAvailable;
+
+  Future<void> publishTeacherAlert(TeacherAlertCloudEvent event);
+
+  Future<void> upsertParentChildLink({
+    required int parentUserId,
+    required int learnerUserId,
+    required String parentFirebaseUid,
+    required String learnerFirebaseUid,
+  });
+
+  Future<void> removeParentChildLink({
+    required String parentFirebaseUid,
+    required String learnerFirebaseUid,
+  });
+
+  Future<List<String>> getLinkedParentFirebaseUids(String learnerFirebaseUid);
+
+  Future<void> upsertClassEnrollment(ClassEnrollmentCloudEvent event);
+
+  Future<void> removeClassEnrollment({
+    required String classCode,
+    required String learnerFirebaseUid,
+  });
+
+  Future<List<RemoteClassEnrollment>> getClassEnrollmentsForTeacher(
+    String teacherFirebaseUid,
+  );
+
+  Future<void> upsertLearnerEmergencyContacts({
+    required int learnerUserId,
+    required String learnerName,
+    required String learnerFirebaseUid,
+    required List<String> contacts,
+  });
+
+  Stream<List<RemoteParentNotification>> watchParentNotifications({
+    required int parentUserId,
+    required String parentFirebaseUid,
+  });
+
+  Future<void> markParentNotificationRead(String remoteId);
+
+  Future<void> dispose();
+}
+
+/// Default stub until Firebase is wired. Local alerts still work on-device.
+class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
+  @override
+  bool get isAvailable => false;
+
+  @override
+  Future<void> dispose() async {}
+
+  @override
+  Future<void> initialize() async {}
+
+  @override
+  Future<void> publishTeacherAlert(TeacherAlertCloudEvent event) async {}
+
+  @override
+  Future<void> upsertParentChildLink({
+    required int parentUserId,
+    required int learnerUserId,
+    required String parentFirebaseUid,
+    required String learnerFirebaseUid,
+  }) async {}
+
+  @override
+  Future<void> removeParentChildLink({
+    required String parentFirebaseUid,
+    required String learnerFirebaseUid,
+  }) async {}
+
+  @override
+  Future<List<String>> getLinkedParentFirebaseUids(
+    String learnerFirebaseUid,
+  ) async =>
+      const [];
+
+  @override
+  Future<void> upsertClassEnrollment(ClassEnrollmentCloudEvent event) async {}
+
+  @override
+  Future<void> removeClassEnrollment({
+    required String classCode,
+    required String learnerFirebaseUid,
+  }) async {}
+
+  @override
+  Future<List<RemoteClassEnrollment>> getClassEnrollmentsForTeacher(
+    String teacherFirebaseUid,
+  ) async =>
+      const [];
+
+  @override
+  Future<void> upsertLearnerEmergencyContacts({
+    required int learnerUserId,
+    required String learnerName,
+    required String learnerFirebaseUid,
+    required List<String> contacts,
+  }) async {}
+
+  @override
+  Stream<List<RemoteParentNotification>> watchParentNotifications({
+    required int parentUserId,
+    required String parentFirebaseUid,
+  }) =>
+      const Stream.empty();
+
+  @override
+  Future<void> markParentNotificationRead(String remoteId) async {}
+}

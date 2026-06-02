@@ -10,8 +10,21 @@ import '../data/models/parent_notification.dart';
 import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
 
-class NotificationsScreen extends StatelessWidget {
+class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
+
+  @override
+  State<NotificationsScreen> createState() => _NotificationsScreenState();
+}
+
+class _NotificationsScreenState extends State<NotificationsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<AppState>().refreshNotifications();
+    });
+  }
 
   static String _sectionLabel(DateTime date, AppLanguage lang) {
     final now = DateTime.now();
@@ -63,7 +76,7 @@ class NotificationsScreen extends StatelessWidget {
 
     return LearnerScaffold(
       title: AppStrings.notifications(lang),
-      currentRoute: AppRoute.home,
+      currentRoute: AppRoute.notifications,
       showBackButton: true,
       showBottomNav: false,
       onBack: () => app.setRoute(AppRoute.home),
@@ -77,31 +90,13 @@ class NotificationsScreen extends StatelessWidget {
               AppSpacing.lg,
               AppSpacing.sm,
             ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    AppStrings.notificationsSubtitle(lang),
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      color: theme.textMain.withValues(alpha: 0.65),
-                      height: 1.35,
-                    ),
-                  ),
-                ),
-                if (app.unreadNotificationCount > 0)
-                  TextButton(
-                    onPressed: () => app.markAllNotificationsRead(),
-                    child: Text(
-                      AppStrings.markAllRead(lang),
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: theme.bgAccent,
-                      ),
-                    ),
-                  ),
-              ],
+            child: Text(
+              AppStrings.notificationsSubtitle(lang),
+              style: GoogleFonts.poppins(
+                fontSize: 12,
+                color: theme.textMain.withValues(alpha: 0.65),
+                height: 1.35,
+              ),
             ),
           ),
           Expanded(
@@ -135,14 +130,37 @@ class NotificationsScreen extends StatelessWidget {
                               AppSpacing.lg,
                               AppSpacing.sm,
                             ),
-                            child: Text(
-                              section,
-                              style: GoogleFonts.poppins(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: theme.textMain.withValues(alpha: 0.55),
-                                letterSpacing: 0.2,
-                              ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    section,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: theme.textMain.withValues(alpha: 0.55),
+                                      letterSpacing: 0.2,
+                                    ),
+                                  ),
+                                ),
+                                if (sectionIndex == 0 && app.unreadNotificationCount > 0)
+                                  TextButton(
+                                    onPressed: () => app.markAllNotificationsRead(),
+                                    style: TextButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                                      minimumSize: Size.zero,
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                    child: Text(
+                                      AppStrings.markAllRead(lang),
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: theme.bgAccent,
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                           for (final notification in sectionItems)

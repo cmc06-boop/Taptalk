@@ -7,6 +7,7 @@ import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../providers/app_state.dart';
 import '../widgets/create_class_dialog.dart';
+import '../widgets/taptalk_result_dialog.dart';
 import '../widgets/learner_scaffold.dart';
 import 'teacher_class_detail_screen.dart';
 
@@ -32,12 +33,13 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
 
   Future<void> _showCreateDialog() async {
     final lang = context.read<AppState>().language;
-    final messenger = ScaffoldMessenger.of(context);
     final created = await CreateClassDialog.show(context);
     if (!mounted || created != true) return;
     await _refreshCounts();
-    messenger.showSnackBar(
-      SnackBar(content: Text(AppStrings.classCreated(lang))),
+    await TapTalkResultDialog.showSuccess(
+      context,
+      title: AppStrings.classCreatedTitle(lang),
+      message: AppStrings.classCreated(lang),
     );
   }
 
@@ -71,12 +73,18 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
     final err = await app.deleteTeacherClass(teacherClass.id);
     if (!mounted) return;
     if (err != null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+      await TapTalkResultDialog.showError(
+        context,
+        title: AppStrings.somethingWentWrong(lang),
+        message: err,
+      );
       return;
     }
     setState(() => _studentCounts.remove(teacherClass.id));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(AppStrings.classDeleted(lang))),
+    await TapTalkResultDialog.showSuccess(
+      context,
+      title: AppStrings.classDeletedTitle(lang),
+      message: AppStrings.classDeleted(lang),
     );
   }
 
@@ -262,13 +270,12 @@ class _ClassCard extends StatelessWidget {
                   children: [
                     Text(
                       teacherClass.name,
-                      maxLines: 2,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.poppins(
                         fontSize: 16,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w800,
                         color: theme.textMain,
-                        height: 1.25,
                       ),
                     ),
                     const SizedBox(height: 4),

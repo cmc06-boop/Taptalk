@@ -17,8 +17,10 @@ import '../models/phrase_first_use.dart';
 import '../models/phrase_usage_stat.dart';
 import '../models/class_lesson.dart';
 import '../models/lesson_phrase.dart';
+import '../models/teacher_alert_result.dart';
 import '../models/teacher_class_student.dart';
 import '../models/user_model.dart';
+import '../../services/cloud_notification_backend.dart';
 
 class AppRepository {
   AppRepository(this._dbHelper);
@@ -107,6 +109,16 @@ class AppRepository {
     );
   }
 
+  Future<void> updatePasswordHash(int userId, String password) async {
+    final db = await _dbHelper.database;
+    await db.update(
+      'users',
+      {'password_hash': hashPassword(password)},
+      where: 'id = ?',
+      whereArgs: [userId],
+    );
+  }
+
   Future<UserModel> registerUser({
     required String fullName,
     required String email,
@@ -124,16 +136,30 @@ class AppRepository {
     }
     final row = <String, Object?>{
       'email': email.trim().toLowerCase(),
-      'password_hash': firebaseUid != null ? '' : hashPassword(password),
+      'password_hash': hashPassword(password),
       'full_name': fullName.trim(),
       'role': role,
       'theme': role == 'learner' ? null : 'mint_green',
       'settings_json': jsonEncode(settings),
     };
-    if (firebaseUid != null) {
-      row['firebase_uid'] = firebaseUid;
+    var uidToStore = firebaseUid;
+    late int id;
+    try {
+      if (uidToStore != null) {
+        row['firebase_uid'] = uidToStore;
+      }
+      id = await db.insert('users', row);
+    } on DatabaseException catch (e) {
+      final msg = e.toString().toLowerCase();
+      if (uidToStore != null &&
+          (msg.contains('unique') || msg.contains('constraint'))) {
+        row.remove('firebase_uid');
+        uidToStore = null;
+        id = await db.insert('users', row);
+      } else {
+        rethrow;
+      }
     }
-    final id = await db.insert('users', row);
     final user = (await findUserById(id))!;
     if (role == 'learner' || role == 'parent') {
       await seedLearnerData(user.id);
@@ -143,10 +169,11 @@ class AppRepository {
 
   Future<bool> verifyLogin(String email, String password) async {
     final user = await findUserByEmail(email);
-    if (user == null || user.passwordHash == null || user.passwordHash!.isEmpty) {
+    if (user == null ||
+        user.passwordHash == null ||
+        user.passwordHash!.isEmpty) {
       return false;
     }
-    if (user.isOnlineAccount) return false;
     return user.passwordHash == hashPassword(password);
   }
 
@@ -167,7 +194,7 @@ class AppRepository {
 
   Future<bool> resetPasswordByEmail(String email, String newPassword) async {
     final user = await findUserByEmail(email);
-    if (user == null || user.isOnlineAccount) return false;
+    if (user == null) return false;
     final db = await _dbHelper.database;
     await db.update(
       'users',
@@ -261,6 +288,20 @@ class AppRepository {
     return jsonDecode(rows.first['settings_json'] as String) as Map<String, dynamic>;
   }
 
+  Future<List<String>> getEmergencyContactsForLearner(int learnerUserId) async {
+    final user = await findUserById(learnerUserId);
+    if (user == null || !user.isLearner) return const [];
+    final settings = await getUserSettings(learnerUserId);
+    final contacts = settings['emergency_contacts'];
+    if (contacts is! List) return const [];
+    return contacts
+        .whereType<String>()
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .take(2)
+        .toList();
+  }
+
   Future<void> seedLearnerData(int userId) async {
     final db = await _dbHelper.database;
     final defaults = [
@@ -288,14 +329,18 @@ class AppRepository {
       ('I want to see a dog', 'animals', _builtinImageUrls['I want to see a dog']!),
     ];
     for (final (text, cat, img) in builtinPhrases) {
-      await db.insert('phrases', {
-        'user_id': userId,
-        'phrase_text': text,
-        'category_key': cat,
-        'image_path': img,
-        'is_builtin': 1,
-        'is_active': 1,
-      });
+      await db.insert(
+        'phrases',
+        {
+          'user_id': userId,
+          'phrase_text': text,
+          'category_key': cat,
+          'image_path': img,
+          'is_builtin': 1,
+          'is_active': 1,
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
     }
   }
 
@@ -813,6 +858,18 @@ class AppRepository {
     return rows.first;
   }
 
+  Future<Map<String, Object?>?> findClassById(int classId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'teacher_classes',
+      where: 'id = ?',
+      whereArgs: [classId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first;
+  }
+
   Future<bool> isLearnerEnrolled(int learnerUserId, int classId) async {
     final db = await _dbHelper.database;
     final rows = await db.query(
@@ -864,6 +921,41 @@ class AppRepository {
       WHERE tc.teacher_user_id = ?
       ORDER BY tc.class_name ASC, u.full_name ASC
     ''', [teacherUserId]);
+    return rows
+        .map(
+          (row) => TeacherClassStudent(
+            learnerId: row['learner_id'] as int,
+            fullName: row['full_name'] as String,
+            classId: row['class_id'] as int,
+            className: row['class_name'] as String,
+            classCode: row['class_code'] as String,
+            enrolledAt: DateTime.fromMillisecondsSinceEpoch(
+              row['enrolled_at'] as int,
+            ),
+          ),
+        )
+        .toList();
+  }
+
+  Future<List<TeacherClassStudent>> getTeacherClassStudentsForClass({
+    required int teacherUserId,
+    required int classId,
+  }) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT
+        u.id AS learner_id,
+        u.full_name,
+        tc.id AS class_id,
+        tc.class_name,
+        tc.class_code,
+        ce.enrolled_at
+      FROM class_enrollments ce
+      INNER JOIN teacher_classes tc ON tc.id = ce.class_id
+      INNER JOIN users u ON u.id = ce.learner_user_id
+      WHERE tc.teacher_user_id = ? AND tc.id = ?
+      ORDER BY u.full_name ASC
+    ''', [teacherUserId, classId]);
     return rows
         .map(
           (row) => TeacherClassStudent(
@@ -1000,6 +1092,150 @@ class AppRepository {
     return rows.map(_notificationFromRow).toList();
   }
 
+  Future<List<int>> getLinkedParentIds(int learnerUserId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'parent_children',
+      columns: ['parent_user_id'],
+      where: 'learner_user_id = ?',
+      whereArgs: [learnerUserId],
+    );
+    return rows.map((row) => row['parent_user_id'] as int).toList();
+  }
+
+  Future<bool> isLearnerInTeacherClass({
+    required int teacherUserId,
+    required int learnerUserId,
+    required int classId,
+  }) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT ce.id
+      FROM class_enrollments ce
+      INNER JOIN teacher_classes tc ON tc.id = ce.class_id
+      WHERE ce.learner_user_id = ?
+        AND ce.class_id = ?
+        AND tc.teacher_user_id = ?
+      LIMIT 1
+    ''', [learnerUserId, classId, teacherUserId]);
+    return rows.isNotEmpty;
+  }
+
+  Future<TeacherAlertResult> sendTeacherAlertToParents({
+    required int teacherUserId,
+    required String teacherName,
+    required int learnerUserId,
+    required String learnerName,
+    required int classId,
+    required String className,
+    required ParentAlertType alertType,
+    required String title,
+    required String body,
+  }) async {
+    final authorized = await isLearnerInTeacherClass(
+      teacherUserId: teacherUserId,
+      learnerUserId: learnerUserId,
+      classId: classId,
+    );
+    if (!authorized) {
+      return const TeacherAlertResult(status: TeacherAlertStatus.notAuthorized);
+    }
+
+    final parentIds = await getLinkedParentIds(learnerUserId);
+    if (parentIds.isEmpty) {
+      return const TeacherAlertResult(
+        status: TeacherAlertStatus.noLinkedParents,
+      );
+    }
+
+    final db = await _dbHelper.database;
+    final createdAt = DateTime.now().millisecondsSinceEpoch;
+    final notificationIds = <int>[];
+    for (final parentId in parentIds) {
+      final id = await db.insert('parent_notifications', {
+        'parent_user_id': parentId,
+        'learner_user_id': learnerUserId,
+        'child_name': learnerName,
+        'alert_type': alertType.name,
+        'title': title,
+        'body': body,
+        'created_at': createdAt,
+        'is_read': 0,
+      });
+      notificationIds.add(id);
+    }
+
+    return TeacherAlertResult(
+      status: TeacherAlertStatus.sent,
+      notificationsSent: notificationIds.length,
+      notificationIds: notificationIds,
+    );
+  }
+
+  Future<int?> parentUserIdForNotification(int notificationId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'parent_notifications',
+      columns: ['parent_user_id'],
+      where: 'id = ?',
+      whereArgs: [notificationId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['parent_user_id'] as int;
+  }
+
+  Future<String?> getFirebaseUidForUser(int userId) async {
+    final user = await findUserById(userId);
+    final uid = user?.firebaseUid;
+    if (uid == null || uid.trim().isEmpty) return null;
+    return uid.trim();
+  }
+
+  Future<void> upsertRemoteParentNotifications({
+    required int parentUserId,
+    required List<RemoteParentNotification> items,
+  }) async {
+    if (items.isEmpty) return;
+    final db = await _dbHelper.database;
+    for (final item in items) {
+      if (item.parentUserId != parentUserId) continue;
+      final existing = await db.query(
+        'parent_notifications',
+        where: 'remote_id = ?',
+        whereArgs: [item.remoteId],
+        limit: 1,
+      );
+      if (existing.isNotEmpty) {
+        final wasRead = (existing.first['is_read'] as int? ?? 0) == 1;
+        final keepRead = wasRead || item.isRead;
+        await db.update(
+          'parent_notifications',
+          {
+            'title': item.title,
+            'body': item.body,
+            'child_name': item.childName,
+            'is_read': keepRead ? 1 : 0,
+          },
+          where: 'id = ?',
+          whereArgs: [existing.first['id']],
+        );
+        continue;
+      }
+      await db.insert('parent_notifications', {
+        'parent_user_id': parentUserId,
+        'learner_user_id': item.learnerUserId,
+        'child_name': item.childName,
+        'alert_type': item.alertType,
+        'title': item.title,
+        'body': item.body,
+        'created_at': item.createdAt.millisecondsSinceEpoch,
+        'is_read': item.isRead ? 1 : 0,
+        'remote_id': item.remoteId,
+      });
+    }
+  }
+
   ParentNotification _notificationFromRow(Map<String, Object?> row) {
     return ParentNotification(
       id: row['id'] as int,
@@ -1014,6 +1250,37 @@ class AppRepository {
       createdAt: DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int),
       isRead: (row['is_read'] as int) == 1,
     );
+  }
+
+  Future<String?> notificationRemoteId(int notificationId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'parent_notifications',
+      columns: ['remote_id'],
+      where: 'id = ?',
+      whereArgs: [notificationId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final remoteId = rows.first['remote_id'] as String?;
+    if (remoteId == null || remoteId.trim().isEmpty) return null;
+    return remoteId.trim();
+  }
+
+  Future<List<String>> unreadNotificationRemoteIds(int parentUserId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'parent_notifications',
+      columns: ['remote_id'],
+      where: 'parent_user_id = ? AND is_read = 0',
+      whereArgs: [parentUserId],
+    );
+    return rows
+        .map((r) => r['remote_id'] as String?)
+        .whereType<String>()
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
   }
 
   Future<void> markNotificationRead(int notificationId) async {

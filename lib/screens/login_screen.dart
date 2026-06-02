@@ -34,15 +34,26 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = null;
       _busy = true;
     });
-    final err = await context.read<AppState>().login(
-          _email.text,
-          _password.text,
+    try {
+      final err = await context.read<AppState>().login(
+            _email.text,
+            _password.text,
+          );
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = err;
+      });
+    } catch (e) {
+      debugPrint('Login screen error: $e');
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = AppStrings.loginFailedTryAgain(
+          context.read<AppState>().language,
         );
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      _error = err;
-    });
+      });
+    }
   }
 
   @override
