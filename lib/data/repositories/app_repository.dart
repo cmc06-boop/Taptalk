@@ -13,6 +13,8 @@ import '../models/enrolled_class_model.dart';
 import '../models/linked_child_model.dart';
 import '../models/phrase_model.dart';
 import '../models/parent_notification.dart';
+import '../models/teacher_recent_alert.dart';
+import '../models/teacher_recent_lesson.dart';
 import '../models/phrase_first_use.dart';
 import '../models/phrase_usage_stat.dart';
 import '../models/class_lesson.dart';
@@ -766,12 +768,14 @@ class AppRepository {
         RegExp(r'^CLS-[0-9A-F]{8}$').hasMatch(normalized);
   }
 
-  Future<String?> createTeacherClass({
+  Future<({String? error, int id, String code, String name})> createTeacherClass({
     required int teacherUserId,
     required String className,
   }) async {
     final trimmed = className.trim();
-    if (trimmed.isEmpty) return 'empty';
+    if (trimmed.isEmpty) {
+      return (error: 'empty', id: 0, code: '', name: '');
+    }
     final db = await _dbHelper.database;
     var code = generateClassCode();
     for (var attempt = 0; attempt < 8; attempt++) {
@@ -784,13 +788,13 @@ class AppRepository {
       if (clash.isEmpty) break;
       code = generateClassCode();
     }
-    await db.insert('teacher_classes', {
+    final id = await db.insert('teacher_classes', {
       'teacher_user_id': teacherUserId,
       'class_name': trimmed,
       'class_code': code,
       'created_at': DateTime.now().millisecondsSinceEpoch,
     });
-    return null;
+    return (error: null, id: id, code: code, name: trimmed);
   }
 
   Future<bool> deleteTeacherClass({
@@ -994,6 +998,60 @@ class AppRepository {
         .toList();
   }
 
+  Future<void> mergeRemoteTeacherClasses({
+    required int teacherUserId,
+    required List<RemoteTeacherClass> remoteClasses,
+  }) async {
+    if (remoteClasses.isEmpty) return;
+    final db = await _dbHelper.database;
+    for (final remote in remoteClasses) {
+      final code = normalizeClassCode(remote.classCode);
+      if (!isValidClassCodeFormat(code)) continue;
+      final existing = await findClassByCode(code);
+      if (existing == null) {
+        await db.insert('teacher_classes', {
+          'teacher_user_id': teacherUserId,
+          'class_name': remote.className.trim().isEmpty ? 'Class' : remote.className.trim(),
+          'class_code': code,
+          'created_at': remote.createdAt.millisecondsSinceEpoch,
+        });
+        continue;
+      }
+      if ((existing['teacher_user_id'] as int?) != teacherUserId) continue;
+      final localName = (existing['class_name'] as String?) ?? '';
+      final remoteName = remote.className.trim();
+      if (remoteName.isNotEmpty && remoteName != localName) {
+        await db.update(
+          'teacher_classes',
+          {'class_name': remoteName},
+          where: 'id = ?',
+          whereArgs: [existing['id']],
+        );
+      }
+    }
+  }
+
+  Future<void> mergeRemoteEnrollmentsForTeacher({
+    required int teacherUserId,
+    required List<RemoteClassEnrollment> enrollments,
+  }) async {
+    if (enrollments.isEmpty) return;
+    for (final enrollment in enrollments) {
+      final code = normalizeClassCode(enrollment.classCode);
+      if (!isValidClassCodeFormat(code)) continue;
+      final classRow = await findClassByCode(code);
+      if (classRow == null) continue;
+      if ((classRow['teacher_user_id'] as int?) != teacherUserId) continue;
+      final classId = classRow['id'] as int;
+      final learnerUid = enrollment.learnerFirebaseUid.trim();
+      if (learnerUid.isEmpty) continue;
+      final learner = await findUserByFirebaseUid(learnerUid);
+      if (learner == null) continue;
+      if (await isLearnerEnrolled(learner.id, classId)) continue;
+      await enrollLearnerInClass(learner.id, classId);
+    }
+  }
+
   Future<bool> _isLearnerEnrolledInLesson(int learnerUserId, int lessonId) async {
     final db = await _dbHelper.database;
     final rows = await db.rawQuery('''
@@ -1090,6 +1148,79 @@ class AppRepository {
       orderBy: 'created_at DESC',
     );
     return rows.map(_notificationFromRow).toList();
+  }
+
+  Future<List<TeacherRecentAlert>> getRecentAlertsForTeacher({
+    required int teacherUserId,
+    int limit = 4,
+  }) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT DISTINCT
+        pn.id,
+        tc.id AS class_id,
+        pn.child_name,
+        pn.alert_type,
+        pn.created_at,
+        tc.class_name
+      FROM parent_notifications pn
+      INNER JOIN class_enrollments ce ON ce.learner_user_id = pn.learner_user_id
+      INNER JOIN teacher_classes tc ON tc.id = ce.class_id
+      WHERE tc.teacher_user_id = ?
+      ORDER BY pn.created_at DESC
+      LIMIT ?
+    ''', [teacherUserId, limit]);
+    return rows
+        .map(
+          (row) => TeacherRecentAlert(
+            id: row['id'] as int,
+            classId: row['class_id'] as int,
+            childName: row['child_name'] as String,
+            alertType: ParentNotification.alertTypeFromKey(
+              row['alert_type'] as String,
+            ),
+            className: row['class_name'] as String,
+            createdAt: DateTime.fromMillisecondsSinceEpoch(
+              row['created_at'] as int,
+            ),
+          ),
+        )
+        .toList();
+  }
+
+  Future<List<TeacherRecentLesson>> getRecentLessonsForTeacher({
+    required int teacherUserId,
+    int limit = 8,
+  }) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT
+        cl.id,
+        cl.class_id,
+        cl.title,
+        cl.created_at,
+        (SELECT COUNT(*) FROM lesson_phrases lp WHERE lp.lesson_id = cl.id) AS phrase_count,
+        tc.class_name
+      FROM class_lessons cl
+      INNER JOIN teacher_classes tc ON tc.id = cl.class_id
+      WHERE tc.teacher_user_id = ?
+      ORDER BY cl.created_at DESC
+      LIMIT ?
+    ''', [teacherUserId, limit]);
+    return rows
+        .map(
+          (row) => TeacherRecentLesson(
+            id: row['id'] as int,
+            classId: row['class_id'] as int,
+            title: row['title'] as String,
+            createdAt: DateTime.fromMillisecondsSinceEpoch(
+              row['created_at'] as int,
+            ),
+            phraseCount: row['phrase_count'] as int? ?? 0,
+            className: row['class_name'] as String,
+          ),
+        )
+        .toList();
   }
 
   Future<List<int>> getLinkedParentIds(int learnerUserId) async {

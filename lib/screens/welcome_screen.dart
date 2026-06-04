@@ -56,9 +56,9 @@ class _WelcomeScreenState extends State<WelcomeScreen>
           final headerHeight = isWide
               ? screenH * 0.42
               : (compactHeight ? screenH * 0.46 : screenH * 0.52);
-          final headerLogoSize = compactHeight ? 48.0 : 56.0;
+          final headerLogoSize = compactHeight ? 52.0 : 60.0;
           final contentHorizontal = isWide ? 36.0 : 24.0;
-          final contentTop = compactHeight ? 36.0 : 48.0;
+          final contentTop = compactHeight ? 68.0 : 80.0;
           final textBlockGap = compactHeight ? 10.0 : 14.0;
           final sheetOverlap = isWide ? 40.0 : 58.0;
 
@@ -95,17 +95,16 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                       size: Size(constraints.maxWidth, headerHeight),
                     ),
                     Align(
-                      alignment: const Alignment(0, -0.55),
-                      child: Row(
+                      alignment: Alignment.center,
+                      child: Column(
                         mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
                           TapTalkLogo(size: headerLogoSize),
-                          SizedBox(width: compactHeight ? 10 : 14),
+                          SizedBox(height: compactHeight ? 12 : 16),
                           Text(
                             'TapTalk',
                             style: GoogleFonts.poppins(
-                              fontSize: compactHeight ? 34 : 38,
+                              fontSize: compactHeight ? 42 : 48,
                               fontWeight: FontWeight.w800,
                               color: Colors.white,
                               letterSpacing: 0.4,
@@ -142,7 +141,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            SizedBox(height: compactHeight ? 4 : 8),
+                            SizedBox(height: compactHeight ? 28 : 36),
                             Text(
                               AppStrings.welcomeHeadline(lang),
                               textAlign: TextAlign.center,
@@ -376,6 +375,72 @@ class _FadeBubbleField extends StatelessWidget {
               bottom: size.height * (0.14 + math.sin(t * math.pi * 2 + 1.4) * 0.028),
               d: 40,
               alpha: 0.14,
+            ),
+            _bubble(
+              left: size.width * 0.28,
+              top: size.height * (0.22 + math.sin(t * math.pi * 2 + 0.4) * 0.032),
+              d: 28,
+              alpha: 0.20,
+            ),
+            _bubble(
+              right: size.width * 0.12,
+              top: size.height * (0.06 + math.cos(t * math.pi * 2 + 1.6) * 0.028),
+              d: 34,
+              alpha: 0.18,
+            ),
+            _bubble(
+              left: size.width * 0.62,
+              top: size.height * (0.28 + math.cos(t * math.pi * 2 + 2.2) * 0.03),
+              d: 22,
+              alpha: 0.16,
+            ),
+            _bubble(
+              right: size.width * 0.34,
+              top: size.height * (0.12 + math.sin(t * math.pi * 2 + 0.9) * 0.025),
+              d: 26,
+              alpha: 0.19,
+            ),
+            _bubble(
+              left: size.width * 0.08,
+              top: size.height * (0.42 + math.cos(t * math.pi * 2 + 1.3) * 0.026),
+              d: 32,
+              alpha: 0.15,
+            ),
+            _bubble(
+              right: size.width * 0.08,
+              bottom: size.height * (0.22 + math.sin(t * math.pi * 2 + 0.7) * 0.024),
+              d: 36,
+              alpha: 0.17,
+            ),
+            _bubble(
+              left: size.width * 0.44,
+              bottom: size.height * (0.04 + math.cos(t * math.pi * 2 + 2.5) * 0.022),
+              d: 24,
+              alpha: 0.21,
+            ),
+            _bubble(
+              left: size.width * 0.78,
+              top: size.height * (0.16 + math.sin(t * math.pi * 2 + 1.8) * 0.027),
+              d: 30,
+              alpha: 0.13,
+            ),
+            _bubble(
+              right: size.width * 0.52,
+              bottom: size.height * (0.18 + math.cos(t * math.pi * 2 + 0.5) * 0.023),
+              d: 20,
+              alpha: 0.18,
+            ),
+            _bubble(
+              left: size.width * 0.36,
+              top: size.height * (0.05 + math.sin(t * math.pi * 2 + 2.8) * 0.02),
+              d: 18,
+              alpha: 0.14,
+            ),
+            _bubble(
+              right: size.width * 0.26,
+              bottom: size.height * (0.08 + math.sin(t * math.pi * 2 + 1.1) * 0.026),
+              d: 42,
+              alpha: 0.12,
             ),
           ],
         );

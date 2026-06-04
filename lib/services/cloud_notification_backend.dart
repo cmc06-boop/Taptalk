@@ -100,6 +100,46 @@ class RemoteClassEnrollment {
   final DateTime enrolledAt;
 }
 
+class RemoteTeacherClass {
+  const RemoteTeacherClass({
+    required this.classCode,
+    required this.className,
+    required this.teacherFirebaseUid,
+    required this.teacherUserId,
+    required this.createdAt,
+  });
+
+  final String classCode;
+  final String className;
+  final String teacherFirebaseUid;
+  final int teacherUserId;
+  final DateTime createdAt;
+}
+
+class TeacherClassCloudEvent {
+  const TeacherClassCloudEvent({
+    required this.classCode,
+    required this.className,
+    required this.teacherFirebaseUid,
+    required this.teacherUserId,
+    required this.createdAt,
+  });
+
+  final String classCode;
+  final String className;
+  final String teacherFirebaseUid;
+  final int teacherUserId;
+  final DateTime createdAt;
+
+  Map<String, Object?> toFirestoreMap() => {
+        'classCode': classCode,
+        'className': className,
+        'teacherFirebaseUid': teacherFirebaseUid,
+        'teacherUserId': teacherUserId,
+        'createdAt': createdAt.toUtc().toIso8601String(),
+      };
+}
+
 /// Remote notification pulled from the cloud into local SQLite.
 class RemoteParentNotification {
   const RemoteParentNotification({
@@ -159,6 +199,14 @@ abstract class CloudNotificationBackend {
   });
 
   Future<List<RemoteClassEnrollment>> getClassEnrollmentsForTeacher(
+    String teacherFirebaseUid,
+  );
+
+  Future<void> upsertTeacherClass(TeacherClassCloudEvent event);
+
+  Future<void> removeTeacherClass({required String classCode});
+
+  Future<List<RemoteTeacherClass>> getTeacherClassesForTeacher(
     String teacherFirebaseUid,
   );
 
@@ -224,6 +272,18 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
 
   @override
   Future<List<RemoteClassEnrollment>> getClassEnrollmentsForTeacher(
+    String teacherFirebaseUid,
+  ) async =>
+      const [];
+
+  @override
+  Future<void> upsertTeacherClass(TeacherClassCloudEvent event) async {}
+
+  @override
+  Future<void> removeTeacherClass({required String classCode}) async {}
+
+  @override
+  Future<List<RemoteTeacherClass>> getTeacherClassesForTeacher(
     String teacherFirebaseUid,
   ) async =>
       const [];

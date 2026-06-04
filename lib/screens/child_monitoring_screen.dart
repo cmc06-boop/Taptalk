@@ -383,6 +383,67 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
     );
   }
 
+  Widget _buildPeriodFilterBar({
+    required TapTalkThemeToken theme,
+    required AppLanguage lang,
+    required List<DateTime> monthOptions,
+    required DateTime selectedMonth,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.sm,
+          children: [
+            _periodChip(
+              label: AppStrings.today(lang),
+              selected: _period == ChildUsagePeriod.today,
+              theme: theme,
+              onTap: () {
+                setState(() {
+                  _period = ChildUsagePeriod.today;
+                  _monthPickerExpanded = false;
+                });
+                _reloadStats();
+              },
+            ),
+            _periodChip(
+              label: AppStrings.thisWeek(lang),
+              selected: _period == ChildUsagePeriod.thisWeek,
+              theme: theme,
+              onTap: () {
+                setState(() {
+                  _period = ChildUsagePeriod.thisWeek;
+                  _monthPickerExpanded = false;
+                });
+                _reloadStats();
+              },
+            ),
+            _periodChip(
+              label: AppStrings.month(lang),
+              selected: _period == ChildUsagePeriod.month,
+              theme: theme,
+              onTap: () {
+                setState(() => _period = ChildUsagePeriod.month);
+                _reloadStats();
+              },
+            ),
+          ],
+        ),
+        if (_period == ChildUsagePeriod.month) ...[
+          const SizedBox(height: AppSpacing.sm),
+          _buildExpandableMonthPicker(
+            theme: theme,
+            lang: lang,
+            monthOptions: monthOptions,
+            selectedMonth: selectedMonth,
+          ),
+        ],
+      ],
+    );
+  }
+
   Widget _phraseStatCard({
     required TapTalkThemeToken theme,
     required AppLanguage lang,
@@ -491,6 +552,20 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
               ),
             ),
           Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              AppSpacing.sm,
+              AppSpacing.lg,
+              AppSpacing.md,
+            ),
+            child: _buildPeriodFilterBar(
+              theme: theme,
+              lang: lang,
+              monthOptions: monthOptions,
+              selectedMonth: selectedMonth,
+            ),
+          ),
+          Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
             child: Text(
               AppStrings.vocabularyGrowth(lang),
@@ -538,61 +613,6 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
             ),
           ),
           const SizedBox(height: AppSpacing.sm),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-            child: Wrap(
-              spacing: AppSpacing.sm,
-              runSpacing: AppSpacing.sm,
-              children: [
-                _periodChip(
-                  label: AppStrings.today(lang),
-                  selected: _period == ChildUsagePeriod.today,
-                  theme: theme,
-                  onTap: () {
-                    setState(() {
-                      _period = ChildUsagePeriod.today;
-                      _monthPickerExpanded = false;
-                    });
-                    _reloadStats();
-                  },
-                ),
-                _periodChip(
-                  label: AppStrings.thisWeek(lang),
-                  selected: _period == ChildUsagePeriod.thisWeek,
-                  theme: theme,
-                  onTap: () {
-                    setState(() {
-                      _period = ChildUsagePeriod.thisWeek;
-                      _monthPickerExpanded = false;
-                    });
-                    _reloadStats();
-                  },
-                ),
-                _periodChip(
-                  label: AppStrings.month(lang),
-                  selected: _period == ChildUsagePeriod.month,
-                  theme: theme,
-                  onTap: () {
-                    setState(() => _period = ChildUsagePeriod.month);
-                    _reloadStats();
-                  },
-                ),
-              ],
-            ),
-          ),
-          if (_period == ChildUsagePeriod.month) ...[
-            const SizedBox(height: AppSpacing.sm),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: _buildExpandableMonthPicker(
-                theme: theme,
-                lang: lang,
-                monthOptions: monthOptions,
-                selectedMonth: selectedMonth,
-              ),
-            ),
-          ],
-          const SizedBox(height: AppSpacing.md),
           if (_loadingStats)
             const Padding(
               padding: EdgeInsets.all(AppSpacing.xxl),

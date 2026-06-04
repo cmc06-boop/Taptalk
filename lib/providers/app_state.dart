@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 
 import '../core/l10n/app_strings.dart';
+import '../core/utils/auth_validation.dart';
 import '../core/utils/phrase_image_storage.dart';
 import '../core/l10n/content_localization.dart';
 import '../data/models/category_model.dart';
@@ -22,6 +23,8 @@ import '../data/models/enrolled_class_model.dart';
 import '../data/models/linked_child_model.dart';
 import '../data/models/password_reset_outcome.dart';
 import '../data/models/parent_notification.dart';
+import '../data/models/teacher_recent_alert.dart';
+import '../data/models/teacher_recent_lesson.dart';
 import '../data/models/phrase_model.dart';
 import '../data/models/phrase_usage_stat.dart';
 import '../data/models/class_lesson.dart';
@@ -36,7 +39,6 @@ import '../services/firestore_notification_backend.dart';
 import '../services/notification_sync_service.dart';
 import '../services/device_sms_service.dart';
 import '../services/network_status.dart';
-import '../services/sms_alert_service.dart';
 import '../services/tts_service.dart';
 
 enum AppRoute {
@@ -58,6 +60,7 @@ enum AppRoute {
   teacherDashboard,
   teacherMyClasses,
   teacherMonitoring,
+  teacherAlertHistory,
 }
 
 class AppState extends ChangeNotifier {
@@ -68,7 +71,6 @@ class AppState extends ChangeNotifier {
 
   final AppRepository _repo = AppRepository(DatabaseHelper.instance);
   final TtsService tts = TtsService();
-  final SmsAlertService _smsAlert = SmsAlertService();
   final DeviceSmsService _deviceSms = DeviceSmsService();
   late final NotificationSyncService _notificationSync = NotificationSyncService(
     repository: _repo,
@@ -260,7 +262,7 @@ class AppState extends ChangeNotifier {
           } else if (_user!.isTeacher) {
             await _loadLearnerData();
             await _ensureStarterData();
-            await _loadTeacherClasses();
+            await refreshTeacherClasses();
             _route = AppRoute.teacherDashboard;
           } else {
             _route = AppRoute.login;
@@ -503,7 +505,14 @@ class AppState extends ChangeNotifier {
   }
 
   Future<String?> _loginImpl(String email, String password) async {
-    final normalizedEmail = email.trim().toLowerCase();
+    final normalizedEmail = AuthValidation.normalizeEmail(email);
+    if (!AuthValidation.isValidEmail(normalizedEmail)) {
+      return AppStrings.invalidEmail(_language);
+    }
+    if (password.isEmpty) {
+      return AppStrings.fillAllFields(_language);
+    }
+
     var user = await _repo.findUserByEmail(normalizedEmail);
     if (user == null) {
       // Account may exist only in Firebase (e.g. from another device).
@@ -516,53 +525,46 @@ class AppState extends ChangeNotifier {
           return AppStrings.accountNotOnThisDevice(_language);
         }
       }
-      return AppStrings.invalidEmailPassword(_language);
+      return AppStrings.emailNotRegistered(_language);
     }
 
-    final hasLocalPassword =
-        user.passwordHash != null && user.passwordHash!.isNotEmpty;
-
-    if (!hasLocalPassword || user.isOnlineAccount) {
-      if (!FirebaseService.instance.isAvailable) {
-        return AppStrings.loginNeedsInternet(_language);
-      }
+    if (FirebaseService.instance.isAvailable) {
       final uid = await FirebaseService.instance.signIn(
         email: normalizedEmail,
         password: password,
       );
-      if (uid == null) {
-        return AppStrings.invalidEmailPassword(_language);
-      }
-      if (!hasLocalPassword) {
-        await _repo.updatePasswordHash(user.id, password);
-        user = user.copyWith(passwordHash: AppRepository.hashPassword(password));
-      }
-      if (user.firebaseUid != uid) {
-        await _repo.linkFirebaseUid(user.id, uid);
-        user = user.copyWith(firebaseUid: uid);
-      }
-    } else {
-      final ok = await _repo.verifyLogin(normalizedEmail, password);
-      if (!ok) return AppStrings.invalidEmailPassword(_language);
-      if (FirebaseService.instance.isAvailable) {
-        final uid = await FirebaseService.instance.signIn(
-          email: normalizedEmail,
-          password: password,
-        );
-        if (uid != null && user.firebaseUid != uid) {
+      if (uid != null) {
+        if (user.firebaseUid != uid) {
           await _repo.linkFirebaseUid(user.id, uid);
           user = user.copyWith(firebaseUid: uid);
-        } else if (uid == null &&
-            (user.firebaseUid == null || user.firebaseUid!.isEmpty)) {
-          unawaited(
-            _linkFirebaseAccountIfAvailable(
-              user: user,
-              email: normalizedEmail,
-              password: password,
-            ),
-          );
         }
+        final hashed = AppRepository.hashPassword(password);
+        if (user.passwordHash != hashed) {
+          await _repo.updatePasswordHash(user.id, password);
+          user = user.copyWith(passwordHash: hashed);
+        }
+      } else {
+        final hasLocalPassword =
+            user.passwordHash != null && user.passwordHash!.isNotEmpty;
+        if (!hasLocalPassword || user.isOnlineAccount) {
+          return AppStrings.wrongPassword(_language);
+        }
+        final ok = await _repo.verifyLogin(normalizedEmail, password);
+        if (!ok) return AppStrings.wrongPassword(_language);
+        unawaited(
+          _linkFirebaseAccountIfAvailable(
+            user: user,
+            email: normalizedEmail,
+            password: password,
+          ),
+        );
       }
+    } else {
+      if (user.isOnlineAccount) {
+        return AppStrings.loginNeedsInternet(_language);
+      }
+      final ok = await _repo.verifyLogin(normalizedEmail, password);
+      if (!ok) return AppStrings.wrongPassword(_language);
     }
 
     _user = user;
@@ -604,7 +606,7 @@ class AppState extends ChangeNotifier {
       } else if (_user!.isTeacher) {
         await _loadLearnerData(cloudSyncInBackground: true);
         await _ensureStarterData();
-        await _loadTeacherClasses();
+        await refreshTeacherClasses();
       }
       notifyListeners();
     } catch (e, st) {
@@ -612,6 +614,16 @@ class AppState extends ChangeNotifier {
     }
 
     return null;
+  }
+
+  /// True when this device already has an account with the email.
+  /// Firebase Auth is checked again when the user taps Create account.
+  Future<bool> isEmailAlreadyInUse(String email) async {
+    final normalizedEmail = AuthValidation.normalizeEmail(email);
+    if (!AuthValidation.isValidEmail(normalizedEmail)) return false;
+
+    final existing = await _repo.findUserByEmail(normalizedEmail);
+    return existing != null;
   }
 
   Future<String?> register({
@@ -639,7 +651,17 @@ class AppState extends ChangeNotifier {
     required String password,
     required String role,
   }) async {
-    final normalizedEmail = email.trim().toLowerCase();
+    final normalizedEmail = AuthValidation.normalizeEmail(email);
+    if (!AuthValidation.isValidFullName(fullName)) {
+      return AppStrings.invalidFullName(_language);
+    }
+    if (!AuthValidation.isValidEmail(normalizedEmail)) {
+      return AppStrings.invalidEmail(_language);
+    }
+    if (!AuthValidation.isStrongPassword(password)) {
+      return AppStrings.passwordTooShort(_language);
+    }
+
     final existing = await _repo.findUserByEmail(normalizedEmail);
     if (existing != null) return AppStrings.emailInUse(_language);
 
@@ -649,10 +671,18 @@ class AppState extends ChangeNotifier {
         email: normalizedEmail,
         password: password,
       );
-      firebaseUid ??= await FirebaseService.instance.signIn(
-        email: normalizedEmail,
-        password: password,
-      );
+      if (firebaseUid == null) {
+        if (FirebaseService.instance.lastAuthErrorCode ==
+            'email-already-in-use') {
+          return AppStrings.emailInUse(_language);
+        }
+        if (FirebaseService.instance.lastAuthErrorCode == 'weak-password') {
+          return AppStrings.passwordTooShort(_language);
+        }
+        return AppStrings.signUpOnlineAccountFailed(_language);
+      }
+    } else {
+      return AppStrings.signUpRequiresInternet(_language);
     }
 
     try {
@@ -670,16 +700,6 @@ class AppState extends ChangeNotifier {
         return AppStrings.emailInUse(_language);
       }
       rethrow;
-    }
-
-    if (firebaseUid == null && FirebaseService.instance.isAvailable) {
-      unawaited(
-        _linkFirebaseAccountIfAvailable(
-          user: _user!,
-          email: normalizedEmail,
-          password: password,
-        ),
-      );
     }
 
     final prefs = await SharedPreferences.getInstance();
@@ -715,7 +735,7 @@ class AppState extends ChangeNotifier {
       } else if (role == 'teacher') {
         await _loadLearnerData(cloudSyncInBackground: true);
         await _ensureStarterData();
-        await _loadTeacherClasses();
+        await refreshTeacherClasses();
       }
       notifyListeners();
     } catch (e, st) {
@@ -726,8 +746,8 @@ class AppState extends ChangeNotifier {
   }
 
   Future<PasswordResetStartOutcome> beginPasswordReset(String email) async {
-    final normalizedEmail = email.trim().toLowerCase();
-    if (normalizedEmail.isEmpty || !normalizedEmail.contains('@')) {
+    final normalizedEmail = AuthValidation.normalizeEmail(email);
+    if (!AuthValidation.isValidEmail(normalizedEmail)) {
       return PasswordResetStartOutcome.error(
         AppStrings.invalidEmail(_language),
       );
@@ -739,37 +759,53 @@ class AppState extends ChangeNotifier {
       );
     }
 
-    if (FirebaseService.instance.isAvailable) {
-      final sent = await FirebaseService.instance.sendPasswordResetEmail(
-        email: normalizedEmail,
-      );
-      if (sent) {
-        return PasswordResetStartOutcome.emailSent();
-      }
-      final hasLocalPassword =
-          user.passwordHash != null && user.passwordHash!.isNotEmpty;
-      if (hasLocalPassword) {
-        return PasswordResetStartOutcome.localPasswordStep();
-      }
-      return PasswordResetStartOutcome.error(
-        AppStrings.passwordResetEmailFailed(_language),
-      );
-    }
-
-    if (user.isOnlineAccount) {
+    if (!FirebaseService.instance.isAvailable) {
       return PasswordResetStartOutcome.error(
         AppStrings.localPasswordResetUnavailable(_language),
       );
     }
 
-    return PasswordResetStartOutcome.localPasswordStep();
+    if (user.firebaseUid == null || user.firebaseUid!.trim().isEmpty) {
+      final uid =
+          await FirebaseService.instance.provisionAuthAccountForPasswordReset(
+        email: normalizedEmail,
+      );
+      if (uid != null) {
+        await _repo.linkFirebaseUid(user.id, uid);
+      }
+    }
+
+    final result = await FirebaseService.instance.sendPasswordResetEmail(
+      email: normalizedEmail,
+    );
+    if (result.success) {
+      return PasswordResetStartOutcome.emailSent();
+    }
+
+    return PasswordResetStartOutcome.error(
+      _passwordResetErrorMessage(result.errorCode),
+    );
+  }
+
+  String _passwordResetErrorMessage(String? code) {
+    switch (code) {
+      case 'too-many-requests':
+        return AppStrings.passwordResetTooManyRequests(_language);
+      case 'invalid-email':
+        return AppStrings.invalidEmail(_language);
+      case 'unavailable':
+      case 'timeout':
+        return AppStrings.localPasswordResetUnavailable(_language);
+      default:
+        return AppStrings.passwordResetEmailFailed(_language);
+    }
   }
 
   Future<String?> completeLocalPasswordReset(
     String email,
     String newPassword,
   ) async {
-    if (newPassword.length < 6) {
+    if (!AuthValidation.isStrongPassword(newPassword)) {
       return AppStrings.passwordTooShort(_language);
     }
     final normalizedEmail = email.trim().toLowerCase();
@@ -1063,6 +1099,127 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> refreshTeacherClasses() async {
+    if (_user == null || !_user!.isTeacher) {
+      _teacherClasses = [];
+      notifyListeners();
+      return;
+    }
+    await _syncTeacherClassesFromCloud();
+    await _loadTeacherClasses();
+    notifyListeners();
+  }
+
+  Future<int> getTeacherStudentCount() async {
+    if (_user == null || !_user!.isTeacher) return 0;
+    final local = await _repo.getTeacherClassStudents(_user!.id);
+    final localCount = local.length;
+    if (!_notificationSync.isCloudAvailable) return localCount;
+
+    final teacherFirebaseUid =
+        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) {
+      return localCount;
+    }
+
+    try {
+      final enrollments = await _notificationSync
+          .getClassEnrollmentsFromCloud(teacherFirebaseUid)
+          .timeout(const Duration(seconds: 12));
+      final cloudUnique = enrollments
+          .map((e) => e.learnerFirebaseUid.trim())
+          .where((uid) => uid.isNotEmpty)
+          .toSet()
+          .length;
+      return localCount > cloudUnique ? localCount : cloudUnique;
+    } catch (e, st) {
+      debugPrint('Cloud teacher student count failed: $e\n$st');
+      return localCount;
+    }
+  }
+
+  Future<void> _syncTeacherClassesFromCloud() async {
+    if (_user == null || !_user!.isTeacher) return;
+    if (!_notificationSync.isCloudAvailable) return;
+
+    final teacherFirebaseUid =
+        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) return;
+
+    try {
+      final localClasses = await _repo.getTeacherClasses(_user!.id);
+      for (final teacherClass in localClasses) {
+        await _notificationSync.syncTeacherClass(
+          classCode: teacherClass.code,
+          className: teacherClass.name,
+          teacherFirebaseUid: teacherFirebaseUid,
+          teacherUserId: _user!.id,
+          createdAt: DateTime.now(),
+        );
+      }
+
+      final remoteClasses = await _notificationSync
+          .getTeacherClassesFromCloud(teacherFirebaseUid)
+          .timeout(const Duration(seconds: 12));
+      await _repo.mergeRemoteTeacherClasses(
+        teacherUserId: _user!.id,
+        remoteClasses: remoteClasses,
+      );
+
+      final enrollments = await _notificationSync
+          .getClassEnrollmentsFromCloud(teacherFirebaseUid)
+          .timeout(const Duration(seconds: 12));
+      await _repo.mergeRemoteEnrollmentsForTeacher(
+        teacherUserId: _user!.id,
+        enrollments: enrollments,
+      );
+    } catch (e, st) {
+      debugPrint('Teacher class cloud sync failed: $e\n$st');
+    }
+  }
+
+  Future<void> _pushTeacherClassToCloud({
+    required String classCode,
+    required String className,
+  }) async {
+    if (_user == null || !_user!.isTeacher) return;
+    final teacherFirebaseUid =
+        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) return;
+
+    await _notificationSync.syncTeacherClass(
+      classCode: classCode,
+      className: className,
+      teacherFirebaseUid: teacherFirebaseUid,
+      teacherUserId: _user!.id,
+      createdAt: DateTime.now(),
+    );
+  }
+
+  Future<List<TeacherRecentAlert>> getTeacherRecentAlerts({int limit = 4}) async {
+    if (_user == null || !_user!.isTeacher) return [];
+    return _repo.getRecentAlertsForTeacher(
+      teacherUserId: _user!.id,
+      limit: limit,
+    );
+  }
+
+  Future<List<TeacherRecentAlert>> getTeacherAlertHistory({int limit = 100}) async {
+    if (_user == null || !_user!.isTeacher) return [];
+    return _repo.getRecentAlertsForTeacher(
+      teacherUserId: _user!.id,
+      limit: limit,
+    );
+  }
+
+  Future<List<TeacherRecentLesson>> getTeacherRecentLessons({int limit = 8}) async {
+    if (_user == null || !_user!.isTeacher) return [];
+    return _repo.getRecentLessonsForTeacher(
+      teacherUserId: _user!.id,
+      limit: limit,
+    );
+  }
+
   void selectChild(int learnerId) {
     if (_linkedChildren.any((c) => c.learnerId == learnerId)) {
       _selectedChildId = learnerId;
@@ -1148,11 +1305,14 @@ class AppState extends ChangeNotifier {
       teacherUserId: _user!.id,
       className: className,
     );
-    if (result == 'empty') {
+    if (result.error == 'empty') {
       return AppStrings.enterClassName(_language);
     }
-    await _loadTeacherClasses();
-    notifyListeners();
+    await _pushTeacherClassToCloud(
+      classCode: result.code,
+      className: result.name,
+    );
+    await refreshTeacherClasses();
     return null;
   }
 
@@ -1160,13 +1320,17 @@ class AppState extends ChangeNotifier {
     if (_user == null || !_user!.isTeacher) {
       return AppStrings.notSignedIn(_language);
     }
+    final classRow = await _repo.findClassById(classId);
+    final classCode = classRow?['class_code'] as String?;
     final ok = await _repo.deleteTeacherClass(
       teacherUserId: _user!.id,
       classId: classId,
     );
     if (!ok) return AppStrings.classNotFound(_language);
-    await _loadTeacherClasses();
-    notifyListeners();
+    if (classCode != null && classCode.isNotEmpty) {
+      await _notificationSync.removeTeacherClass(classCode: classCode);
+    }
+    await refreshTeacherClasses();
     return null;
   }
 
@@ -1329,32 +1493,6 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<bool> _ensureClassEnrollmentSyncedForAlert({
-    required String teacherFirebaseUid,
-    required int learnerUserId,
-    required String learnerName,
-    required String learnerFirebaseUid,
-    required int classId,
-    required String className,
-  }) async {
-    if (!_notificationSync.isCloudAvailable) return false;
-    final classRow = await _repo.findClassById(classId);
-    if (classRow == null) return false;
-    final teacherUserId = classRow['teacher_user_id'] as int?;
-    if (_user == null || teacherUserId != _user!.id) return false;
-
-    await _notificationSync.syncClassEnrollment(
-      classId: classId,
-      classCode: (classRow['class_code'] as String?) ?? '',
-      className: (classRow['class_name'] as String?) ?? className,
-      teacherFirebaseUid: teacherFirebaseUid,
-      learnerUserId: learnerUserId,
-      learnerName: learnerName,
-      learnerFirebaseUid: learnerFirebaseUid,
-    );
-    return true;
-  }
-
   Future<TeacherAlertDeliveryResult> sendTeacherAlert({
     required int learnerUserId,
     required String learnerName,
@@ -1420,78 +1558,22 @@ class AppState extends ChangeNotifier {
     }
 
     final offline = await NetworkStatus.isOffline();
-    if (offline) {
-      final sms = await _deviceSms.sendEmergencyAlert(
-        rawContacts: contacts,
-        message: smsText,
-      );
-      return TeacherAlertDeliveryResult(
-        inAppError: inAppError ?? AppStrings.inAppNeedsInternet(_language),
-        sms: SmsAlertResult(
-          attempted: sms.attempted,
-          sent: sms.sent,
-          failed: sms.failed,
-          invalidContacts: sms.invalidContacts,
-          errorMessage: sms.errorMessage,
-          sentViaDevice: true,
-        ),
-      );
-    }
-
-    final learnerFirebaseUid = await _repo.getFirebaseUidForUser(learnerUserId);
-    SmsAlertResult sms = const SmsAlertResult(attempted: 0, sent: 0, failed: 0);
-
-    if (learnerFirebaseUid != null && learnerFirebaseUid.isNotEmpty) {
-      final authedUid = await FirebaseService.instance.ensureCallableAuth();
-      if (authedUid != null) {
-        await _ensureClassEnrollmentSyncedForAlert(
-          teacherFirebaseUid: authedUid,
-          learnerUserId: learnerUserId,
-          learnerName: learnerName,
-          learnerFirebaseUid: learnerFirebaseUid,
-          classId: classId,
-          className: className,
-        );
-        sms = await _smsAlert.sendTeacherSmsAlert(
-          learnerUserId: learnerUserId,
-          learnerName: learnerName,
-          learnerFirebaseUid: learnerFirebaseUid,
-          classId: classId,
-          className: className,
-          alertType: alertType.name,
-          title: title,
-          body: body,
-        );
-      } else {
-        sms = SmsAlertResult(
-          attempted: 0,
-          sent: 0,
-          failed: 0,
-          errorMessage: AppStrings.smsSignInRequired(_language),
-        );
-      }
-    }
-
-    if (!sms.isSuccess) {
-      final deviceSms = await _deviceSms.sendEmergencyAlert(
-        rawContacts: contacts,
-        message: smsText,
-      );
-      if (deviceSms.sent > 0 || deviceSms.errorMessage == null) {
-        sms = SmsAlertResult(
-          attempted: deviceSms.attempted,
-          sent: deviceSms.sent,
-          failed: deviceSms.failed,
-          invalidContacts: deviceSms.invalidContacts,
-          errorMessage: deviceSms.errorMessage,
-          sentViaDevice: true,
-        );
-      }
-    }
+    final sms = await _deviceSms.sendEmergencyAlert(
+      rawContacts: contacts,
+      message: smsText,
+    );
 
     return TeacherAlertDeliveryResult(
-      inAppError: inAppError,
-      sms: sms,
+      inAppError: inAppError ??
+          (offline ? AppStrings.inAppNeedsInternet(_language) : null),
+      sms: SmsAlertResult(
+        attempted: sms.attempted,
+        sent: sms.sent,
+        failed: sms.failed,
+        invalidContacts: sms.invalidContacts,
+        errorMessage: sms.errorMessage,
+        sentViaDevice: true,
+      ),
     );
   }
 
@@ -1767,6 +1849,12 @@ class AppState extends ChangeNotifier {
 
   Future<String?> changePassword(String currentPassword, String newPassword) async {
     if (_user == null) return AppStrings.notSignedIn(_language);
+    if (currentPassword.isEmpty || newPassword.isEmpty) {
+      return AppStrings.fillAllFields(_language);
+    }
+    if (!AuthValidation.isStrongPassword(newPassword)) {
+      return AppStrings.passwordTooShort(_language);
+    }
     final ok = await _repo.updateUserPassword(_user!.id, currentPassword, newPassword);
     if (!ok) return AppStrings.wrongCurrentPassword(_language);
     _user = _user!.copyWith(passwordHash: AppRepository.hashPassword(newPassword));

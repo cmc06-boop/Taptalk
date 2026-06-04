@@ -5,8 +5,12 @@ import 'package:provider/provider.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
+import '../data/models/teacher_recent_alert.dart';
+import '../data/models/teacher_recent_lesson.dart';
 import '../providers/app_state.dart';
+import '../widgets/class_color_card.dart';
 import '../widgets/learner_scaffold.dart';
+import '../widgets/teacher_alert_card.dart';
 
 class TeacherDashboardScreen extends StatefulWidget {
   const TeacherDashboardScreen({super.key});
@@ -17,6 +21,8 @@ class TeacherDashboardScreen extends StatefulWidget {
 
 class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
   int _studentCount = 0;
+  List<TeacherRecentAlert> _recentAlerts = [];
+  List<TeacherRecentLesson> _recentLessons = [];
   bool _loading = true;
 
   @override
@@ -26,12 +32,23 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
   }
 
   Future<void> _load() async {
-    final students = await context.read<AppState>().getTeacherClassStudents();
-    if (!mounted) return;
-    setState(() {
-      _studentCount = students.length;
-      _loading = false;
-    });
+    final app = context.read<AppState>();
+    try {
+      await app.refreshTeacherClasses();
+      final studentCount = await app.getTeacherStudentCount();
+      final alerts = await app.getTeacherRecentAlerts();
+      final lessons = await app.getTeacherRecentLessons();
+      if (!mounted) return;
+      setState(() {
+        _studentCount = studentCount;
+        _recentAlerts = alerts;
+        _recentLessons = lessons;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
   }
 
   @override
@@ -40,89 +57,72 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
     final theme = app.theme;
     final lang = app.language;
     final classCount = app.teacherClasses.length;
-    final name = app.user?.fullName ?? '';
     final accent = theme.bgAccent;
 
     return LearnerScaffold(
       title: AppStrings.appName(lang),
       currentRoute: AppRoute.teacherDashboard,
       showBottomNav: false,
-      body: ListView(
-        padding: EdgeInsets.zero,
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              AppSpacing.md,
-              AppSpacing.lg,
-              AppSpacing.xl,
-            ),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Color.alphaBlend(
-                    accent.withValues(alpha: 0.85),
-                    const Color(0xFF3ECF8E),
-                  ),
-                  Color.alphaBlend(
-                    accent.withValues(alpha: 0.35),
-                    const Color(0xFFB3E6CC),
-                  ),
-                ],
+      body: RefreshIndicator(
+        onRefresh: _load,
+        color: accent,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.md,
+                AppSpacing.lg,
+                AppSpacing.lg,
               ),
-              borderRadius: const BorderRadius.only(
-                bottomLeft: Radius.circular(28),
-                bottomRight: Radius.circular(28),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    accent,
+                    Color.lerp(accent, theme.bgMid, 0.45) ?? theme.bgMid,
+                  ],
+                ),
+                borderRadius: const BorderRadius.only(
+                  bottomLeft: Radius.circular(28),
+                  bottomRight: Radius.circular(28),
+                ),
               ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  lang == AppLanguage.filipino
-                      ? 'Kumusta, $name'
-                      : 'Hello, $name',
-                  style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white.withValues(alpha: 0.92),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    AppStrings.dashboard(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                      height: 1.15,
+                    ),
                   ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  AppStrings.dashboard(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                    height: 1.15,
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    AppStrings.teacherDashboardSubtitle(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      color: Colors.white.withValues(alpha: 0.88),
+                      height: 1.35,
+                    ),
                   ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  AppStrings.teacherDashboardSubtitle(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 13,
-                    color: Colors.white.withValues(alpha: 0.88),
-                    height: 1.35,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Transform.translate(
-            offset: const Offset(0, -28),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: _loading
-                  ? const Padding(
-                      padding: EdgeInsets.all(AppSpacing.xxl),
-                      child: Center(child: CircularProgressIndicator()),
+                  const SizedBox(height: AppSpacing.lg),
+                  if (_loading)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
+                      child: Center(
+                        child: CircularProgressIndicator(color: Colors.white),
+                      ),
                     )
-                  : Row(
+                  else
+                    Row(
                       children: [
                         Expanded(
                           child: _ModernStatCard(
@@ -143,60 +143,233 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                         ),
                       ],
                     ),
+                ],
+              ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              AppSpacing.sm,
-              AppSpacing.lg,
-              AppSpacing.xxl,
+            _SectionHeader(
+              theme: theme,
+              title: AppStrings.recentAlerts(lang),
+              actionLabel: AppStrings.viewAll(lang),
+              onAction: () => app.setRoute(AppRoute.teacherAlertHistory),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  lang == AppLanguage.filipino
-                      ? 'Mabilis na aksyon'
-                      : 'Quick actions',
-                  style: GoogleFonts.poppins(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: theme.textMain,
+            if (_loading)
+              const SizedBox.shrink()
+            else if (_recentAlerts.isEmpty)
+              _EmptySectionCard(
+                theme: theme,
+                message: AppStrings.noRecentAlerts(lang),
+                icon: Icons.notifications_none_rounded,
+              )
+            else
+              ..._recentAlerts.map(
+                (alert) => Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    0,
+                    AppSpacing.lg,
+                    AppSpacing.sm,
+                  ),
+                  child: TeacherAlertCard(
+                    theme: theme,
+                    alertType: alert.alertType,
+                    studentName: AppStrings.shortChildName(alert.childName),
+                    timeLabel: AppStrings.timeAgo(alert.createdAt, lang),
+                    description: AppStrings.alertTypeLabel(lang, alert.alertType),
+                    className: alert.className,
+                    onTap: () => app.setRoute(AppRoute.teacherAlertHistory),
                   ),
                 ),
-                const SizedBox(height: AppSpacing.md),
-                _QuickActionCard(
-                  theme: theme,
-                  icon: Icons.class_rounded,
-                  title: AppStrings.myClasses(lang),
-                  subtitle: lang == AppLanguage.filipino
-                      ? 'Gumawa at pamahalaan ang mga klase'
-                      : 'Create and manage your classes',
-                  accent: accent,
-                  onTap: () => app.setRoute(AppRoute.teacherMyClasses),
+              ),
+            const SizedBox(height: AppSpacing.md),
+            _SectionHeader(
+              theme: theme,
+              title: AppStrings.recentLessons(lang),
+              actionLabel: AppStrings.viewAll(lang),
+              onAction: () => app.setRoute(AppRoute.teacherMyClasses),
+            ),
+            if (_loading)
+              const SizedBox.shrink()
+            else if (_recentLessons.isEmpty)
+              _EmptySectionCard(
+                theme: theme,
+                message: AppStrings.noRecentLessons(lang),
+                icon: Icons.menu_book_outlined,
+              )
+            else
+              SizedBox(
+                height: 168,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                  itemCount: _recentLessons.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
+                  itemBuilder: (context, index) {
+                    final lesson = _recentLessons[index];
+                    return ClassColorCard(
+                      classId: lesson.classId,
+                      title: lesson.title,
+                      badge: lesson.className,
+                      subtitle:
+                          '${AppStrings.phrasesCount(lesson.phraseCount, lang)} · ${AppStrings.timeAgo(lesson.createdAt, lang)}',
+                      icon: Icons.auto_stories_rounded,
+                      layout: ClassColorCardLayout.tile,
+                    );
+                  },
                 ),
-                const SizedBox(height: AppSpacing.sm),
-                _QuickActionCard(
-                  theme: theme,
-                  icon: Icons.monitor_heart_rounded,
-                  title: AppStrings.monitoring(lang),
-                  subtitle: AppStrings.teacherMonitoringSubtitle(lang),
-                  accent: accent,
-                  onTap: () => app.setRoute(AppRoute.teacherMonitoring),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.lg,
+                AppSpacing.lg,
+                AppSpacing.sm,
+              ),
+              child: Text(
+                lang == AppLanguage.filipino
+                    ? 'Mabilis na aksyon'
+                    : 'Quick actions',
+                style: GoogleFonts.poppins(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: theme.textMain,
                 ),
-                const SizedBox(height: AppSpacing.sm),
-                _QuickActionCard(
-                  theme: theme,
-                  icon: Icons.chat_bubble_outline_rounded,
-                  title: AppStrings.forMe(lang),
-                  subtitle: lang == AppLanguage.filipino
-                      ? 'Personal na phrase board'
-                      : 'Your personal phrase board',
-                  accent: accent,
-                  onTap: () => app.setRoute(AppRoute.home),
-                ),
-              ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _QuickActionCard(
+                    theme: theme,
+                    icon: Icons.class_rounded,
+                    title: AppStrings.myClasses(lang),
+                    subtitle: lang == AppLanguage.filipino
+                        ? 'Gumawa at pamahalaan ang mga klase'
+                        : 'Create and manage your classes',
+                    accent: accent,
+                    onTap: () => app.setRoute(AppRoute.teacherMyClasses),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _QuickActionCard(
+                    theme: theme,
+                    icon: Icons.monitor_heart_rounded,
+                    title: AppStrings.monitoring(lang),
+                    subtitle: AppStrings.teacherMonitoringSubtitle(lang),
+                    accent: accent,
+                    onTap: () => app.setRoute(AppRoute.teacherMonitoring),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _QuickActionCard(
+                    theme: theme,
+                    icon: Icons.chat_bubble_outline_rounded,
+                    title: AppStrings.forMe(lang),
+                    subtitle: lang == AppLanguage.filipino
+                        ? 'Personal na phrase board'
+                        : 'Your personal phrase board',
+                    accent: accent,
+                    onTap: () => app.setRoute(AppRoute.home),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({
+    required this.theme,
+    required this.title,
+    required this.actionLabel,
+    required this.onAction,
+  });
+
+  final TapTalkThemeToken theme;
+  final String title;
+  final String actionLabel;
+  final VoidCallback onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.sm,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              style: GoogleFonts.poppins(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: theme.textMain,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: onAction,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Text(
+              actionLabel,
+              style: GoogleFonts.poppins(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: theme.bgAccent,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptySectionCard extends StatelessWidget {
+  const _EmptySectionCard({
+    required this.theme,
+    required this.message,
+    required this.icon,
+  });
+
+  final TapTalkThemeToken theme;
+  final String message;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: theme.bgMid.withValues(alpha: 0.28),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE9EEF2)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: theme.textMain.withValues(alpha: 0.35), size: 22),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              message,
+              style: GoogleFonts.poppins(
+                fontSize: 12,
+                color: theme.textMain.withValues(alpha: 0.68),
+                height: 1.35,
+              ),
             ),
           ),
         ],

@@ -4,8 +4,8 @@ import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
-import '../core/theme/theme_tokens.dart';
 import '../providers/app_state.dart';
+import '../widgets/class_color_card.dart';
 import '../widgets/learner_scaffold.dart';
 import 'teacher_class_monitoring_screen.dart';
 
@@ -126,103 +126,19 @@ class _TeacherMonitoringScreenState extends State<TeacherMonitoringScreen> {
             for (final teacherClass in classes)
               Padding(
                 padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                child: _MonitoringClassCard(
-                  className: teacherClass.name,
-                  studentCount: _studentCounts[teacherClass.id] ?? 0,
-                  theme: theme,
-                  lang: lang,
+                child: ClassColorCard(
+                  classId: teacherClass.id,
+                  title: teacherClass.name,
+                  badge: teacherClass.code,
+                  subtitle: AppStrings.studentsInClass(
+                    _studentCounts[teacherClass.id] ?? 0,
+                    lang,
+                  ),
+                  icon: Icons.monitor_heart_outlined,
                   onTap: () => _openClass(teacherClass),
                 ),
               ),
         ],
-      ),
-    );
-  }
-}
-
-class _MonitoringClassCard extends StatelessWidget {
-  const _MonitoringClassCard({
-    required this.className,
-    required this.studentCount,
-    required this.theme,
-    required this.lang,
-    required this.onTap,
-  });
-
-  final String className;
-  final int studentCount;
-  final TapTalkThemeToken theme;
-  final AppLanguage lang;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = theme.bgAccent;
-
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(14),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFE9EEF2)),
-            boxShadow: [
-              BoxShadow(
-                color: theme.textMain.withValues(alpha: 0.06),
-                blurRadius: 10,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md,
-            vertical: AppSpacing.md,
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(Icons.menu_book_rounded, color: accent, size: 24),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      className,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: theme.textMain,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      AppStrings.studentsInClass(studentCount, lang),
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        color: theme.textMain.withValues(alpha: 0.55),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(Icons.chevron_right_rounded, color: accent, size: 28),
-            ],
-          ),
-        ),
       ),
     );
   }

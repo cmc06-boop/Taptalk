@@ -8,6 +8,7 @@ import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../data/models/class_lesson.dart';
 import '../providers/app_state.dart';
+import '../widgets/class_color_card.dart';
 import '../widgets/create_lesson_dialog.dart';
 import '../widgets/taptalk_result_dialog.dart';
 import '../widgets/learner_scaffold.dart';
@@ -141,29 +142,13 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
               96,
             ),
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Text(
-                      widget.className,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        color: theme.textMain,
-                      ),
-                    ),
-                  ),
-                  _CodeChip(
-                    code: widget.classCode,
-                    theme: theme,
-                    onCopy: _copyCode,
-                  ),
-                ],
+              _ClassHeaderBanner(
+                classId: widget.classId,
+                className: widget.className,
+                classCode: widget.classCode,
+                onCopyCode: _copyCode,
               ),
-              const SizedBox(height: AppSpacing.sm),
+              const SizedBox(height: AppSpacing.lg),
               Text(
                 AppStrings.lessons(lang),
                 style: GoogleFonts.poppins(
@@ -226,15 +211,104 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
   }
 }
 
-class _CodeChip extends StatelessWidget {
-  const _CodeChip({
+class _ClassHeaderBanner extends StatelessWidget {
+  const _ClassHeaderBanner({
+    required this.classId,
+    required this.className,
+    required this.classCode,
+    required this.onCopyCode,
+  });
+
+  final int classId;
+  final String className;
+  final String classCode;
+  final VoidCallback onCopyCode;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = ClassColorPalette.forClass(classId);
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: colors.gradient,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: colors.border, width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: colors.shadow,
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Stack(
+        clipBehavior: Clip.antiAlias,
+        children: [
+          Positioned.fill(
+            child: ClassBubbleDecor(seed: classId),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: colors.iconBg,
+                    borderRadius: BorderRadius.circular(13),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.35),
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.menu_book_rounded,
+                    color: Colors.white,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        className,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      _ClassCodeChip(
+                        code: classCode,
+                        colors: colors,
+                        onCopy: onCopyCode,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ClassCodeChip extends StatelessWidget {
+  const _ClassCodeChip({
     required this.code,
-    required this.theme,
+    required this.colors,
     required this.onCopy,
   });
 
   final String code;
-  final TapTalkThemeToken theme;
+  final ClassColorScheme colors;
   final VoidCallback onCopy;
 
   @override
@@ -245,9 +319,9 @@ class _CodeChip extends StatelessWidget {
         vertical: AppSpacing.xs,
       ),
       decoration: BoxDecoration(
-        color: theme.bgAccent.withValues(alpha: 0.10),
+        color: colors.badgeBg,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: theme.bgAccent.withValues(alpha: 0.28)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -257,7 +331,8 @@ class _CodeChip extends StatelessWidget {
             style: GoogleFonts.poppins(
               fontSize: 11,
               fontWeight: FontWeight.w700,
-              color: theme.bgAccent,
+              color: Colors.white,
+              letterSpacing: 0.5,
             ),
           ),
           const SizedBox(width: 4),
@@ -267,7 +342,7 @@ class _CodeChip extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
-                color: theme.bgAccent,
+                color: Colors.white.withValues(alpha: 0.22),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: const Icon(Icons.copy_rounded, size: 14, color: Colors.white),

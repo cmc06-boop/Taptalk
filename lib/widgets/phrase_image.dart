@@ -12,14 +12,19 @@ class PhraseImage extends StatelessWidget {
     required this.imagePath,
     required this.theme,
     this.aspectRatio = 1.35,
+    this.fill = false,
   });
 
   final String? imagePath;
   final TapTalkThemeToken theme;
   final double aspectRatio;
+  final bool fill;
 
   @override
   Widget build(BuildContext context) {
+    if (fill) {
+      return SizedBox.expand(child: _buildImage());
+    }
     return AspectRatio(
       aspectRatio: aspectRatio,
       child: _buildImage(),

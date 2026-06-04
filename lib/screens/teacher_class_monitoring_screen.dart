@@ -9,6 +9,7 @@ import '../data/models/monitored_learner.dart';
 import '../data/models/parent_notification.dart';
 import '../data/models/teacher_class_student.dart';
 import '../providers/app_state.dart';
+import '../core/utils/parent_alert_icons.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/taptalk_result_dialog.dart';
 import 'child_monitoring_screen.dart';
@@ -127,7 +128,7 @@ class _TeacherClassMonitoringScreenState
                         child: Row(
                           children: [
                             Icon(
-                              Icons.notifications_active_rounded,
+                              ParentAlertIcons.forType(type),
                               size: 18,
                               color: theme.bgAccent,
                             ),
@@ -241,18 +242,12 @@ class _TeacherClassMonitoringScreenState
     final success = delivery.inAppSent || smsOk;
     final smsError = delivery.sms.errorMessage;
     final smsSummary = smsError != null
-        ? switch (smsError) {
-            'unauthenticated' => AppStrings.smsSignInRequired(lang),
-            'permission-denied' => AppStrings.smsEnrollmentSyncRequired(lang),
-            _ => 'SMS: $smsError',
-          }
-        : delivery.sms.sentViaDevice
-            ? AppStrings.smsSentViaPhone(
-                lang,
-                delivery.sms.sent,
-                delivery.sms.attempted,
-              )
-            : 'SMS sent: ${delivery.sms.sent}/${delivery.sms.attempted}';
+        ? 'SMS: $smsError'
+        : AppStrings.smsSentViaPhone(
+            lang,
+            delivery.sms.sent,
+            delivery.sms.attempted,
+          );
     final resultMessage = delivery.inAppError == null
         ? '${AppStrings.alertSent(lang, student.fullName)}\n$smsSummary'
         : '${delivery.inAppError}\n$smsSummary';

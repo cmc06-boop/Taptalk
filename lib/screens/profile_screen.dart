@@ -6,8 +6,10 @@ import 'package:provider/provider.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
+import '../core/utils/auth_validation.dart';
 import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
+import '../widgets/password_strength_hint.dart';
 import '../widgets/panel_card.dart';
 import '../widgets/taptalk_result_dialog.dart';
 
@@ -507,6 +509,12 @@ class _EditPasswordDialogState extends State<_EditPasswordDialog> {
   bool _obscureConfirm = true;
 
   @override
+  void initState() {
+    super.initState();
+    _next.addListener(() => setState(() {}));
+  }
+
+  @override
   void dispose() {
     _current.dispose();
     _next.dispose();
@@ -522,6 +530,10 @@ class _EditPasswordDialogState extends State<_EditPasswordDialog> {
     }
     if (_next.text != _confirm.text) {
       setState(() => _error = AppStrings.passwordsDoNotMatch(lang));
+      return;
+    }
+    if (!AuthValidation.isStrongPassword(_next.text)) {
+      setState(() => _error = AppStrings.passwordTooShort(lang));
       return;
     }
     setState(() {
@@ -568,6 +580,10 @@ class _EditPasswordDialogState extends State<_EditPasswordDialog> {
                 theme: theme,
                 obscure: _obscureNext,
                 onToggleObscure: () => setState(() => _obscureNext = !_obscureNext),
+              ),
+              PasswordStrengthHint(
+                password: _next.text,
+                lang: lang,
               ),
               const SizedBox(height: AppSpacing.sm),
               _ProfileField(

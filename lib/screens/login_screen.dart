@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
+import '../core/utils/auth_validation.dart';
 import '../providers/app_state.dart';
 import '../widgets/taptalk_logo.dart';
 import '../widgets/taptalk_shell.dart';
@@ -16,6 +17,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  final _formKey = GlobalKey<FormState>();
   final _email = TextEditingController();
   final _password = TextEditingController();
   String? _error;
@@ -30,6 +32,11 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) {
+      setState(() => _error = null);
+      return;
+    }
+
     setState(() {
       _error = null;
       _busy = true;
@@ -118,7 +125,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         contentHorizontal,
                         compactHeight ? 14 : 18,
                       ),
-                      child: Column(
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           Center(child: TapTalkLogo(size: logoSize)),
@@ -141,15 +150,37 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ],
                           SizedBox(height: sectionGap),
-                          _field(AppStrings.email(lang), _email,
-                              keyboard: TextInputType.emailAddress),
+                          _field(
+                            AppStrings.email(lang),
+                            _email,
+                            keyboard: TextInputType.emailAddress,
+                            textInputAction: TextInputAction.next,
+                            autocorrect: false,
+                            validator: (value) {
+                              if (value == null || value.trim().isEmpty) {
+                                return AppStrings.fillAllFields(lang);
+                              }
+                              if (!AuthValidation.isValidEmail(value)) {
+                                return AppStrings.invalidEmail(lang);
+                              }
+                              return null;
+                            },
+                          ),
                           SizedBox(height: fieldGap),
                           _field(
                             AppStrings.password(lang),
                             _password,
                             obscure: _obscurePassword,
+                            textInputAction: TextInputAction.done,
+                            onFieldSubmitted: (_) => _submit(),
                             onToggleObscure: () =>
                                 setState(() => _obscurePassword = !_obscurePassword),
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return AppStrings.fillAllFields(lang);
+                              }
+                              return null;
+                            },
                           ),
                           SizedBox(height: compactHeight ? 6 : 8),
                           Align(
@@ -229,6 +260,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           SizedBox(height: compactHeight ? 4 : 6),
                         ],
+                        ),
                       ),
                     ),
                   ),
@@ -247,6 +279,10 @@ class _LoginScreenState extends State<LoginScreen> {
     bool obscure = false,
     VoidCallback? onToggleObscure,
     TextInputType? keyboard,
+    TextInputAction? textInputAction,
+    bool autocorrect = true,
+    ValueChanged<String>? onFieldSubmitted,
+    String? Function(String?)? validator,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -256,14 +292,19 @@ class _LoginScreenState extends State<LoginScreen> {
           style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: AppSpacing.xs),
-        TextField(
+        TextFormField(
           controller: controller,
           obscureText: obscure,
           keyboardType: keyboard,
+          textInputAction: textInputAction,
+          autocorrect: autocorrect,
+          onFieldSubmitted: onFieldSubmitted,
+          validator: validator,
           decoration: InputDecoration(
             filled: true,
             fillColor: const Color(0xFFEFF8F3),
             contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            errorStyle: GoogleFonts.poppins(fontSize: 11),
             suffixIcon: onToggleObscure == null
                 ? null
                 : IconButton(
@@ -289,6 +330,14 @@ class _LoginScreenState extends State<LoginScreen> {
                 color: const Color(0xFF5BB88A).withValues(alpha: 0.65),
                 width: 1.6,
               ),
+            ),
+            errorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFC62828)),
+            ),
+            focusedErrorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFC62828), width: 1.6),
             ),
           ),
         ),

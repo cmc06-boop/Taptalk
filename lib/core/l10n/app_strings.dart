@@ -81,8 +81,28 @@ abstract final class AppStrings {
       : 'Enter a valid email address.';
 
   static String passwordTooShort(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Dapat ay hindi bababa sa 6 na character ang password.'
-      : 'Password must be at least 6 characters.';
+      ? 'Dapat ay hindi bababa sa 8 na character ang password at may malaki/maliit na titik, numero, at simbolo.'
+      : 'Password must be at least 8 characters with upper, lower, number, and symbol.';
+
+  static String passwordRequirements(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Hindi bababa sa 8 character, may malaki/maliit na titik, numero, at simbolo.'
+      : 'At least 8 characters with upper, lower, number, and symbol.';
+
+  static String strongPassword(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Malakas na password'
+      : 'Strong password';
+
+  static String weakPassword(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Mahinang password'
+      : 'Weak password';
+
+  static String wrongPassword(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Maling password.'
+      : 'Incorrect password.';
+
+  static String invalidFullName(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Maglagay ng buong pangalan (hindi bababa sa 2 character).'
+      : 'Enter your full name (at least 2 characters).';
 
   static String whatAreYou(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Sino ka?'
@@ -504,6 +524,80 @@ abstract final class AppStrings {
   static String myChild(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Aking Anak' : 'My child';
 
+  static String parentDashboard(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Dashboard' : 'Dashboard';
+
+  static String parentDashboardSubtitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Subaybayan ang alerts, aralin, at progress ng anak.'
+          : 'Track alerts, lessons, and your child\'s progress.';
+
+  static String recentAlerts(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Kamakailang Alerts' : 'Recent Alerts';
+
+  static String recentLessons(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Kamakailang Aralin' : 'Recent Lessons';
+
+  static String viewAll(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Tingnan lahat' : 'View all';
+
+  static String alertHistory(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Kasaysayan ng Alerts' : 'Alert History';
+
+  static String alertHistorySubtitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Lahat ng alert na ipinadala mo sa mga magulang.'
+          : 'All alerts you sent to parents.';
+
+  static String noRecentAlerts(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Walang alert pa. Lalabas dito ang mga alert na ipinadala mo sa magulang.'
+      : 'No alerts yet. Alerts you send to parents will appear here.';
+
+  static String noRecentLessons(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Walang bagong aralin pa. Gumawa ng lesson sa My Classes.'
+      : 'No lessons yet. Create one from My Classes.';
+
+  static String linkedChildren(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Mga Naka-link na Anak'
+      : 'Linked Children';
+
+  static String timeAgo(DateTime date, AppLanguage lang) {
+    final diff = DateTime.now().difference(date);
+    if (diff.inSeconds < 60) {
+      return lang == AppLanguage.filipino ? 'Ngayon lang' : 'Just now';
+    }
+    if (diff.inMinutes < 60) {
+      final minutes = diff.inMinutes;
+      return lang == AppLanguage.filipino
+          ? '$minutes min ang nakalipas'
+          : '$minutes mins ago';
+    }
+    if (diff.inHours < 24) {
+      final hours = diff.inHours;
+      if (lang == AppLanguage.filipino) {
+        return hours == 1 ? '1 oras ang nakalipas' : '$hours oras ang nakalipas';
+      }
+      return hours == 1 ? '1 hour ago' : '$hours hours ago';
+    }
+    if (diff.inDays < 7) {
+      final days = diff.inDays;
+      if (lang == AppLanguage.filipino) {
+        return days == 1 ? '1 araw ang nakalipas' : '$days araw ang nakalipas';
+      }
+      return days == 1 ? '1 day ago' : '$days days ago';
+    }
+    return lang == AppLanguage.filipino
+        ? '${date.day}/${date.month}/${date.year}'
+        : '${date.month}/${date.day}/${date.year}';
+  }
+
+  static String shortChildName(String fullName) {
+    final parts = fullName.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty || parts.first.isEmpty) return fullName;
+    if (parts.length == 1) return parts.first;
+    return '${parts.first} ${parts.last[0]}.';
+  }
+
   static String notifications(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Mga Abiso' : 'Notifications';
 
@@ -564,12 +658,12 @@ abstract final class AppStrings {
       : 'Reset Password';
 
   static String forgotPasswordHint(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Ilagay ang email ng account mo para mag-set ng bagong password.'
-      : 'Enter your account email to set a new password.';
+      ? 'Ilagay ang email na ginamit mo sa sign up. Magpapadala kami ng reset link sa inbox mo.'
+      : 'Enter the email you used to sign up. We\'ll send a reset link to that inbox.';
 
   static String sendResetLink(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Magpatuloy'
-      : 'Continue';
+      ? 'Ipadala ang reset link'
+      : 'Send reset link';
 
   static String backToLogin(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Bumalik sa login'
@@ -604,6 +698,19 @@ abstract final class AppStrings {
       lang == AppLanguage.filipino
           ? 'Hindi maipadala ang reset link. Suriin ang email at subukan muli.'
           : 'Could not send reset link. Check the email and try again.';
+
+  static String passwordResetTooManyRequests(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Masyadong maraming request. Subukan muli pagkalipas ng ilang minuto.'
+          : 'Too many requests. Try again in a few minutes.';
+
+  static String signUpRequiresInternet(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Kailangan ng internet para mag-sign up. Gamitin ang valid na email (Gmail o iba pa).'
+      : 'Internet is required to sign up. Use a valid email address (Gmail or any inbox).';
+
+  static String signUpOnlineAccountFailed(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Hindi makagawa ng online account. Suriin ang internet at subukan muli.'
+      : 'Could not create your online account. Check your internet and try again.';
 
   static String ok(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'OK' : 'OK';

@@ -39,11 +39,11 @@ class PhraseCard extends StatelessWidget {
     final lang = app.language;
     final cardRadius = dense ? AppSpacing.radiusMd : AppSpacing.radiusLg;
     final edgePad = dense ? AppSpacing.xs : AppSpacing.sm;
-    final imageAspect = dense ? 1.15 : 1.45;
-    final actionHeight = dense ? 28.0 : 34.0;
-    final actionIcon = dense ? 14.0 : 16.0;
-    final labelSize = dense ? 9.0 : 11.0;
-    final titleSize = dense ? 10.0 : 12.0;
+    final actionHeight = dense ? 28.0 : 32.0;
+    final actionIcon = dense ? 14.0 : 15.0;
+    final labelSize = dense ? 9.0 : 10.0;
+    final titleSize = dense ? 9.5 : 11.0;
+    final phraseText = app.localizedPhraseText(phrase);
 
     return Material(
       color: theme.bgMid,
@@ -66,121 +66,130 @@ class PhraseCard extends StatelessWidget {
               ),
             ],
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: EdgeInsets.fromLTRB(edgePad, edgePad, edgePad, 0),
-                child: Stack(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(
-                        dense ? AppSpacing.radiusSm : AppSpacing.radiusMd,
-                      ),
-                      child: PhraseImage(
-                        imagePath: phrase.imagePath,
-                        theme: theme,
-                        aspectRatio: imageAspect,
-                      ),
-                    ),
-                    if (showFavorite)
-                      Positioned(
-                        top: dense ? 4 : 6,
-                        right: dense ? 4 : 6,
-                        child: _StarButton(
-                          active: isFavorite,
-                          onTap: onFavorite,
-                          size: dense ? 22 : 28,
-                          iconSize: dense ? 14 : 17,
+          child: Padding(
+            padding: EdgeInsets.all(edgePad),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Positioned.fill(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(
+                            dense ? AppSpacing.radiusSm : AppSpacing.radiusMd,
+                          ),
+                          child: PhraseImage(
+                            imagePath: phrase.imagePath,
+                            theme: theme,
+                            fill: true,
+                          ),
                         ),
                       ),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: EdgeInsets.fromLTRB(edgePad, AppSpacing.xs, edgePad, 0),
-                child: Text(
-                  app.localizedPhraseText(phrase),
-                  textAlign: TextAlign.center,
-                  maxLines: dense ? 2 : 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.poppins(
-                    fontSize: titleSize,
-                    fontWeight: FontWeight.w800,
-                    color: theme.textMain,
-                    height: 1.05,
+                      if (showFavorite)
+                        Positioned(
+                          top: dense ? 4 : 6,
+                          right: dense ? 4 : 6,
+                          child: _StarButton(
+                            active: isFavorite,
+                            onTap: onFavorite,
+                            size: dense ? 22 : 28,
+                            iconSize: dense ? 14 : 17,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-              ),
-              Padding(
-                padding: EdgeInsets.fromLTRB(
-                  edgePad,
-                  AppSpacing.xs,
-                  edgePad,
-                  edgePad,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: onSpeak,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: theme.bgAccent,
-                          foregroundColor: Colors.white,
-                          minimumSize: Size(0, actionHeight),
-                          padding: EdgeInsets.symmetric(
-                            horizontal: dense ? 2 : AppSpacing.xs,
-                            vertical: dense ? 2 : AppSpacing.xs,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(
-                              dense ? 8 : AppSpacing.radiusSm,
-                            ),
-                          ),
-                          elevation: 0,
-                        ),
-                        icon: Icon(Icons.volume_up_rounded, size: actionIcon),
-                        label: dense
-                            ? const SizedBox.shrink()
-                            : Text(
-                                AppStrings.speak(lang),
-                                style: GoogleFonts.poppins(
-                                  fontSize: labelSize,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
+                SizedBox(height: dense ? 3 : AppSpacing.xs),
+                SizedBox(
+                  height: dense ? 28 : 32,
+                  child: Center(
+                    child: Text(
+                      phraseText,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(
+                        fontSize: titleSize,
+                        fontWeight: FontWeight.w800,
+                        color: theme.textMain,
+                        height: 1.12,
                       ),
                     ),
-                    if (showDelete) ...[
-                      SizedBox(width: dense ? AppSpacing.xs : AppSpacing.sm),
-                      Material(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(
-                          dense ? 8 : AppSpacing.radiusSm,
-                        ),
-                        elevation: 0,
-                        child: InkWell(
-                          onTap: onDelete,
-                          borderRadius: BorderRadius.circular(
-                            dense ? 8 : AppSpacing.radiusSm,
-                          ),
-                          child: SizedBox(
-                            width: actionHeight,
-                            height: actionHeight,
-                            child: Icon(
-                              Icons.delete_outline_rounded,
-                              size: dense ? 15 : 18,
-                              color: const Color(0xFF5C3D2E),
+                  ),
+                ),
+                SizedBox(height: dense ? 3 : AppSpacing.xs),
+                SizedBox(
+                  height: actionHeight,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final compactSpeak = constraints.maxWidth < 108;
+                      return Row(
+                        children: [
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: onSpeak,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: theme.bgAccent,
+                                foregroundColor: Colors.white,
+                                minimumSize: Size(0, actionHeight),
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: compactSpeak ? 0 : AppSpacing.xs,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(
+                                    dense ? 8 : AppSpacing.radiusSm,
+                                  ),
+                                ),
+                                elevation: 0,
+                              ),
+                              icon: Icon(Icons.volume_up_rounded, size: actionIcon),
+                              label: dense || compactSpeak
+                                  ? const SizedBox.shrink()
+                                  : Text(
+                                      AppStrings.speak(lang),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: labelSize,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
                             ),
                           ),
-                        ),
-                      ),
-                    ],
-                  ],
+                          if (showDelete) ...[
+                            SizedBox(width: dense ? AppSpacing.xs : AppSpacing.sm),
+                            Material(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(
+                                dense ? 8 : AppSpacing.radiusSm,
+                              ),
+                              elevation: 0,
+                              child: InkWell(
+                                onTap: onDelete,
+                                borderRadius: BorderRadius.circular(
+                                  dense ? 8 : AppSpacing.radiusSm,
+                                ),
+                                child: SizedBox(
+                                  width: actionHeight,
+                                  height: actionHeight,
+                                  child: Icon(
+                                    Icons.delete_outline_rounded,
+                                    size: dense ? 15 : 18,
+                                    color: const Color(0xFF5C3D2E),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      );
+                    },
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

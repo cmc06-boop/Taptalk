@@ -217,6 +217,44 @@ class NotificationSyncService {
     return students;
   }
 
+  Future<void> syncTeacherClass({
+    required String classCode,
+    required String className,
+    required String teacherFirebaseUid,
+    required int teacherUserId,
+    required DateTime createdAt,
+  }) async {
+    if (!_cloud.isAvailable || teacherFirebaseUid.trim().isEmpty) return;
+    await _cloud.upsertTeacherClass(
+      TeacherClassCloudEvent(
+        classCode: classCode,
+        className: className,
+        teacherFirebaseUid: teacherFirebaseUid,
+        teacherUserId: teacherUserId,
+        createdAt: createdAt,
+      ),
+    );
+  }
+
+  Future<void> removeTeacherClass({required String classCode}) async {
+    if (!_cloud.isAvailable || classCode.trim().isEmpty) return;
+    await _cloud.removeTeacherClass(classCode: classCode);
+  }
+
+  Future<List<RemoteTeacherClass>> getTeacherClassesFromCloud(
+    String teacherFirebaseUid,
+  ) async {
+    if (!_cloud.isAvailable || teacherFirebaseUid.trim().isEmpty) return const [];
+    return _cloud.getTeacherClassesForTeacher(teacherFirebaseUid);
+  }
+
+  Future<List<RemoteClassEnrollment>> getClassEnrollmentsFromCloud(
+    String teacherFirebaseUid,
+  ) async {
+    if (!_cloud.isAvailable || teacherFirebaseUid.trim().isEmpty) return const [];
+    return _cloud.getClassEnrollmentsForTeacher(teacherFirebaseUid);
+  }
+
   Future<void> syncLearnerEmergencyContacts({
     required int learnerUserId,
     required String learnerName,

@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+import '../core/utils/parent_alert_icons.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
@@ -56,14 +57,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     ).format(date);
   }
 
-  static IconData _iconFor(ParentAlertType type) {
-    return switch (type) {
-      ParentAlertType.needsAttention => Icons.priority_high_rounded,
-      ParentAlertType.distress => Icons.sentiment_dissatisfied_outlined,
-      ParentAlertType.schoolNeeded => Icons.school_outlined,
-      ParentAlertType.teacherAlert => Icons.campaign_outlined,
-    };
-  }
+  static IconData _iconFor(ParentAlertType type) =>
+      ParentAlertIcons.forType(type);
 
   @override
   Widget build(BuildContext context) {

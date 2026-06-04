@@ -4,12 +4,11 @@ import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
+import '../core/utils/auth_validation.dart';
 import '../providers/app_state.dart';
-import '../widgets/taptalk_logo.dart';
-import '../widgets/taptalk_result_dialog.dart';
 import '../widgets/taptalk_shell.dart';
 
-enum _ForgotStep { enterEmail, setPassword, checkEmail }
+enum _ForgotStep { enterEmail, checkEmail }
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -20,26 +19,20 @@ class ForgotPasswordScreen extends StatefulWidget {
 
 class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final _email = TextEditingController();
-  final _password = TextEditingController();
-  final _confirmPassword = TextEditingController();
   _ForgotStep _step = _ForgotStep.enterEmail;
   String? _error;
   bool _busy = false;
-  bool _obscurePassword = true;
-  bool _obscureConfirm = true;
 
   @override
   void dispose() {
     _email.dispose();
-    _password.dispose();
-    _confirmPassword.dispose();
     super.dispose();
   }
 
   Future<void> _submitEmail() async {
     final lang = context.read<AppState>().language;
     final email = _email.text.trim();
-    if (email.isEmpty || !email.contains('@')) {
+    if (!AuthValidation.isValidEmail(email)) {
       setState(() => _error = AppStrings.invalidEmail(lang));
       return;
     }
@@ -63,60 +56,14 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
     setState(() {
       _busy = false;
-      if (outcome.emailSent) {
-        _step = _ForgotStep.checkEmail;
-      } else {
-        _step = _ForgotStep.setPassword;
-      }
+      _step = _ForgotStep.checkEmail;
     });
-  }
-
-  Future<void> _submitNewPassword() async {
-    final lang = context.read<AppState>().language;
-    if (_password.text.length < 6) {
-      setState(() => _error = AppStrings.passwordTooShort(lang));
-      return;
-    }
-    if (_password.text != _confirmPassword.text) {
-      setState(() => _error = AppStrings.passwordsDoNotMatch(lang));
-      return;
-    }
-
-    setState(() {
-      _error = null;
-      _busy = true;
-    });
-
-    final err = await context.read<AppState>().completeLocalPasswordReset(
-          _email.text,
-          _password.text,
-        );
-    if (!mounted) return;
-
-    if (err != null) {
-      setState(() {
-        _busy = false;
-        _error = err;
-      });
-      return;
-    }
-
-    setState(() => _busy = false);
-    await TapTalkResultDialog.showSuccess(
-      context,
-      title: AppStrings.passwordUpdatedTitle(lang),
-      message: AppStrings.passwordResetSuccess(lang),
-    );
-    if (!mounted) return;
-    context.read<AppState>().setRoute(AppRoute.login);
   }
 
   String _subtitle(AppLanguage lang) {
     switch (_step) {
       case _ForgotStep.enterEmail:
         return AppStrings.forgotPasswordHint(lang);
-      case _ForgotStep.setPassword:
-        return AppStrings.setNewPasswordHint(lang);
       case _ForgotStep.checkEmail:
         return AppStrings.passwordResetEmailSent(lang);
     }
@@ -133,11 +80,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
           final isWide = constraints.maxWidth >= 500;
           final compactHeight = constraints.maxHeight < 760;
           final headerHeight = isWide ? 180.0 : (compactHeight ? 150.0 : 190.0);
-          final logoSize = compactHeight ? 70.0 : 86.0;
           final contentHorizontal = isWide ? 36.0 : 24.0;
           final contentTop = compactHeight ? 16.0 : 22.0;
           final sectionGap = compactHeight ? 12.0 : 16.0;
-          final fieldGap = compactHeight ? 10.0 : 14.0;
           final isCheckEmail = _step == _ForgotStep.checkEmail;
 
           return Column(
@@ -195,12 +140,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                               onPressed: _busy
                                   ? null
                                   : () {
-                                      if (_step == _ForgotStep.setPassword) {
+                                      if (_step == _ForgotStep.checkEmail) {
                                         setState(() {
                                           _step = _ForgotStep.enterEmail;
                                           _error = null;
-                                          _password.clear();
-                                          _confirmPassword.clear();
                                         });
                                       } else {
                                         app.setRoute(AppRoute.login);
@@ -210,7 +153,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                               color: const Color(0xFF2F5E48),
                             ),
                           ),
-                          Center(child: TapTalkLogo(size: logoSize)),
                           if (isCheckEmail) ...[
                             const SizedBox(height: AppSpacing.md),
                             Center(
@@ -269,26 +211,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                               keyboard: TextInputType.emailAddress,
                             ),
                           ],
-                          if (_step == _ForgotStep.setPassword) ...[
-                            SizedBox(height: sectionGap),
-                            _field(
-                              AppStrings.newPassword(lang),
-                              _password,
-                              obscure: _obscurePassword,
-                              onToggleObscure: () => setState(
-                                () => _obscurePassword = !_obscurePassword,
-                              ),
-                            ),
-                            SizedBox(height: fieldGap),
-                            _field(
-                              AppStrings.confirmPassword(lang),
-                              _confirmPassword,
-                              obscure: _obscureConfirm,
-                              onToggleObscure: () => setState(
-                                () => _obscureConfirm = !_obscureConfirm,
-                              ),
-                            ),
-                          ],
                           const Spacer(),
                           if (_step == _ForgotStep.enterEmail)
                             FilledButton(
@@ -297,15 +219,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                               child: _buttonChild(
                                 busy: _busy,
                                 label: AppStrings.sendResetLink(lang),
-                              ),
-                            ),
-                          if (_step == _ForgotStep.setPassword)
-                            FilledButton(
-                              onPressed: _busy ? null : _submitNewPassword,
-                              style: _primaryButtonStyle(compactHeight),
-                              child: _buttonChild(
-                                busy: _busy,
-                                label: AppStrings.saveNewPassword(lang),
                               ),
                             ),
                           if (isCheckEmail)
@@ -374,8 +287,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     String label,
     TextEditingController controller, {
     TextInputType? keyboard,
-    bool obscure = false,
-    VoidCallback? onToggleObscure,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -387,27 +298,12 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         const SizedBox(height: AppSpacing.xs),
         TextField(
           controller: controller,
-          obscureText: obscure,
           keyboardType: keyboard,
           decoration: InputDecoration(
             filled: true,
             fillColor: const Color(0xFFEFF8F3),
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            suffixIcon: onToggleObscure == null
-                ? null
-                : IconButton(
-                    icon: Icon(
-                      obscure
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined,
-                      color: const Color(0xFF5A6B63),
-                      size: 19,
-                    ),
-                    onPressed: onToggleObscure,
-                    constraints:
-                        const BoxConstraints(minWidth: 38, minHeight: 38),
-                  ),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
               borderSide: const BorderSide(color: Color(0xFFDCECE4)),

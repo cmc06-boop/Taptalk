@@ -4,8 +4,8 @@ import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
-import '../core/theme/theme_tokens.dart';
 import '../providers/app_state.dart';
+import '../widgets/class_color_card.dart';
 import '../widgets/create_class_dialog.dart';
 import '../widgets/taptalk_result_dialog.dart';
 import '../widgets/learner_scaffold.dart';
@@ -177,13 +177,47 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
                 for (final teacherClass in classes)
                   Padding(
                     padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                    child: _ClassCard(
-                      teacherClass: teacherClass,
-                      theme: theme,
-                      lang: lang,
-                      studentCount: _studentCounts[teacherClass.id] ?? 0,
-                      onOpen: () => _openClass(teacherClass),
-                      onDelete: () => _confirmDelete(teacherClass),
+                    child: ClassColorCard(
+                      classId: teacherClass.id,
+                      title: teacherClass.name,
+                      badge: teacherClass.code,
+                      subtitle: AppStrings.studentsInClass(
+                        _studentCounts[teacherClass.id] ?? 0,
+                        lang,
+                      ),
+                      icon: Icons.menu_book_rounded,
+                      onTap: () => _openClass(teacherClass),
+                      trailing: PopupMenuButton<String>(
+                        icon: Icon(
+                          Icons.more_vert_rounded,
+                          color: Colors.white.withValues(alpha: 0.92),
+                        ),
+                        onSelected: (value) {
+                          if (value == 'delete') _confirmDelete(teacherClass);
+                        },
+                        itemBuilder: (ctx) => [
+                          PopupMenuItem(
+                            value: 'delete',
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.delete_outline_rounded,
+                                  color: Color(0xFFC62828),
+                                  size: 20,
+                                ),
+                                const SizedBox(width: AppSpacing.sm),
+                                Text(
+                                  AppStrings.deleteClass(lang),
+                                  style: GoogleFonts.poppins(
+                                    fontWeight: FontWeight.w600,
+                                    color: const Color(0xFFC62828),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
             ],
@@ -203,127 +237,6 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _ClassCard extends StatelessWidget {
-  const _ClassCard({
-    required this.teacherClass,
-    required this.theme,
-    required this.lang,
-    required this.studentCount,
-    required this.onOpen,
-    required this.onDelete,
-  });
-
-  final ({int id, String name, String code}) teacherClass;
-  final TapTalkThemeToken theme;
-  final AppLanguage lang;
-  final int studentCount;
-  final VoidCallback onOpen;
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = theme.bgAccent;
-
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(16),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onOpen,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFFE9EEF2)),
-            boxShadow: [
-              BoxShadow(
-                color: theme.textMain.withValues(alpha: 0.06),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md,
-            vertical: AppSpacing.md,
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(Icons.menu_book_rounded, color: accent, size: 24),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      teacherClass.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: theme.textMain,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      AppStrings.studentsInClass(studentCount, lang),
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        color: theme.textMain.withValues(alpha: 0.55),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              PopupMenuButton<String>(
-                icon: Icon(
-                  Icons.more_vert_rounded,
-                  color: theme.textMain.withValues(alpha: 0.55),
-                ),
-                onSelected: (value) {
-                  if (value == 'delete') onDelete();
-                },
-                itemBuilder: (ctx) => [
-                  PopupMenuItem(
-                    value: 'delete',
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.delete_outline_rounded,
-                          color: Color(0xFFC62828),
-                          size: 20,
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        Text(
-                          AppStrings.deleteClass(lang),
-                          style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.w600,
-                            color: const Color(0xFFC62828),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              Icon(Icons.chevron_right_rounded, color: accent, size: 28),
-            ],
-          ),
-        ),
       ),
     );
   }

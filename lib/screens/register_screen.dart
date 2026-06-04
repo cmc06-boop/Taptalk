@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
+import '../core/utils/auth_validation.dart';
 import '../providers/app_state.dart';
+import '../widgets/password_strength_hint.dart';
 import '../widgets/taptalk_logo.dart';
 import '../widgets/taptalk_shell.dart';
 
@@ -26,9 +30,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _busy = false;
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
+  bool? _emailInUse;
+  Timer? _emailCheckDebounce;
+  int _emailCheckGeneration = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _password.addListener(() => setState(() {}));
+    _email.addListener(_scheduleEmailAvailabilityCheck);
+  }
 
   @override
   void dispose() {
+    _emailCheckDebounce?.cancel();
+    _email.removeListener(_scheduleEmailAvailabilityCheck);
     _name.dispose();
     _email.dispose();
     _password.dispose();
@@ -36,8 +52,37 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
+  void _scheduleEmailAvailabilityCheck() {
+    _emailCheckDebounce?.cancel();
+    _emailCheckDebounce = Timer(
+      const Duration(milliseconds: 350),
+      _checkEmailAvailability,
+    );
+  }
+
+  Future<void> _checkEmailAvailability() async {
+    final rawEmail = _email.text;
+    final normalized = AuthValidation.normalizeEmail(rawEmail);
+    if (!AuthValidation.isValidEmail(normalized)) {
+      if (_emailInUse != null && mounted) {
+        setState(() => _emailInUse = null);
+      }
+      return;
+    }
+
+    final app = context.read<AppState>();
+    final generation = ++_emailCheckGeneration;
+    final inUse = await app.isEmailAlreadyInUse(normalized);
+    if (!mounted || generation != _emailCheckGeneration) return;
+    if (AuthValidation.normalizeEmail(_email.text) != normalized) return;
+
+    setState(() => _emailInUse = inUse);
+    _formKey.currentState?.validate();
+  }
+
   Future<void> _submit() async {
-    final lang = context.read<AppState>().language;
+    final app = context.read<AppState>();
+    final lang = app.language;
 
     if (!_formKey.currentState!.validate()) {
       setState(() => _error = null);
@@ -47,13 +92,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() => _error = AppStrings.passwordsDoNotMatch(lang));
       return;
     }
+    if (!AuthValidation.isStrongPassword(_password.text)) {
+      setState(() => _error = AppStrings.passwordTooShort(lang));
+      return;
+    }
+
+    final emailTaken = await app.isEmailAlreadyInUse(_email.text);
+    if (!mounted) return;
+    if (emailTaken) {
+      setState(() => _emailInUse = true);
+      _formKey.currentState?.validate();
+      return;
+    }
 
     setState(() {
       _error = null;
       _busy = true;
     });
     try {
-      final err = await context.read<AppState>().register(
+      final err = await app.register(
             fullName: _name.text,
             email: _email.text,
             password: _password.text,
@@ -63,7 +120,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() {
         _busy = false;
         _error = err;
+        if (err == AppStrings.emailInUse(lang)) {
+          _emailInUse = true;
+        }
       });
+      if (err == AppStrings.emailInUse(lang)) {
+        _formKey.currentState?.validate();
+      }
     } catch (e) {
       debugPrint('Register screen error: $e');
       if (!mounted) return;
@@ -190,6 +253,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 if (value == null || value.trim().isEmpty) {
                                   return AppStrings.fillAllFields(lang);
                                 }
+                                if (!AuthValidation.isValidFullName(value)) {
+                                  return AppStrings.invalidFullName(lang);
+                                }
                                 return null;
                               },
                             ),
@@ -204,8 +270,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 if (value == null || value.trim().isEmpty) {
                                   return AppStrings.fillAllFields(lang);
                                 }
-                                if (!value.contains('@')) {
+                                if (!AuthValidation.isValidEmail(value)) {
                                   return AppStrings.invalidEmail(lang);
+                                }
+                                if (_emailInUse == true) {
+                                  return AppStrings.emailInUse(lang);
                                 }
                                 return null;
                               },
@@ -223,11 +292,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 if (value == null || value.isEmpty) {
                                   return AppStrings.fillAllFields(lang);
                                 }
-                                if (value.length < 6) {
+                                if (!AuthValidation.isStrongPassword(value)) {
                                   return AppStrings.passwordTooShort(lang);
                                 }
                                 return null;
                               },
+                            ),
+                            PasswordStrengthHint(
+                              password: _password.text,
+                              lang: lang,
                             ),
                             SizedBox(height: fieldGap),
                             _field(
@@ -242,6 +315,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               validator: (value) {
                                 if (value == null || value.isEmpty) {
                                   return AppStrings.fillAllFields(lang);
+                                }
+                                if (value != _password.text) {
+                                  return AppStrings.passwordsDoNotMatch(lang);
                                 }
                                 return null;
                               },

@@ -3,12 +3,14 @@ import 'package:flutter/foundation.dart';
 
 import 'cloud_notification_backend.dart';
 import 'firebase_service.dart';
+import '../data/repositories/app_repository.dart';
 
 /// Firestore-backed notifications for cross-device parent alerts.
 class FirestoreNotificationBackend implements CloudNotificationBackend {
   static const String collectionName = 'parent_notifications';
   static const String linkCollectionName = 'parent_child_links';
   static const String enrollmentCollectionName = 'class_enrollments_cloud';
+  static const String teacherClassCollectionName = 'teacher_classes_cloud';
   static const String learnerProfileCollectionName = 'learner_profiles';
 
   @override
@@ -139,6 +141,44 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   }
 
   @override
+  Future<void> upsertTeacherClass(TeacherClassCloudEvent event) async {
+    if (!isAvailable ||
+        event.classCode.trim().isEmpty ||
+        event.teacherFirebaseUid.trim().isEmpty) {
+      return;
+    }
+    final docId = AppRepository.normalizeClassCode(event.classCode);
+    final payload = event.toFirestoreMap()
+      ..['createdAt'] = Timestamp.fromDate(event.createdAt.toUtc());
+    await FirebaseFirestore.instance
+        .collection(teacherClassCollectionName)
+        .doc(docId)
+        .set(payload);
+  }
+
+  @override
+  Future<void> removeTeacherClass({required String classCode}) async {
+    if (!isAvailable || classCode.trim().isEmpty) return;
+    final docId = AppRepository.normalizeClassCode(classCode);
+    await FirebaseFirestore.instance
+        .collection(teacherClassCollectionName)
+        .doc(docId)
+        .delete();
+  }
+
+  @override
+  Future<List<RemoteTeacherClass>> getTeacherClassesForTeacher(
+    String teacherFirebaseUid,
+  ) async {
+    if (!isAvailable || teacherFirebaseUid.trim().isEmpty) return const [];
+    final snapshot = await FirebaseFirestore.instance
+        .collection(teacherClassCollectionName)
+        .where('teacherFirebaseUid', isEqualTo: teacherFirebaseUid.trim())
+        .get();
+    return snapshot.docs.map(_teacherClassFromDocument).toList();
+  }
+
+  @override
   Future<void> upsertLearnerEmergencyContacts({
     required int learnerUserId,
     required String learnerName,
@@ -229,6 +269,19 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       learnerName: (data['learnerName'] as String?) ?? '',
       learnerFirebaseUid: (data['learnerFirebaseUid'] as String?) ?? '',
       enrolledAt: _readTimestamp(data['enrolledAt']),
+    );
+  }
+
+  RemoteTeacherClass _teacherClassFromDocument(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    final data = doc.data();
+    return RemoteTeacherClass(
+      classCode: (data['classCode'] as String?) ?? doc.id,
+      className: (data['className'] as String?) ?? '',
+      teacherFirebaseUid: (data['teacherFirebaseUid'] as String?) ?? '',
+      teacherUserId: data['teacherUserId'] as int? ?? 0,
+      createdAt: _readTimestamp(data['createdAt']),
     );
   }
 
