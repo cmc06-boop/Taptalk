@@ -36,6 +36,13 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
 
+# Use OS SQLite instead of downloading binaries from GitHub during build.
+hooks:
+  user_defines:
+    sqlite3:
+      source: system
+      name_windows: winsqlite3
+
 flutter:
   uses-material-design: true
   assets:

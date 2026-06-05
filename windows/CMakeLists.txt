@@ -1,6 +1,28 @@
 # Project-level configuration.
 cmake_minimum_required(VERSION 3.14)
+
+# flutter_tts on Windows needs nuget.exe (CppWinRT). Bootstrap if missing.
+set(TAPTALK_NUGET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/nuget")
+set(TAPTALK_NUGET_EXE "${TAPTALK_NUGET_DIR}/nuget.exe")
+if(NOT EXISTS "${TAPTALK_NUGET_EXE}")
+  message(STATUS "Downloading nuget.exe for Windows plugins...")
+  file(MAKE_DIRECTORY "${TAPTALK_NUGET_DIR}")
+  file(DOWNLOAD
+    "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe"
+    "${TAPTALK_NUGET_EXE}"
+    SHOW_PROGRESS
+    TLS_VERIFY ON
+  )
+endif()
+list(PREPEND CMAKE_PROGRAM_PATH "${TAPTALK_NUGET_DIR}")
+
 project(flutter_application_1 LANGUAGES CXX)
+
+# MSVC 14.5x (VS 2025): plugins using /await need this on every translation unit.
+if(MSVC)
+  add_compile_definitions(_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+  string(APPEND CMAKE_CXX_FLAGS " /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS")
+endif()
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
@@ -43,6 +65,10 @@ function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_options(${TARGET} PRIVATE /EHsc)
   target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
   target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")
+  if(MSVC)
+    target_compile_definitions(${TARGET} PRIVATE
+      "_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS")
+  endif()
 endfunction()
 
 # Flutter library and tool build rules.
@@ -57,6 +83,16 @@ add_subdirectory("runner")
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# Ensure every Windows plugin gets the MSVC coroutine silence flag (STL1011).
+if(MSVC)
+  foreach(_taptalk_plugin ${FLUTTER_PLUGIN_LIST})
+    set(_taptalk_target "${_taptalk_plugin}_plugin")
+    if(TARGET ${_taptalk_target})
+      target_compile_definitions(${_taptalk_target} PRIVATE
+        "_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS")
+    endif()
+  endforeach()
+endif()
 
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can
