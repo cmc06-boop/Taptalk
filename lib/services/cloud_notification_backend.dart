@@ -245,12 +245,14 @@ class RemoteClassLessonContent {
 class RemoteClassContent {
   const RemoteClassContent({
     required this.classCode,
+    required this.className,
     required this.teacherFirebaseUid,
     required this.updatedAt,
     required this.lessons,
   });
 
   final String classCode;
+  final String className;
   final String teacherFirebaseUid;
   final DateTime updatedAt;
   final List<RemoteClassLessonContent> lessons;

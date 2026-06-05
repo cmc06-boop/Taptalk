@@ -1995,6 +1995,7 @@ class AppRepository {
     required int teacherUserId,
     required int classId,
     required String classCode,
+    required String className,
     required String teacherFirebaseUid,
   }) async {
     if (!await _teacherOwnsClass(teacherUserId, classId)) return null;
@@ -2064,6 +2065,7 @@ class AppRepository {
     }
     return RemoteClassContent(
       classCode: normalizeClassCode(classCode),
+      className: className.trim().isEmpty ? 'Class' : className.trim(),
       teacherFirebaseUid: teacherFirebaseUid.trim(),
       updatedAt: DateTime.now(),
       lessons: remoteLessons,

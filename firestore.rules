@@ -84,14 +84,5 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    match /class_content_cloud/{classCode} {
-      allow read: if request.auth != null;
-      allow create, update: if request.auth != null
-        && request.resource.data.teacherFirebaseUid == request.auth.uid
-        && request.resource.data.classCode is string;
-      allow delete: if request.auth != null
-        && resource.data.teacherFirebaseUid == request.auth.uid;
-    }
-
   }
 }

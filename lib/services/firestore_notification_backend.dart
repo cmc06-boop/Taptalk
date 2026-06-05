@@ -14,7 +14,6 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   static const String learnerProfileCollectionName = 'learner_profiles';
   static const String userProfileCollectionName = 'user_profiles';
   static const String activityCollectionName = 'learner_activity';
-  static const String classContentCollectionName = 'class_content_cloud';
 
   @override
   bool get isAvailable => FirebaseService.instance.isAvailable;
@@ -219,14 +218,17 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   Future<void> upsertClassContent(RemoteClassContent content) async {
     if (!isAvailable ||
         content.classCode.trim().isEmpty ||
+        content.className.trim().isEmpty ||
         content.teacherFirebaseUid.trim().isEmpty) {
       return;
     }
     final docId = AppRepository.normalizeClassCode(content.classCode);
+    final className = content.className.trim();
     final payload = <String, Object?>{
       'classCode': docId,
+      'className': className,
       'teacherFirebaseUid': content.teacherFirebaseUid.trim(),
-      'updatedAt': Timestamp.fromDate(content.updatedAt.toUtc()),
+      'contentUpdatedAt': Timestamp.fromDate(content.updatedAt.toUtc()),
       'lessons': content.lessons.map((lesson) {
         return <String, Object?>{
           'lessonKey': lesson.lessonKey,
@@ -245,10 +247,11 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
         };
       }).toList(),
     };
+    // Store lessons on the existing teacher_classes_cloud doc (rules already deployed).
     await FirebaseFirestore.instance
-        .collection(classContentCollectionName)
+        .collection(teacherClassCollectionName)
         .doc(docId)
-        .set(payload);
+        .set(payload, SetOptions(merge: true));
   }
 
   @override
@@ -257,7 +260,7 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     try {
       final docId = AppRepository.normalizeClassCode(classCode);
       final doc = await FirebaseFirestore.instance
-          .collection(classContentCollectionName)
+          .collection(teacherClassCollectionName)
           .doc(docId)
           .get();
       if (!doc.exists) return null;
@@ -315,8 +318,9 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     });
     return RemoteClassContent(
       classCode: classCode,
+      className: (data['className'] as String?) ?? '',
       teacherFirebaseUid: (data['teacherFirebaseUid'] as String?) ?? '',
-      updatedAt: _readTimestamp(data['updatedAt']),
+      updatedAt: _readTimestamp(data['contentUpdatedAt'] ?? data['updatedAt']),
       lessons: lessons,
     );
   }
@@ -334,7 +338,7 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     await FirebaseFirestore.instance
         .collection(teacherClassCollectionName)
         .doc(docId)
-        .set(payload);
+        .set(payload, SetOptions(merge: true));
   }
 
   @override

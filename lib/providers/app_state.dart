@@ -1638,9 +1638,13 @@ class AppState extends ChangeNotifier {
     final classRow = await _repo.findClassById(classId);
     if (classRow == null) return;
     final classCode = (classRow['class_code'] as String?) ?? '';
+    final className = (classRow['class_name'] as String?) ?? '';
     final teacherFirebaseUid =
-        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+        _user!.firebaseUid ??
+        await FirebaseService.instance.waitForAuthUid() ??
+        FirebaseService.instance.currentUid;
     if (classCode.isEmpty ||
+        className.isEmpty ||
         teacherFirebaseUid == null ||
         teacherFirebaseUid.isEmpty) {
       return;
@@ -1650,6 +1654,7 @@ class AppState extends ChangeNotifier {
         teacherUserId: _user!.id,
         classId: classId,
         classCode: classCode,
+        className: className,
         teacherFirebaseUid: teacherFirebaseUid,
       );
       if (content == null) return;
