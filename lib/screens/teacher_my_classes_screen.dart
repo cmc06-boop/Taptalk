@@ -125,7 +125,12 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
       showBottomNav: false,
       body: Stack(
         children: [
-          ListView(
+          RefreshIndicator(
+            onRefresh: () async {
+              await context.read<AppState>().refreshTeacherClasses();
+              await _refreshCounts();
+            },
+            child: ListView(
             padding: const EdgeInsets.fromLTRB(
               AppSpacing.lg,
               AppSpacing.sm,
@@ -227,6 +232,7 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
                     ),
                   ),
             ],
+            ),
           ),
           Positioned(
             right: AppSpacing.lg,

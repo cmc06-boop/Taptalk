@@ -166,6 +166,52 @@ class RemoteUserProfile {
   final String? profileCode;
 }
 
+/// Phrase tap / history event synced for cross-device monitoring.
+class LearnerActivityCloudEvent {
+  const LearnerActivityCloudEvent({
+    required this.learnerFirebaseUid,
+    required this.phraseText,
+    required this.categoryKey,
+    required this.createdAt,
+    this.className,
+    this.lessonTitle,
+  });
+
+  final String learnerFirebaseUid;
+  final String phraseText;
+  final String categoryKey;
+  final DateTime createdAt;
+  final String? className;
+  final String? lessonTitle;
+
+  Map<String, Object?> toFirestoreMap() => {
+        'learnerFirebaseUid': learnerFirebaseUid,
+        'phraseText': phraseText,
+        'categoryKey': categoryKey,
+        'createdAt': createdAt.toUtc().toIso8601String(),
+        if (className != null && className!.trim().isNotEmpty)
+          'className': className!.trim(),
+        if (lessonTitle != null && lessonTitle!.trim().isNotEmpty)
+          'lessonTitle': lessonTitle!.trim(),
+      };
+}
+
+class RemoteLearnerActivity {
+  const RemoteLearnerActivity({
+    required this.phraseText,
+    required this.categoryKey,
+    required this.createdAt,
+    this.className,
+    this.lessonTitle,
+  });
+
+  final String phraseText;
+  final String categoryKey;
+  final DateTime createdAt;
+  final String? className;
+  final String? lessonTitle;
+}
+
 class TeacherClassCloudEvent {
   const TeacherClassCloudEvent({
     required this.classCode,
@@ -253,6 +299,18 @@ abstract class CloudNotificationBackend {
   Future<List<RemoteClassEnrollment>> getClassEnrollmentsForTeacher(
     String teacherFirebaseUid,
   );
+
+  Future<List<RemoteClassEnrollment>> getClassEnrollmentsForLearner(
+    String learnerFirebaseUid,
+  );
+
+  Future<void> appendLearnerActivity(LearnerActivityCloudEvent event);
+
+  Future<List<RemoteLearnerActivity>> getLearnerActivities({
+    required String learnerFirebaseUid,
+    required DateTime rangeStart,
+    required DateTime rangeEnd,
+  });
 
   Future<void> upsertTeacherClass(TeacherClassCloudEvent event);
 
@@ -343,6 +401,23 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
   Future<List<RemoteClassEnrollment>> getClassEnrollmentsForTeacher(
     String teacherFirebaseUid,
   ) async =>
+      const [];
+
+  @override
+  Future<List<RemoteClassEnrollment>> getClassEnrollmentsForLearner(
+    String learnerFirebaseUid,
+  ) async =>
+      const [];
+
+  @override
+  Future<void> appendLearnerActivity(LearnerActivityCloudEvent event) async {}
+
+  @override
+  Future<List<RemoteLearnerActivity>> getLearnerActivities({
+    required String learnerFirebaseUid,
+    required DateTime rangeStart,
+    required DateTime rangeEnd,
+  }) async =>
       const [];
 
   @override

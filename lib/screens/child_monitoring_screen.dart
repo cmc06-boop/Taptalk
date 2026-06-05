@@ -541,7 +541,9 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
       currentRoute: widget.currentRoute,
       showBackButton: true,
       showBottomNav: false,
-      body: ListView(
+      body: RefreshIndicator(
+        onRefresh: _reloadStats,
+        child: ListView(
         padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
         children: [
           if (contextSubtitle != null)
@@ -771,6 +773,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
             ),
           ),
         ],
+        ),
       ),
     );
   }
