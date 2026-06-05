@@ -6,6 +6,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import '../../core/l10n/content_localization.dart';
+
 class DatabaseHelper {
   DatabaseHelper._();
   static final DatabaseHelper instance = DatabaseHelper._();
@@ -29,7 +31,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 10,
+      version: 12,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE users (
@@ -80,7 +82,9 @@ class DatabaseHelper {
             user_id INTEGER NOT NULL,
             phrase_text TEXT NOT NULL,
             category_key TEXT NOT NULL,
-            created_at INTEGER NOT NULL
+            created_at INTEGER NOT NULL,
+            class_name TEXT,
+            lesson_title TEXT
           )
         ''');
         await _createParentChildrenTable(db);
@@ -123,6 +127,13 @@ class DatabaseHelper {
             'CREATE UNIQUE INDEX IF NOT EXISTS idx_parent_notifications_remote_id '
             'ON parent_notifications(remote_id) WHERE remote_id IS NOT NULL',
           );
+        }
+        if (oldVersion < 11) {
+          await db.execute('ALTER TABLE history ADD COLUMN class_name TEXT');
+          await db.execute('ALTER TABLE history ADD COLUMN lesson_title TEXT');
+        }
+        if (oldVersion < 12) {
+          await _canonicalizeLessonContent(db);
         }
       },
     );
@@ -241,6 +252,38 @@ class DatabaseHelper {
         'class_code': code,
         'created_at': DateTime.now().millisecondsSinceEpoch,
       });
+    }
+  }
+
+  Future<void> _canonicalizeLessonContent(Database db) async {
+    final phraseRows = await db.query('lesson_phrases');
+    for (final row in phraseRows) {
+      final id = row['id'] as int;
+      final text = row['phrase_text'] as String;
+      final canonical = ContentLocalization.canonicalPhrase(text);
+      if (canonical != text) {
+        await db.update(
+          'lesson_phrases',
+          {'phrase_text': canonical},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      }
+    }
+
+    final lessonRows = await db.query('class_lessons');
+    for (final row in lessonRows) {
+      final id = row['id'] as int;
+      final title = row['title'] as String;
+      final canonical = ContentLocalization.canonicalPhrase(title);
+      if (canonical != title) {
+        await db.update(
+          'class_lessons',
+          {'title': canonical},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      }
     }
   }
 

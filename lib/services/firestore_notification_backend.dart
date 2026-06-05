@@ -12,6 +12,7 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   static const String enrollmentCollectionName = 'class_enrollments_cloud';
   static const String teacherClassCollectionName = 'teacher_classes_cloud';
   static const String learnerProfileCollectionName = 'learner_profiles';
+  static const String userProfileCollectionName = 'user_profiles';
 
   @override
   bool get isAvailable => FirebaseService.instance.isAvailable;
@@ -42,6 +43,8 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     required int learnerUserId,
     required String parentFirebaseUid,
     required String learnerFirebaseUid,
+    String? learnerName,
+    String? learnerProfileCode,
   }) async {
     if (!isAvailable ||
         parentFirebaseUid.trim().isEmpty ||
@@ -49,16 +52,25 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       return;
     }
     final docId = '${parentFirebaseUid.trim()}_${learnerFirebaseUid.trim()}';
-    await FirebaseFirestore.instance
-        .collection(linkCollectionName)
-        .doc(docId)
-        .set({
+    final payload = <String, Object?>{
       'parentUserId': parentUserId,
       'learnerUserId': learnerUserId,
       'parentFirebaseUid': parentFirebaseUid.trim(),
       'learnerFirebaseUid': learnerFirebaseUid.trim(),
       'linkedAt': FieldValue.serverTimestamp(),
-    });
+    };
+    final name = learnerName?.trim();
+    if (name != null && name.isNotEmpty) {
+      payload['learnerName'] = name;
+    }
+    final code = learnerProfileCode?.trim();
+    if (code != null && code.isNotEmpty) {
+      payload['learnerProfileCode'] = code;
+    }
+    await FirebaseFirestore.instance
+        .collection(linkCollectionName)
+        .doc(docId)
+        .set(payload, SetOptions(merge: true));
   }
 
   @override
@@ -179,23 +191,131 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   }
 
   @override
+  Future<RemoteTeacherClass?> getTeacherClassByCode(String classCode) async {
+    if (!isAvailable || classCode.trim().isEmpty) return null;
+    try {
+      final docId = AppRepository.normalizeClassCode(classCode);
+      final doc = await FirebaseFirestore.instance
+          .collection(teacherClassCollectionName)
+          .doc(docId)
+          .get();
+      if (!doc.exists) return null;
+      return _teacherClassFromDocument(doc);
+    } catch (e, st) {
+      debugPrint('getTeacherClassByCode failed: $e\n$st');
+      return null;
+    }
+  }
+
+  @override
+  Future<RemoteLearnerProfile?> findLearnerByProfileCode(
+    String profileCode,
+  ) async {
+    if (!isAvailable || profileCode.trim().isEmpty) return null;
+    try {
+      final normalized = AppRepository.normalizeProfileCode(profileCode);
+      final snapshot = await FirebaseFirestore.instance
+          .collection(learnerProfileCollectionName)
+          .where('profileCode', isEqualTo: normalized)
+          .limit(1)
+          .get();
+      if (snapshot.docs.isEmpty) return null;
+      return _learnerProfileFromDocument(snapshot.docs.first);
+    } catch (e, st) {
+      debugPrint('findLearnerByProfileCode failed: $e\n$st');
+      return null;
+    }
+  }
+
+  @override
+  Future<List<RemoteParentChildLink>> getParentChildLinksForParent(
+    String parentFirebaseUid,
+  ) async {
+    if (!isAvailable || parentFirebaseUid.trim().isEmpty) return const [];
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection(linkCollectionName)
+          .where('parentFirebaseUid', isEqualTo: parentFirebaseUid.trim())
+          .get();
+      return snapshot.docs.map(_parentChildLinkFromDocument).toList();
+    } catch (e, st) {
+      debugPrint('getParentChildLinksForParent failed: $e\n$st');
+      return const [];
+    }
+  }
+
+  @override
+  Future<void> upsertUserProfile(RemoteUserProfile profile) async {
+    if (!isAvailable || profile.firebaseUid.trim().isEmpty) return;
+    final payload = <String, Object?>{
+      'firebaseUid': profile.firebaseUid.trim(),
+      'email': profile.email.trim().toLowerCase(),
+      'fullName': profile.fullName.trim(),
+      'role': profile.role,
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    if (profile.themeKey != null && profile.themeKey!.trim().isNotEmpty) {
+      payload['themeKey'] = profile.themeKey!.trim();
+    }
+    if (profile.profileCode != null && profile.profileCode!.trim().isNotEmpty) {
+      payload['profileCode'] = AppRepository.normalizeProfileCode(
+        profile.profileCode!,
+      );
+    }
+    await FirebaseFirestore.instance
+        .collection(userProfileCollectionName)
+        .doc(profile.firebaseUid.trim())
+        .set(payload, SetOptions(merge: true));
+  }
+
+  @override
+  Future<RemoteUserProfile?> getUserProfile(String firebaseUid) async {
+    if (!isAvailable || firebaseUid.trim().isEmpty) return null;
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection(userProfileCollectionName)
+          .doc(firebaseUid.trim())
+          .get();
+      if (!doc.exists) return null;
+      final data = doc.data();
+      if (data == null) return null;
+      return RemoteUserProfile(
+        firebaseUid: firebaseUid.trim(),
+        email: (data['email'] as String?) ?? '',
+        fullName: (data['fullName'] as String?) ?? '',
+        role: (data['role'] as String?) ?? 'learner',
+        themeKey: data['themeKey'] as String?,
+        profileCode: data['profileCode'] as String?,
+      );
+    } catch (e, st) {
+      debugPrint('getUserProfile failed: $e\n$st');
+      return null;
+    }
+  }
+
+  @override
   Future<void> upsertLearnerEmergencyContacts({
     required int learnerUserId,
     required String learnerName,
     required String learnerFirebaseUid,
     required List<String> contacts,
+    String? profileCode,
   }) async {
     if (!isAvailable || learnerFirebaseUid.trim().isEmpty) return;
-    await FirebaseFirestore.instance
-        .collection(learnerProfileCollectionName)
-        .doc(learnerFirebaseUid.trim())
-        .set({
+    final payload = <String, Object?>{
       'learnerUserId': learnerUserId,
       'learnerName': learnerName,
       'learnerFirebaseUid': learnerFirebaseUid.trim(),
       'emergencyContacts': contacts,
       'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    };
+    if (profileCode != null && profileCode.trim().isNotEmpty) {
+      payload['profileCode'] = AppRepository.normalizeProfileCode(profileCode);
+    }
+    await FirebaseFirestore.instance
+        .collection(learnerProfileCollectionName)
+        .doc(learnerFirebaseUid.trim())
+        .set(payload, SetOptions(merge: true));
   }
 
   @override
@@ -298,15 +418,42 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   }
 
   RemoteTeacherClass _teacherClassFromDocument(
-    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+    DocumentSnapshot<Map<String, dynamic>> doc,
   ) {
-    final data = doc.data();
+    final data = doc.data() ?? {};
     return RemoteTeacherClass(
       classCode: (data['classCode'] as String?) ?? doc.id,
       className: (data['className'] as String?) ?? '',
       teacherFirebaseUid: (data['teacherFirebaseUid'] as String?) ?? '',
       teacherUserId: data['teacherUserId'] as int? ?? 0,
       createdAt: _readTimestamp(data['createdAt']),
+    );
+  }
+
+  RemoteLearnerProfile _learnerProfileFromDocument(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    final data = doc.data();
+    return RemoteLearnerProfile(
+      learnerFirebaseUid:
+          (data['learnerFirebaseUid'] as String?) ?? doc.id,
+      learnerName: (data['learnerName'] as String?) ?? '',
+      profileCode: (data['profileCode'] as String?) ?? '',
+      learnerUserId: data['learnerUserId'] as int? ?? 0,
+    );
+  }
+
+  RemoteParentChildLink _parentChildLinkFromDocument(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    final data = doc.data();
+    return RemoteParentChildLink(
+      parentFirebaseUid: (data['parentFirebaseUid'] as String?) ?? '',
+      learnerFirebaseUid: (data['learnerFirebaseUid'] as String?) ?? '',
+      parentUserId: data['parentUserId'] as int? ?? 0,
+      learnerUserId: data['learnerUserId'] as int? ?? 0,
+      learnerName: (data['learnerName'] as String?) ?? '',
+      learnerProfileCode: (data['learnerProfileCode'] as String?) ?? '',
     );
   }
 

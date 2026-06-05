@@ -101,6 +101,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   String _categoryLabel(AppState app, HistoryModel item, AppLanguage lang) {
+    if (item.isLessonEntry) {
+      return item.lessonContext!.className;
+    }
     var categoryLabel = item.categoryKey;
     for (final cat in app.categories) {
       if (cat.key == item.categoryKey) {
@@ -318,6 +321,12 @@ class _HistoryCardState extends State<_HistoryCard>
       widget.item.text,
       widget.item.categoryKey,
     );
+    final lessonClassName = widget.item.lessonContext == null
+        ? null
+        : app.localizedContent(widget.item.lessonContext!.className);
+    final lessonTitle = widget.item.lessonContext == null
+        ? null
+        : app.localizedContent(widget.item.lessonContext!.lessonTitle);
     final theme = widget.theme;
 
     return ClipRect(
@@ -345,24 +354,58 @@ class _HistoryCardState extends State<_HistoryCard>
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: AppSpacing.sm,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: theme.bgAccent,
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: Text(
-                                  widget.categoryLabel,
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.white,
+                              if (widget.item.isLessonEntry) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: AppSpacing.sm,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: theme.bgAccent,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    lessonClassName!,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white,
+                                    ),
                                   ),
                                 ),
-                              ),
+                                if (widget.item.text.trim() !=
+                                    widget.item.lessonContext!.lessonTitle
+                                        .trim()) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    lessonTitle!,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: theme.textMain
+                                          .withValues(alpha: 0.75),
+                                    ),
+                                  ),
+                                ],
+                              ] else
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: AppSpacing.sm,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: theme.bgAccent,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    widget.categoryLabel,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
                               const SizedBox(height: AppSpacing.xs),
                               Text(
                                 widget.formattedTime,

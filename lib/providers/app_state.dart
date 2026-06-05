@@ -12,6 +12,7 @@ export '../core/constants/child_usage_period.dart';
 import '../core/constants/child_usage_period.dart';
 import '../core/utils/session_usage_calculator.dart';
 import '../core/utils/vocabulary_growth_calculator.dart';
+import '../data/models/child_lesson_progress.dart';
 import '../data/models/child_session_summary.dart';
 import '../data/models/vocabulary_growth_summary.dart';
 import '../core/constants/tts_speed_options.dart';
@@ -34,6 +35,7 @@ import '../data/models/teacher_alert_result.dart';
 import '../data/models/teacher_class_student.dart';
 import '../data/models/user_model.dart';
 import '../data/repositories/app_repository.dart';
+import '../services/cloud_notification_backend.dart';
 import '../services/firebase_service.dart';
 import '../services/firestore_notification_backend.dart';
 import '../services/notification_sync_service.dart';
@@ -358,12 +360,39 @@ class AppState extends ChangeNotifier {
           learnerName: _user!.fullName,
           learnerFirebaseUid: learnerFirebaseUid,
           contacts: _emergencyContacts,
+          profileCode: _profileCode,
         );
       }
       await _resyncLearnerEnrollmentsToCloud();
+      await _syncUserProfileToCloud();
     } catch (e, st) {
       debugPrint('Learner cloud sync failed: $e\n$st');
     }
+  }
+
+  Future<void> _syncUserProfileToCloud() async {
+    if (_user == null || !_notificationSync.isCloudAvailable) return;
+    final firebaseUid =
+        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (firebaseUid == null || firebaseUid.isEmpty) return;
+
+    String? profileCode;
+    if (_user!.isLearner) {
+      profileCode = _profileCode.isNotEmpty
+          ? _profileCode
+          : await _repo.ensureLearnerProfileCode(_user!.id);
+    }
+
+    await _notificationSync.syncUserProfile(
+      RemoteUserProfile(
+        firebaseUid: firebaseUid,
+        email: _user!.email,
+        fullName: _user!.fullName,
+        role: _user!.role,
+        themeKey: _user!.themeKey,
+        profileCode: profileCode,
+      ),
+    );
   }
 
   Future<void> _refreshLearnerCollections() async {
@@ -482,6 +511,9 @@ class AppState extends ChangeNotifier {
   String localizedPhraseText(PhraseModel phrase) =>
       localizedPhrase(phrase.text, phrase.categoryKey);
 
+  String localizedContent(String text) =>
+      ContentLocalization.freeText(text, _language);
+
   String localizedCategoryName(CategoryModel category) =>
       ContentLocalization.category(category.key, category.name, _language);
 
@@ -515,17 +547,30 @@ class AppState extends ChangeNotifier {
 
     var user = await _repo.findUserByEmail(normalizedEmail);
     if (user == null) {
-      // Account may exist only in Firebase (e.g. from another device).
+      // Account may exist only in Firebase (registered on another device).
       if (FirebaseService.instance.isAvailable) {
         final uid = await FirebaseService.instance.signIn(
           email: normalizedEmail,
           password: password,
         );
         if (uid != null) {
-          return AppStrings.accountNotOnThisDevice(_language);
+          final cloudProfile =
+              await _notificationSync.getUserProfileFromCloud(uid);
+          if (cloudProfile != null) {
+            user = await _repo.provisionLocalUserFromCloud(
+              email: normalizedEmail,
+              password: password,
+              firebaseUid: uid,
+              profile: cloudProfile,
+            );
+          } else {
+            return AppStrings.accountNotOnThisDevice(_language);
+          }
         }
       }
-      return AppStrings.emailNotRegistered(_language);
+      if (user == null) {
+        return AppStrings.emailNotRegistered(_language);
+      }
     }
 
     if (FirebaseService.instance.isAvailable) {
@@ -569,6 +614,8 @@ class AppState extends ChangeNotifier {
 
     _user = user;
     if (_user == null) return AppStrings.loginFailed(_language);
+
+    unawaited(_syncUserProfileToCloud());
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('user_id', _user!.id);
@@ -726,6 +773,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
 
     try {
+      await _syncUserProfileToCloud();
       if (role == 'learner') {
         await _loadLearnerData(cloudSyncInBackground: true);
       } else if (role == 'parent') {
@@ -926,6 +974,8 @@ class AppState extends ChangeNotifier {
   Future<void> recordHistory(
     String text, {
     String? categoryKey,
+    String? className,
+    String? lessonTitle,
   }) async {
     if (_user == null || text.trim().isEmpty) return;
     final canonical = ContentLocalization.canonicalPhrase(text);
@@ -933,6 +983,8 @@ class AppState extends ChangeNotifier {
       userId: _user!.id,
       text: canonical,
       categoryKey: categoryKey ?? _selectedCategoryKey,
+      className: className,
+      lessonTitle: lessonTitle,
     );
     _history = await _repo.getHistory(_user!.id);
     notifyListeners();
@@ -957,6 +1009,11 @@ class AppState extends ChangeNotifier {
       _linkedChildren = [];
       _selectedChildId = null;
       return;
+    }
+    if (syncCloudInBackground) {
+      unawaited(_syncLinkedChildrenFromCloud());
+    } else {
+      await _syncLinkedChildrenFromCloud();
     }
     _linkedChildren = await _repo.getLinkedChildren(_user!.id);
     if (_linkedChildren.isEmpty) {
@@ -983,6 +1040,27 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  Future<void> _syncLinkedChildrenFromCloud() async {
+    if (_user == null || !_user!.isParent) return;
+    if (!_notificationSync.isCloudAvailable) return;
+
+    final parentFirebaseUid =
+        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (parentFirebaseUid == null || parentFirebaseUid.isEmpty) return;
+
+    try {
+      final links = await _notificationSync
+          .getParentChildLinksFromCloud(parentFirebaseUid)
+          .timeout(const Duration(seconds: 12));
+      await _repo.mergeRemoteParentChildLinks(
+        parentUserId: _user!.id,
+        links: links,
+      );
+    } catch (e, st) {
+      debugPrint('Pull parent-child links failed: $e\n$st');
+    }
+  }
+
   Future<void> _syncLinkedChildrenToCloud() async {
     if (_user == null || !_user!.isParent || _linkedChildren.isEmpty) return;
     final parentFirebaseUid =
@@ -997,6 +1075,8 @@ class AppState extends ChangeNotifier {
         learnerUserId: child.learnerId,
         parentFirebaseUid: parentFirebaseUid,
         learnerFirebaseUid: learnerFirebaseUid,
+        learnerName: child.fullName,
+        learnerProfileCode: child.profileCode,
       );
     }
   }
@@ -1235,7 +1315,19 @@ class AppState extends ChangeNotifier {
     if (!AppRepository.isValidProfileCodeFormat(normalized)) {
       return AppStrings.invalidProfileCode(_language);
     }
-    final learner = await _repo.findLearnerByProfileCode(normalized);
+    var learner = await _repo.findLearnerByProfileCode(normalized);
+    if (learner == null && _notificationSync.isCloudAvailable) {
+      try {
+        final remote = await _notificationSync
+            .findLearnerProfileByCodeFromCloud(normalized)
+            .timeout(const Duration(seconds: 12));
+        if (remote != null) {
+          learner = await _repo.ensureLearnerFromRemoteProfile(remote);
+        }
+      } catch (e, st) {
+        debugPrint('Cloud profile code lookup failed: $e\n$st');
+      }
+    }
     if (learner == null) {
       return AppStrings.childNotFound(_language);
     }
@@ -1253,11 +1345,14 @@ class AppState extends ChangeNotifier {
         parentFirebaseUid.isNotEmpty &&
         learnerFirebaseUid != null &&
         learnerFirebaseUid.isNotEmpty) {
+      final profileCode = await _repo.ensureLearnerProfileCode(learner.id);
       await _notificationSync.syncParentChildLink(
         parentUserId: _user!.id,
         learnerUserId: learner.id,
         parentFirebaseUid: parentFirebaseUid,
         learnerFirebaseUid: learnerFirebaseUid,
+        learnerName: learner.fullName,
+        learnerProfileCode: profileCode,
       );
     }
     await _loadLinkedChildren();
@@ -1367,7 +1462,16 @@ class AppState extends ChangeNotifier {
     return _repo.createClassLesson(
       teacherUserId: _user!.id,
       classId: classId,
-      title: title,
+      title: ContentLocalization.canonicalPhrase(title.trim()),
+    );
+  }
+
+  Future<bool> updateClassLesson(int lessonId, String title) async {
+    if (_user == null || !_user!.isTeacher) return false;
+    return _repo.updateClassLesson(
+      teacherUserId: _user!.id,
+      lessonId: lessonId,
+      title: ContentLocalization.canonicalPhrase(title.trim()),
     );
   }
 
@@ -1628,9 +1732,24 @@ class AppState extends ChangeNotifier {
     if (!AppRepository.isValidClassCodeFormat(normalized)) {
       return AppStrings.invalidClassCode(_language);
     }
-    final classRow = await _repo.findClassByCode(normalized);
+    var classRow = await _repo.findClassByCode(normalized);
     if (classRow == null) {
-      return AppStrings.classNotFound(_language);
+      if (!_notificationSync.isCloudAvailable) {
+        return AppStrings.classNotFound(_language);
+      }
+      try {
+        final remote = await _notificationSync
+            .getTeacherClassByCodeFromCloud(normalized)
+            .timeout(const Duration(seconds: 12));
+        if (remote != null) {
+          classRow = await _repo.importRemoteTeacherClassForEnrollment(remote);
+        }
+      } catch (e, st) {
+        debugPrint('Cloud class code lookup failed: $e\n$st');
+      }
+      if (classRow == null) {
+        return AppStrings.classNotFound(_language);
+      }
     }
     final classId = classRow['id'] as int;
     if (await _repo.isLearnerEnrolled(_user!.id, classId)) {
@@ -1774,6 +1893,19 @@ class AppState extends ChangeNotifier {
     );
   }
 
+  Future<List<ChildLessonProgressEntry>> getChildLessonProgress({
+    required int learnerUserId,
+    required ChildUsagePeriod period,
+    DateTime? month,
+  }) async {
+    final range = _dateRangeForPeriod(period, month: month);
+    return _repo.getChildLessonProgress(
+      learnerUserId: learnerUserId,
+      rangeStart: range.$1,
+      rangeEnd: range.$2,
+    );
+  }
+
   Future<ChildSessionSummary> getChildSessionSummary({
     required int learnerUserId,
     required ChildUsagePeriod period,
@@ -1876,6 +2008,8 @@ class AppState extends ChangeNotifier {
     String text, {
     bool record = false,
     String? categoryKey,
+    String? className,
+    String? lessonTitle,
   }) async {
     final catKey = categoryKey ?? _selectedCategoryKey;
     final canonical = ContentLocalization.canonicalPhrase(text);
@@ -1895,10 +2029,27 @@ class AppState extends ChangeNotifier {
       _resetSpeechTracking();
       notifyListeners();
     }
-    if (ok && record) {
-      await recordHistory(canonical, categoryKey: catKey);
+    if (record) {
+      await recordHistory(
+        canonical,
+        categoryKey: catKey,
+        className: className,
+        lessonTitle: lessonTitle,
+      );
     }
     return ok;
+  }
+
+  Future<void> recordLessonOpen({
+    required String className,
+    required String lessonTitle,
+  }) async {
+    await recordHistory(
+      lessonTitle,
+      categoryKey: 'lesson',
+      className: className,
+      lessonTitle: lessonTitle,
+    );
   }
 
   Future<void> pauseSpeech() async {

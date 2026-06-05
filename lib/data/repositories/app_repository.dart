@@ -16,6 +16,7 @@ import '../models/parent_notification.dart';
 import '../models/teacher_recent_alert.dart';
 import '../models/teacher_recent_lesson.dart';
 import '../models/phrase_first_use.dart';
+import '../models/child_lesson_progress.dart';
 import '../models/phrase_usage_stat.dart';
 import '../models/class_lesson.dart';
 import '../models/lesson_phrase.dart';
@@ -109,6 +110,164 @@ class AppRepository {
       where: 'id = ?',
       whereArgs: [userId],
     );
+  }
+
+  Future<int> ensureUserStubFromFirebase({
+    required String firebaseUid,
+    required String role,
+    required String displayName,
+    String? profileCode,
+  }) async {
+    final existing = await findUserByFirebaseUid(firebaseUid);
+    if (existing != null) {
+      if (role == 'learner' &&
+          profileCode != null &&
+          profileCode.trim().isNotEmpty) {
+        await updateUserSettings(existing.id, profileCode: profileCode);
+      }
+      return existing.id;
+    }
+
+    final db = await _dbHelper.database;
+    final settings = <String, dynamic>{
+      'language': 'English',
+      'tts_speed': 0.25,
+    };
+    if (role == 'learner' &&
+        profileCode != null &&
+        profileCode.trim().isNotEmpty) {
+      settings['profile_code'] = normalizeProfileCode(profileCode);
+    }
+    final stubEmail = '${firebaseUid.substring(0, 8)}@taptalk.stub';
+
+    final id = await db.insert('users', {
+      'email': stubEmail,
+      'password_hash': '',
+      'full_name': displayName.trim().isEmpty ? role : displayName.trim(),
+      'role': role,
+      'theme': role == 'learner' ? null : 'mint_green',
+      'settings_json': jsonEncode(settings),
+      'firebase_uid': firebaseUid.trim(),
+    });
+
+    if (role == 'learner' || role == 'parent') {
+      await seedLearnerData(id);
+    }
+    return id;
+  }
+
+  Future<UserModel> provisionLocalUserFromCloud({
+    required String email,
+    required String password,
+    required String firebaseUid,
+    required RemoteUserProfile profile,
+  }) async {
+    final byUid = await findUserByFirebaseUid(firebaseUid);
+    if (byUid != null) return byUid;
+
+    final db = await _dbHelper.database;
+    final settings = <String, dynamic>{
+      'language': 'English',
+      'tts_speed': 0.25,
+    };
+    if (profile.profileCode != null && profile.profileCode!.trim().isNotEmpty) {
+      settings['profile_code'] = normalizeProfileCode(profile.profileCode!);
+    }
+
+    final id = await db.insert('users', {
+      'email': email.trim().toLowerCase(),
+      'password_hash': hashPassword(password),
+      'full_name': profile.fullName.trim().isEmpty
+          ? email.trim()
+          : profile.fullName.trim(),
+      'role': profile.role,
+      'theme': profile.role == 'learner'
+          ? profile.themeKey
+          : (profile.themeKey ?? 'mint_green'),
+      'settings_json': jsonEncode(settings),
+      'firebase_uid': firebaseUid.trim(),
+    });
+
+    final user = (await findUserById(id))!;
+    if (profile.role == 'learner' || profile.role == 'parent') {
+      await seedLearnerData(user.id);
+    }
+    return user;
+  }
+
+  Future<Map<String, Object?>?> importRemoteTeacherClassForEnrollment(
+    RemoteTeacherClass remote,
+  ) async {
+    final code = normalizeClassCode(remote.classCode);
+    if (!isValidClassCodeFormat(code)) return null;
+
+    final existing = await findClassByCode(code);
+    if (existing != null) return existing;
+
+    final teacherId = await ensureUserStubFromFirebase(
+      firebaseUid: remote.teacherFirebaseUid,
+      role: 'teacher',
+      displayName: 'Teacher',
+    );
+
+    final db = await _dbHelper.database;
+    await db.insert('teacher_classes', {
+      'teacher_user_id': teacherId,
+      'class_name':
+          remote.className.trim().isEmpty ? 'Class' : remote.className.trim(),
+      'class_code': code,
+      'created_at': remote.createdAt.millisecondsSinceEpoch,
+    });
+    return findClassByCode(code);
+  }
+
+  Future<UserModel> ensureLearnerFromRemoteProfile(
+    RemoteLearnerProfile remote,
+  ) async {
+    final existing = await findUserByFirebaseUid(remote.learnerFirebaseUid);
+    if (existing != null) {
+      if (remote.profileCode.trim().isNotEmpty) {
+        await updateUserSettings(
+          existing.id,
+          profileCode: normalizeProfileCode(remote.profileCode),
+        );
+      }
+      return existing;
+    }
+
+    final id = await ensureUserStubFromFirebase(
+      firebaseUid: remote.learnerFirebaseUid,
+      role: 'learner',
+      displayName:
+          remote.learnerName.trim().isEmpty ? 'Learner' : remote.learnerName,
+      profileCode: remote.profileCode,
+    );
+    return (await findUserById(id))!;
+  }
+
+  Future<void> mergeRemoteParentChildLinks({
+    required int parentUserId,
+    required List<RemoteParentChildLink> links,
+  }) async {
+    if (links.isEmpty) return;
+    for (final link in links) {
+      final learnerUid = link.learnerFirebaseUid.trim();
+      if (learnerUid.isEmpty) continue;
+
+      var learner = await findUserByFirebaseUid(learnerUid);
+      learner ??= await ensureLearnerFromRemoteProfile(
+        RemoteLearnerProfile(
+          learnerFirebaseUid: learnerUid,
+          learnerName: link.learnerName,
+          profileCode: link.learnerProfileCode,
+          learnerUserId: link.learnerUserId,
+        ),
+      );
+
+      if (!await isChildLinked(parentUserId, learner.id)) {
+        await linkParentToChild(parentUserId, learner.id);
+      }
+    }
   }
 
   Future<void> updatePasswordHash(int userId, String password) async {
@@ -499,15 +658,40 @@ class AppRepository {
     required int userId,
     required String text,
     required String categoryKey,
+    String? className,
+    String? lessonTitle,
   }) async {
     if (text.trim().isEmpty) return;
     final db = await _dbHelper.database;
-    await db.insert('history', {
+    final trimmedClass = className?.trim();
+    final trimmedLesson = lessonTitle?.trim();
+    final hasLessonContext = trimmedClass != null &&
+        trimmedClass.isNotEmpty &&
+        trimmedLesson != null &&
+        trimmedLesson.isNotEmpty;
+    final effectiveCategoryKey = hasLessonContext
+        ? HistoryModel.encodeLessonCategoryKey(
+            className: trimmedClass,
+            lessonTitle: trimmedLesson,
+          )
+        : categoryKey;
+    final row = <String, Object?>{
       'user_id': userId,
       'phrase_text': text.trim(),
-      'category_key': categoryKey,
+      'category_key': effectiveCategoryKey,
       'created_at': DateTime.now().millisecondsSinceEpoch,
-    });
+    };
+    if (hasLessonContext) {
+      row['class_name'] = trimmedClass;
+      row['lesson_title'] = trimmedLesson;
+    }
+    try {
+      await db.insert('history', row);
+    } on DatabaseException {
+      row.remove('class_name');
+      row.remove('lesson_title');
+      await db.insert('history', row);
+    }
   }
 
   Future<void> removeHistory(int historyId) async {
@@ -736,6 +920,92 @@ class AppRepository {
         if (byCount != 0) return byCount;
         return a.text.compareTo(b.text);
       });
+  }
+
+  Future<List<ChildLessonProgressEntry>> getChildLessonProgress({
+    required int learnerUserId,
+    required DateTime rangeStart,
+    required DateTime rangeEnd,
+  }) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'history',
+      where: 'user_id = ? AND created_at >= ? AND created_at < ?',
+      whereArgs: [
+        learnerUserId,
+        rangeStart.millisecondsSinceEpoch,
+        rangeEnd.millisecondsSinceEpoch,
+      ],
+      orderBy: 'created_at DESC',
+    );
+
+    final aggregate = <String, _LessonProgressAgg>{};
+    for (final row in rows) {
+      final item = HistoryModel.fromMap(row);
+      if (!item.isLessonEntry) continue;
+      final ctx = item.lessonContext!;
+      final key = '${ctx.className}:::${ctx.lessonTitle}';
+      final agg = aggregate.putIfAbsent(
+        key,
+        () => _LessonProgressAgg(
+          className: ctx.className,
+          lessonTitle: ctx.lessonTitle,
+        ),
+      );
+      agg.totalInteractions++;
+      if (agg.lastAccessed == null ||
+          item.createdAt.isAfter(agg.lastAccessed!)) {
+        agg.lastAccessed = item.createdAt;
+      }
+      final canonical = ContentLocalization.canonicalPhrase(item.text);
+      final lessonCanonical =
+          ContentLocalization.canonicalPhrase(ctx.lessonTitle);
+      if (canonical != lessonCanonical) {
+        agg.practicedPhrases.add(canonical);
+      }
+    }
+
+    final results = <ChildLessonProgressEntry>[];
+    for (final agg in aggregate.values) {
+      final totalPhrases = await _lessonPhraseCountForTitle(
+        className: agg.className,
+        lessonTitle: agg.lessonTitle,
+      );
+      results.add(
+        ChildLessonProgressEntry(
+          className: agg.className,
+          lessonTitle: agg.lessonTitle,
+          practicedPhrases: agg.practicedPhrases.length,
+          totalInteractions: agg.totalInteractions,
+          lastAccessed: agg.lastAccessed ?? rangeStart,
+          totalPhrases: totalPhrases,
+        ),
+      );
+    }
+
+    results.sort((a, b) {
+      final byClass = a.className.compareTo(b.className);
+      if (byClass != 0) return byClass;
+      return b.lastAccessed.compareTo(a.lastAccessed);
+    });
+    return results;
+  }
+
+  Future<int?> _lessonPhraseCountForTitle({
+    required String className,
+    required String lessonTitle,
+  }) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT
+        (SELECT COUNT(*) FROM lesson_phrases lp WHERE lp.lesson_id = cl.id) AS phrase_count
+      FROM class_lessons cl
+      INNER JOIN classes c ON c.id = cl.class_id
+      WHERE c.class_name = ? AND cl.title = ?
+      LIMIT 1
+    ''', [className, lessonTitle]);
+    if (rows.isEmpty) return null;
+    return rows.first['phrase_count'] as int?;
   }
 
   static String generateClassCode() {
@@ -1045,7 +1315,17 @@ class AppRepository {
       final classId = classRow['id'] as int;
       final learnerUid = enrollment.learnerFirebaseUid.trim();
       if (learnerUid.isEmpty) continue;
-      final learner = await findUserByFirebaseUid(learnerUid);
+      var learner = await findUserByFirebaseUid(learnerUid);
+      if (learner == null) {
+        final stubId = await ensureUserStubFromFirebase(
+          firebaseUid: learnerUid,
+          role: 'learner',
+          displayName: enrollment.learnerName.trim().isEmpty
+              ? 'Learner'
+              : enrollment.learnerName.trim(),
+        );
+        learner = await findUserById(stubId);
+      }
       if (learner == null) continue;
       if (await isLearnerEnrolled(learner.id, classId)) continue;
       await enrollLearnerInClass(learner.id, classId);
@@ -1086,7 +1366,7 @@ class AppRepository {
           (row) => ClassLesson(
             id: row['id'] as int,
             classId: row['class_id'] as int,
-            title: row['title'] as String,
+            title: ContentLocalization.canonicalPhrase(row['title'] as String),
             createdAt: DateTime.fromMillisecondsSinceEpoch(
               row['created_at'] as int,
             ),
@@ -1113,7 +1393,9 @@ class AppRepository {
           (row) => LessonPhrase(
             id: row['id'] as int,
             lessonId: row['lesson_id'] as int,
-            text: row['phrase_text'] as String,
+            text: ContentLocalization.canonicalPhrase(
+              row['phrase_text'] as String,
+            ),
             imagePath: row['image_path'] as String?,
           ),
         )
@@ -1562,7 +1844,7 @@ class AppRepository {
           (row) => ClassLesson(
             id: row['id'] as int,
             classId: row['class_id'] as int,
-            title: row['title'] as String,
+            title: ContentLocalization.canonicalPhrase(row['title'] as String),
             createdAt: DateTime.fromMillisecondsSinceEpoch(
               row['created_at'] as int,
             ),
@@ -1578,7 +1860,7 @@ class AppRepository {
     required String title,
   }) async {
     if (!await _teacherOwnsClass(teacherUserId, classId)) return null;
-    final trimmed = title.trim();
+    final trimmed = ContentLocalization.canonicalPhrase(title.trim());
     if (trimmed.isEmpty) return null;
     final db = await _dbHelper.database;
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -1594,6 +1876,24 @@ class AppRepository {
       title: trimmed,
       createdAt: DateTime.fromMillisecondsSinceEpoch(now),
     );
+  }
+
+  Future<bool> updateClassLesson({
+    required int teacherUserId,
+    required int lessonId,
+    required String title,
+  }) async {
+    if (!await _teacherOwnsLesson(teacherUserId, lessonId)) return false;
+    final trimmed = ContentLocalization.canonicalPhrase(title.trim());
+    if (trimmed.isEmpty) return false;
+    final db = await _dbHelper.database;
+    final updated = await db.update(
+      'class_lessons',
+      {'title': trimmed},
+      where: 'id = ?',
+      whereArgs: [lessonId],
+    );
+    return updated > 0;
   }
 
   Future<bool> deleteClassLesson({
@@ -1632,7 +1932,9 @@ class AppRepository {
           (row) => LessonPhrase(
             id: row['id'] as int,
             lessonId: row['lesson_id'] as int,
-            text: row['phrase_text'] as String,
+            text: ContentLocalization.canonicalPhrase(
+              row['phrase_text'] as String,
+            ),
             imagePath: row['image_path'] as String?,
           ),
         )
@@ -1646,7 +1948,7 @@ class AppRepository {
     String? imagePath,
   }) async {
     if (!await _teacherOwnsLesson(teacherUserId, lessonId)) return null;
-    final trimmed = text.trim();
+    final trimmed = ContentLocalization.canonicalPhrase(text.trim());
     if (trimmed.isEmpty) return null;
     final db = await _dbHelper.database;
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -1731,4 +2033,17 @@ class AppRepository {
       ),
     ];
   }
+}
+
+class _LessonProgressAgg {
+  _LessonProgressAgg({
+    required this.className,
+    required this.lessonTitle,
+  });
+
+  final String className;
+  final String lessonTitle;
+  final practicedPhrases = <String>{};
+  int totalInteractions = 0;
+  DateTime? lastAccessed;
 }

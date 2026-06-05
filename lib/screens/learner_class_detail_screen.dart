@@ -47,8 +47,13 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
     });
   }
 
-  void _openLesson(ClassLesson lesson) {
-    Navigator.of(context)
+  Future<void> _openLesson(ClassLesson lesson) async {
+    await context.read<AppState>().recordLessonOpen(
+      className: widget.enrolledClass.className,
+      lessonTitle: lesson.title,
+    );
+    if (!mounted) return;
+    await Navigator.of(context)
         .push(
           MaterialPageRoute<void>(
             builder: (_) => LearnerLessonScreen(
@@ -57,8 +62,9 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
               className: widget.enrolledClass.className,
             ),
           ),
-        )
-        .then((_) => _load());
+        );
+    if (!mounted) return;
+    await _load();
   }
 
   @override
@@ -67,6 +73,7 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
     final theme = app.theme;
     final lang = app.language;
     final enrolled = widget.enrolledClass;
+    final displayClassName = app.localizedContent(enrolled.className);
 
     return LearnerScaffold(
       title: AppStrings.appName(lang),
@@ -87,7 +94,7 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  enrolled.className,
+                  displayClassName,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.poppins(
@@ -134,6 +141,7 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
                 padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                 child: _LessonCard(
                   lesson: lesson,
+                  displayTitle: app.localizedContent(lesson.title),
                   theme: theme,
                   lang: lang,
                   onTap: () => _openLesson(lesson),
@@ -148,12 +156,14 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
 class _LessonCard extends StatelessWidget {
   const _LessonCard({
     required this.lesson,
+    required this.displayTitle,
     required this.theme,
     required this.lang,
     required this.onTap,
   });
 
   final ClassLesson lesson;
+  final String displayTitle;
   final TapTalkThemeToken theme;
   final AppLanguage lang;
   final VoidCallback onTap;
@@ -199,7 +209,7 @@ class _LessonCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      lesson.title,
+                      displayTitle,
                       style: GoogleFonts.poppins(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,

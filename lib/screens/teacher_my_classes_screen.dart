@@ -54,7 +54,12 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
           AppStrings.deleteClass(lang),
           style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
         ),
-        content: Text(AppStrings.deleteClassConfirm(lang, teacherClass.name)),
+        content: Text(
+          AppStrings.deleteClassConfirm(
+            lang,
+            app.localizedContent(teacherClass.name),
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -180,7 +185,7 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
                     padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                     child: ClassColorCard(
                       classId: teacherClass.id,
-                      title: teacherClass.name,
+                      title: app.localizedContent(teacherClass.name),
                       badge: teacherClass.code,
                       subtitle: AppStrings.studentsInClass(
                         _studentCounts[teacherClass.id] ?? 0,

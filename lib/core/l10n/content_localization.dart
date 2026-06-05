@@ -71,6 +71,15 @@ abstract final class ContentLocalization {
     'sleep': 'matulog',
     'play': 'maglaro',
     'eat': 'kumain',
+    'ugly': 'pangit',
+    'pretty': 'maganda',
+    'beautiful': 'maganda',
+    'kind': 'mabait',
+    'bad': 'masama',
+    'good': 'mabuti',
+    'smart': 'matalino',
+    'stupid': 'bobo',
+    'nice': 'mabait',
   };
 
   static const Map<String, String> _phraseFragmentFil = {
@@ -105,8 +114,12 @@ abstract final class ContentLocalization {
 
   static Map<String, String> get _filToEn {
     _filToEnWords ??= {
-      for (final entry in _wordEnFil.entries) entry.value: entry.key,
-      for (final entry in _phraseFil.entries) entry.value: entry.key,
+      for (final entry in _wordEnFil.entries)
+        entry.value.toLowerCase(): entry.key,
+      for (final entry in _phraseFil.entries)
+        entry.value.toLowerCase(): entry.key,
+      for (final entry in _phraseFragmentFil.entries)
+        entry.value.toLowerCase(): entry.key,
     };
     return _filToEnWords!;
   }
@@ -130,6 +143,9 @@ abstract final class ContentLocalization {
 
     final fromPattern = _patternToEnglish(trimmed);
     if (fromPattern != null) return fromPattern;
+
+    final wordByWord = _wordByWordToEnglish(trimmed);
+    if (wordByWord != null) return wordByWord;
 
     final normalized = _normalizeEnglishPhrase(trimmed);
     if (normalized != null) {
@@ -176,6 +192,16 @@ abstract final class ContentLocalization {
 
     final iNeed = RegExp(r'^i need (.+)$').firstMatch(lower);
     if (iNeed != null) return 'I need ${_titleCaseEnglish(iNeed.group(1)!)}';
+
+    final youAre = RegExp(r'^you are (.+)$').firstMatch(lower);
+    if (youAre != null) {
+      return 'You are ${_titleCaseEnglish(youAre.group(1)!)}';
+    }
+
+    final youre = RegExp(r"^you're (.+)$").firstMatch(lower);
+    if (youre != null) {
+      return 'You are ${_titleCaseEnglish(youre.group(1)!)}';
+    }
 
     return null;
   }
@@ -256,6 +282,18 @@ abstract final class ContentLocalization {
       if (fil != null) return 'Kailangan ko ng $fil';
     }
 
+    final youAre = RegExp(r'^you are (.+)$').firstMatch(lower);
+    if (youAre != null) {
+      final fil = _translateFragment(youAre.group(1)!);
+      if (fil != null) return '${_capitalizeFirst(fil)} ka';
+    }
+
+    final youre = RegExp(r"^you're (.+)$").firstMatch(lower);
+    if (youre != null) {
+      final fil = _translateFragment(youre.group(1)!);
+      if (fil != null) return '${_capitalizeFirst(fil)} ka';
+    }
+
     return null;
   }
 
@@ -290,6 +328,12 @@ abstract final class ContentLocalization {
       if (enTail != null) return 'I need ${_titleCaseEnglish(enTail)}';
     }
 
+    final kaPattern = RegExp(r'^(.+) ka$').firstMatch(lower);
+    if (kaPattern != null) {
+      final enTail = _reverseFragment(kaPattern.group(1)!);
+      if (enTail != null) return 'You are ${enTail.toLowerCase()}';
+    }
+
     return null;
   }
 
@@ -299,6 +343,50 @@ abstract final class ContentLocalization {
       if (entry.value.toLowerCase() == lower) return entry.key;
     }
     return null;
+  }
+
+  static String? _wordByWordToEnglish(String text) {
+    final words = text.trim().split(RegExp(r'\s+'));
+    if (words.isEmpty) return null;
+
+    final reversed = <String>[];
+    var anyReversed = false;
+    for (final word in words) {
+      if (_skipWords.contains(word.toLowerCase())) {
+        reversed.add(word);
+        continue;
+      }
+      final en = _reverseWord(word) ?? _filToEn[word.toLowerCase()];
+      if (en != null) {
+        reversed.add(en);
+        anyReversed = true;
+      } else {
+        reversed.add(word);
+      }
+    }
+    return anyReversed ? _titleCaseEnglish(reversed.join(' ')) : null;
+  }
+
+  static String? _wordByWordToFilipino(String text) {
+    final words = text.trim().split(RegExp(r'\s+'));
+    if (words.isEmpty) return null;
+
+    final translated = <String>[];
+    var anyTranslated = false;
+    for (final word in words) {
+      if (_skipWords.contains(word.toLowerCase())) {
+        translated.add(word);
+        continue;
+      }
+      final fil = _wordEnFil[word.toLowerCase()];
+      if (fil != null) {
+        translated.add(fil);
+        anyTranslated = true;
+      } else {
+        translated.add(word);
+      }
+    }
+    return anyTranslated ? translated.join(' ') : null;
   }
 
   static String? _reverseFragment(String fragment) {
@@ -375,8 +463,13 @@ abstract final class ContentLocalization {
 
     return _phraseFilValueFor(canonical) ??
         _patternToFilipino(canonical) ??
+        _wordByWordToFilipino(canonical) ??
         canonical;
   }
+
+  /// Localized display for user-entered phrases, lesson titles, and class names.
+  static String freeText(String storedText, AppLanguage lang) =>
+      phrase(storedText, '', lang: lang);
 
   static String themeName(String themeKey, String storedName, AppLanguage lang) {
     if (lang == AppLanguage.english) return storedName;

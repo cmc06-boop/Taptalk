@@ -66,9 +66,11 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
     final theme = app.theme;
     final lang = app.language;
     final denseGrid = AppSpacing.phraseGridIsDense(context);
+    final displayLessonTitle = app.localizedContent(widget.lessonTitle);
+    final displayClassName = app.localizedContent(widget.className);
 
     return LearnerScaffold(
-      title: widget.lessonTitle,
+      title: displayLessonTitle,
       currentRoute: AppRoute.classes,
       showBackButton: true,
       showBottomNav: false,
@@ -86,7 +88,7 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  widget.lessonTitle,
+                  displayLessonTitle,
                   style: GoogleFonts.poppins(
                     fontSize: 20,
                     fontWeight: FontWeight.w800,
@@ -95,7 +97,7 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  widget.className,
+                  displayClassName,
                   style: GoogleFonts.poppins(
                     fontSize: 12,
                     color: theme.textMain.withValues(alpha: 0.65),
@@ -158,24 +160,29 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
                 itemBuilder: (context, i) {
                   final lessonPhrase = _phrases[i];
                   final phrase = _asPhraseModel(lessonPhrase);
-                  final label =
-                      app.localizedPhrase(phrase.text, phrase.categoryKey);
+                  final displayText = app.localizedPhraseText(phrase);
                   return PhraseCard(
+                    key: ValueKey('lesson_${phrase.id}_${lang.name}'),
                     phrase: phrase,
+                    displayText: displayText,
                     dense: denseGrid,
                     isFavorite: app.isFavorite(phrase),
                     showDelete: false,
                     onTap: () => speakWithFeedback(
                       context,
-                      label,
+                      phrase.text,
                       record: true,
                       categoryKey: phrase.categoryKey,
+                      className: widget.className,
+                      lessonTitle: widget.lessonTitle,
                     ),
                     onSpeak: () => speakWithFeedback(
                       context,
-                      label,
+                      phrase.text,
                       record: true,
                       categoryKey: phrase.categoryKey,
+                      className: widget.className,
+                      lessonTitle: widget.lessonTitle,
                     ),
                     onFavorite: () => app.toggleFavorite(phrase),
                     onDelete: () {},

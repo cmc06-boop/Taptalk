@@ -67,7 +67,7 @@ class _EnrollClassDialogState extends State<EnrollClassDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.read<AppState>();
+    final app = context.watch<AppState>();
     final lang = app.language;
     final theme = app.theme;
 

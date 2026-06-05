@@ -9,6 +9,7 @@ import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../data/models/category_model.dart';
+import '../data/models/child_lesson_progress.dart';
 import '../data/models/child_session_summary.dart';
 import '../data/models/monitored_learner.dart';
 import '../data/models/phrase_usage_stat.dart';
@@ -16,6 +17,7 @@ import '../data/models/vocabulary_growth_summary.dart';
 import '../data/repositories/app_repository.dart';
 import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
+import '../widgets/lesson_progress_section.dart';
 import '../widgets/session_usage_chart.dart';
 import '../widgets/vocabulary_growth_section.dart';
 
@@ -42,6 +44,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
   List<CategoryModel> _childCategories = [];
   ChildSessionSummary _sessionSummary = ChildSessionSummary.empty;
   VocabularyGrowthSummary _vocabularyGrowth = VocabularyGrowthSummary.empty;
+  List<ChildLessonProgressEntry> _lessonProgress = [];
   bool _loadingStats = false;
   bool _monthPickerExpanded = false;
   Timer? _liveSessionTimer;
@@ -103,11 +106,17 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
       month: month,
       linkedAt: widget.learner.trackingSince,
     );
+    final lessonProgressFuture = app.getChildLessonProgress(
+      learnerUserId: widget.learner.learnerId,
+      period: _period,
+      month: month,
+    );
     final categoriesFuture = app.categoriesForUser(widget.learner.learnerId);
     final results = await Future.wait([
       statsFuture,
       sessionFuture,
       vocabularyFuture,
+      lessonProgressFuture,
       categoriesFuture,
     ]);
     if (mounted) {
@@ -115,7 +124,8 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
         _stats = results[0] as List<PhraseUsageStat>;
         _sessionSummary = results[1] as ChildSessionSummary;
         _vocabularyGrowth = results[2] as VocabularyGrowthSummary;
-        _childCategories = results[3] as List<CategoryModel>;
+        _lessonProgress = results[3] as List<ChildLessonProgressEntry>;
+        _childCategories = results[4] as List<CategoryModel>;
         _loadingStats = false;
       });
     }
@@ -597,6 +607,42 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                       theme: theme,
                       lang: lang,
                       labelForCategory: (key) => _categoryLabel(app, key),
+                    ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            child: Text(
+              AppStrings.lessonProgress(lang),
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: theme.textMain,
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(_cardRadius),
+                border: Border.all(color: const Color(0xFFE9EEF2)),
+              ),
+              child: _loadingStats
+                  ? const Padding(
+                      padding: EdgeInsets.all(AppSpacing.xl),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  : LessonProgressSection(
+                      entries: _lessonProgress,
+                      theme: theme,
+                      lang: lang,
+                      labelForContent: app.localizedContent,
                     ),
             ),
           ),

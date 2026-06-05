@@ -70,5 +70,11 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /user_profiles/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create, update: if request.auth != null && request.auth.uid == userId;
+      allow delete: if false;
+    }
+
   }
 }
