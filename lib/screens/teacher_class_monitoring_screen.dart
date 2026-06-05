@@ -47,12 +47,16 @@ class _TeacherClassMonitoringScreenState
           await app.getTeacherClassStudentsForClass(widget.classId);
       if (!mounted) return;
       setState(() => _students = students);
-      app.scheduleTeacherEnrollmentCloudSyncForClass(widget.classId);
     } catch (e, st) {
       debugPrint('Teacher class roster load failed: $e\n$st');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _onRefresh() async {
+    setState(() => _loading = true);
+    await _load();
   }
 
   void _openMonitoring(TeacherClassStudent student) {
@@ -275,7 +279,9 @@ class _TeacherClassMonitoringScreenState
       showBackButton: true,
       showBottomNav: false,
       onBack: () => Navigator.of(context).pop(),
-      body: ListView(
+      body: RefreshIndicator(
+        onRefresh: _onRefresh,
+        child: ListView(
         padding: const EdgeInsets.fromLTRB(
           AppSpacing.lg,
           AppSpacing.sm,
@@ -344,6 +350,7 @@ class _TeacherClassMonitoringScreenState
                 ),
               ),
         ],
+        ),
       ),
     );
   }

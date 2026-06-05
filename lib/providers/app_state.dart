@@ -1004,15 +1004,31 @@ class AppState extends ChangeNotifier {
   }) async {
     if (_user == null || text.trim().isEmpty) return;
     final canonical = ContentLocalization.canonicalPhrase(text);
+    final effectiveCategoryKey = categoryKey ?? _selectedCategoryKey;
+    final now = DateTime.now();
     await _repo.addHistory(
       userId: _user!.id,
       text: canonical,
-      categoryKey: categoryKey ?? _selectedCategoryKey,
+      categoryKey: effectiveCategoryKey,
       className: className,
       lessonTitle: lessonTitle,
     );
     _history = await _repo.getHistory(_user!.id);
     notifyListeners();
+    // Push to cloud for cross-device monitoring (fire-and-forget).
+    final uid = _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (uid != null && uid.isNotEmpty && _notificationSync.isCloudAvailable) {
+      unawaited(_notificationSync.pushLearnerActivity(
+        LearnerActivityCloudEvent(
+          learnerFirebaseUid: uid,
+          phraseText: canonical,
+          categoryKey: effectiveCategoryKey,
+          createdAt: now,
+          className: className,
+          lessonTitle: lessonTitle,
+        ),
+      ));
+    }
   }
 
   Future<void> deleteHistoryItem(HistoryModel item) async {
@@ -1558,7 +1574,8 @@ class AppState extends ChangeNotifier {
     required bool clearImage,
   }) async {
     if (_user == null || !_user!.isTeacher) return false;
-    final savedImage = clearImage ? null : await persistPhraseImageIfNeeded(imagePath);
+    final savedImage =
+        clearImage ? null : await persistPhraseImageIfNeeded(imagePath);
     return _repo.updateLessonPhrase(
       teacherUserId: _user!.id,
       phraseId: phraseId,
@@ -1567,11 +1584,14 @@ class AppState extends ChangeNotifier {
     );
   }
 
-  /// Local SQLite roster only — never blocks on Firestore (used by teacher UI).
+  /// Returns the roster for a class, merging cloud enrollments into local SQLite
+  /// so students enrolled from another device appear on the teacher's phone too.
   Future<List<TeacherClassStudent>> getTeacherClassStudentsForClass(
     int classId,
   ) async {
     if (_user == null || !_user!.isTeacher) return [];
+    // Sync cloud enrollments into local DB before reading.
+    await _syncTeacherClassesFromCloud();
     return _repo.getTeacherClassStudentsForClass(
       teacherUserId: _user!.id,
       classId: classId,
@@ -1748,8 +1768,45 @@ class AppState extends ChangeNotifier {
       _enrolledClasses = [];
       return;
     }
+    // Pull enrollments from cloud first so cross-device joins appear immediately.
+    await _syncEnrolledClassesFromCloud();
     _enrolledClasses = await _repo.getEnrolledClasses(_user!.id);
     await _resyncLearnerEnrollmentsToCloud();
+  }
+
+  /// Pulls cloud enrollment records for this learner and imports any missing
+  /// teacher-class records into local SQLite so the learner sees them.
+  Future<void> _syncEnrolledClassesFromCloud() async {
+    if (_user == null || !_user!.isLearner || !_notificationSync.isCloudAvailable) return;
+    final uid = _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (uid == null || uid.isEmpty) return;
+    try {
+      final remoteEnrollments = await _notificationSync
+          .getClassEnrollmentsForLearnerFromCloud(uid)
+          .timeout(const Duration(seconds: 12));
+      for (final enrollment in remoteEnrollments) {
+        final code = AppRepository.normalizeClassCode(enrollment.classCode);
+        if (!AppRepository.isValidClassCodeFormat(code)) continue;
+        // Ensure the teacher class exists locally.
+        var classRow = await _repo.findClassByCode(code);
+        if (classRow == null) {
+          // Fetch the class details from cloud and import.
+          final remoteClass = await _notificationSync
+              .getTeacherClassByCodeFromCloud(code)
+              .timeout(const Duration(seconds: 8));
+          if (remoteClass != null) {
+            classRow = await _repo.importRemoteTeacherClassForEnrollment(remoteClass);
+          }
+        }
+        if (classRow == null) continue;
+        final classId = classRow['id'] as int;
+        if (!await _repo.isLearnerEnrolled(_user!.id, classId)) {
+          await _repo.enrollLearnerInClass(_user!.id, classId);
+        }
+      }
+    } catch (e, st) {
+      debugPrint('Sync enrolled classes from cloud failed: $e\n$st');
+    }
   }
 
   Future<void> _resyncLearnerEnrollmentsToCloud() async {
@@ -1884,11 +1941,57 @@ class AppState extends ChangeNotifier {
     DateTime? month,
   }) async {
     final range = _dateRangeForPeriod(period, month: month);
-    return _repo.getPhraseUsageStats(
+    final localStats = await _repo.getPhraseUsageStats(
       learnerUserId: learnerUserId,
       rangeStart: range.$1,
       rangeEnd: range.$2,
     );
+
+    // Merge cloud activity so teacher/parent on another phone sees updates.
+    if (_notificationSync.isCloudAvailable) {
+      final learnerFirebaseUid =
+          await _repo.getFirebaseUidForUser(learnerUserId);
+      if (learnerFirebaseUid != null && learnerFirebaseUid.isNotEmpty) {
+        try {
+          final remoteActivities = await _notificationSync
+              .getLearnerActivitiesFromCloud(
+                learnerFirebaseUid: learnerFirebaseUid,
+                rangeStart: range.$1,
+                rangeEnd: range.$2,
+              )
+              .timeout(const Duration(seconds: 12));
+          if (remoteActivities.isNotEmpty) {
+            // Merge remote into local stat map.
+            final merged = <String, int>{};
+            for (final s in localStats) {
+              final key = '${s.categoryKey}|${s.text}';
+              merged[key] = (merged[key] ?? 0) + s.count;
+            }
+            for (final a in remoteActivities) {
+              final canonical = ContentLocalization.canonicalPhrase(a.phraseText);
+              final key = '${AppRepository.normalizeCategoryKey(a.categoryKey)}|$canonical';
+              merged[key] = (merged[key] ?? 0) + 1;
+            }
+            final result = merged.entries.map((e) {
+              final parts = e.key.split('|');
+              return PhraseUsageStat(
+                categoryKey: parts[0],
+                text: parts.sublist(1).join('|'),
+                count: e.value,
+              );
+            }).toList()
+              ..sort((a, b) {
+                final c = b.count.compareTo(a.count);
+                return c != 0 ? c : a.text.compareTo(b.text);
+              });
+            return result;
+          }
+        } catch (e, st) {
+          debugPrint('Cloud phrase stats merge failed: $e\n$st');
+        }
+      }
+    }
+    return localStats;
   }
 
   Future<VocabularyGrowthSummary> getChildVocabularyGrowth({

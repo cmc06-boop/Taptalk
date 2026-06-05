@@ -259,6 +259,40 @@ class NotificationSyncService {
     return _cloud.getClassEnrollmentsForTeacher(teacherFirebaseUid);
   }
 
+  Future<List<RemoteClassEnrollment>> getClassEnrollmentsForLearnerFromCloud(
+    String learnerFirebaseUid,
+  ) async {
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return const [];
+    return _cloud.getClassEnrollmentsForLearner(learnerFirebaseUid);
+  }
+
+  Future<void> pushLearnerActivity(LearnerActivityCloudEvent event) async {
+    if (!_cloud.isAvailable) return;
+    try {
+      await _cloud.appendLearnerActivity(event);
+    } catch (e, st) {
+      debugPrint('Push learner activity failed: $e\n$st');
+    }
+  }
+
+  Future<List<RemoteLearnerActivity>> getLearnerActivitiesFromCloud({
+    required String learnerFirebaseUid,
+    required DateTime rangeStart,
+    required DateTime rangeEnd,
+  }) async {
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return const [];
+    try {
+      return await _cloud.getLearnerActivities(
+        learnerFirebaseUid: learnerFirebaseUid,
+        rangeStart: rangeStart,
+        rangeEnd: rangeEnd,
+      );
+    } catch (e, st) {
+      debugPrint('getLearnerActivitiesFromCloud failed: $e\n$st');
+      return const [];
+    }
+  }
+
   Future<RemoteTeacherClass?> getTeacherClassByCodeFromCloud(
     String classCode,
   ) async {

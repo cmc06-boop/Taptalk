@@ -13,6 +13,7 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   static const String teacherClassCollectionName = 'teacher_classes_cloud';
   static const String learnerProfileCollectionName = 'learner_profiles';
   static const String userProfileCollectionName = 'user_profiles';
+  static const String activityCollectionName = 'learner_activity';
 
   @override
   bool get isAvailable => FirebaseService.instance.isAvailable;
@@ -150,6 +151,61 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
         .where('teacherFirebaseUid', isEqualTo: teacherFirebaseUid.trim())
         .get();
     return snapshot.docs.map(_enrollmentFromDocument).toList();
+  }
+
+  @override
+  Future<List<RemoteClassEnrollment>> getClassEnrollmentsForLearner(
+    String learnerFirebaseUid,
+  ) async {
+    if (!isAvailable || learnerFirebaseUid.trim().isEmpty) return const [];
+    final snapshot = await FirebaseFirestore.instance
+        .collection(enrollmentCollectionName)
+        .where('learnerFirebaseUid', isEqualTo: learnerFirebaseUid.trim())
+        .get();
+    return snapshot.docs.map(_enrollmentFromDocument).toList();
+  }
+
+  @override
+  Future<void> appendLearnerActivity(LearnerActivityCloudEvent event) async {
+    if (!isAvailable || event.learnerFirebaseUid.trim().isEmpty) return;
+    final payload = event.toFirestoreMap()
+      ..['createdAt'] = Timestamp.fromDate(event.createdAt.toUtc());
+    await FirebaseFirestore.instance
+        .collection(activityCollectionName)
+        .add(payload);
+  }
+
+  @override
+  Future<List<RemoteLearnerActivity>> getLearnerActivities({
+    required String learnerFirebaseUid,
+    required DateTime rangeStart,
+    required DateTime rangeEnd,
+  }) async {
+    if (!isAvailable || learnerFirebaseUid.trim().isEmpty) return const [];
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection(activityCollectionName)
+          .where('learnerFirebaseUid', isEqualTo: learnerFirebaseUid.trim())
+          .where('createdAt',
+              isGreaterThanOrEqualTo:
+                  Timestamp.fromDate(rangeStart.toUtc()))
+          .where('createdAt',
+              isLessThan: Timestamp.fromDate(rangeEnd.toUtc()))
+          .get();
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        return RemoteLearnerActivity(
+          phraseText: (data['phraseText'] as String?) ?? '',
+          categoryKey: (data['categoryKey'] as String?) ?? '',
+          createdAt: _readTimestamp(data['createdAt']),
+          className: data['className'] as String?,
+          lessonTitle: data['lessonTitle'] as String?,
+        );
+      }).toList();
+    } catch (e, st) {
+      debugPrint('getLearnerActivities failed: $e\n$st');
+      return const [];
+    }
   }
 
   @override

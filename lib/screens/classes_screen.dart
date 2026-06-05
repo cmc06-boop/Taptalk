@@ -13,9 +13,14 @@ import '../widgets/learner_scaffold.dart';
 import '../widgets/panel_card.dart';
 import 'learner_class_detail_screen.dart';
 
-class ClassesScreen extends StatelessWidget {
+class ClassesScreen extends StatefulWidget {
   const ClassesScreen({super.key});
 
+  @override
+  State<ClassesScreen> createState() => _ClassesScreenState();
+}
+
+class _ClassesScreenState extends State<ClassesScreen> {
   Future<void> _showEnrollDialog(BuildContext context) async {
     final joined = await EnrollClassDialog.show(context);
     if (!context.mounted || joined != true) return;
@@ -75,6 +80,10 @@ class ClassesScreen extends StatelessWidget {
     );
   }
 
+  Future<void> _onRefresh() async {
+    await context.read<AppState>().refreshEnrolledClasses();
+  }
+
   void _openClass(BuildContext context, EnrolledClassModel enrolled) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -98,7 +107,9 @@ class ClassesScreen extends StatelessWidget {
       showBottomNav: false,
       body: Stack(
         children: [
-          ListView(
+          RefreshIndicator(
+            onRefresh: _onRefresh,
+            child: ListView(
             padding: const EdgeInsets.only(bottom: 80),
             children: [
               Padding(
@@ -168,6 +179,7 @@ class ClassesScreen extends StatelessWidget {
                   ),
             ],
           ),
+          ), // end RefreshIndicator
           Positioned(
             right: AppSpacing.lg,
             bottom: AppSpacing.md,
