@@ -1070,6 +1070,11 @@ abstract final class AppStrings {
       ? 'Lahat ng kategorya'
       : 'All categories';
 
+  static String allFrequentlyUsedTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Madalas gamiting parirala'
+          : 'Frequently used phrases';
+
   static String trendByWeek(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Linggo' : 'Weeks';
 
@@ -1094,6 +1099,9 @@ abstract final class AppStrings {
 
   static String selectClass(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Piliin ang klase' : 'Select class';
+
+  static String selectCategory(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Piliin ang kategorya' : 'Select category';
 
   static String selectLesson(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Piliin ang aralin' : 'Select lesson';
@@ -1133,6 +1141,16 @@ abstract final class AppStrings {
   static String frequentlyUsed(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Madalas gamitin'
       : 'Frequently used';
+
+  static String frequentlyUsedSubtitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'For Me na kategorya lang — piliin ang kategorya na gusto mong tingnan.'
+          : 'For Me categories only — choose a category to view its phrases.';
+
+  static String noPhrasesInSelectedCategory(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Walang pariralang ginamit sa kategoryang ito sa panahong ito.'
+          : 'No phrases used in this category for the selected period.';
 
   static String sessionActivity(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Oras ng paggamit'

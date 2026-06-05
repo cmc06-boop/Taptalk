@@ -16,6 +16,7 @@ import '../data/models/vocabulary_growth_summary.dart';
 import '../data/repositories/app_repository.dart';
 import '../providers/app_state.dart';
 import '../widgets/categories_used_section.dart';
+import '../widgets/frequently_used_section.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/lesson_progress_section.dart';
 import '../widgets/session_usage_chart.dart';
@@ -155,29 +156,6 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
       }
     }
     return app.localizedCategoryKey(categoryKey);
-  }
-
-  Map<String, List<PhraseUsageStat>> _groupByCategory() {
-    final grouped = <String, List<PhraseUsageStat>>{};
-    for (final stat in _stats) {
-      grouped.putIfAbsent(stat.categoryKey, () => []).add(stat);
-    }
-    for (final list in grouped.values) {
-      list.sort((a, b) {
-        final byCount = b.count.compareTo(a.count);
-        if (byCount != 0) return byCount;
-        return a.text.compareTo(b.text);
-      });
-    }
-    return grouped;
-  }
-
-  int _categoryUsageRank(List<PhraseUsageStat> items) {
-    var max = 0;
-    for (final stat in items) {
-      if (stat.count > max) max = stat.count;
-    }
-    return max;
   }
 
   Widget _buildExpandableMonthPicker({
@@ -435,69 +413,6 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
     );
   }
 
-  Widget _phraseStatCard({
-    required TapTalkThemeToken theme,
-    required AppLanguage lang,
-    required String phrase,
-    required int count,
-  }) {
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.md,
-        vertical: AppSpacing.md,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(_cardRadius),
-        border: Border.all(color: const Color(0xFFE9EEF2)),
-        boxShadow: [
-          BoxShadow(
-            color: theme.textMain.withValues(alpha: 0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: Text(
-              phrase,
-              style: GoogleFonts.poppins(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: theme.textMain,
-                height: 1.3,
-              ),
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.sm,
-              vertical: AppSpacing.xs,
-            ),
-            decoration: BoxDecoration(
-              color: theme.bgAccent.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              AppStrings.timesUsed(count, lang),
-              style: GoogleFonts.poppins(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: theme.bgAccent,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
@@ -505,15 +420,6 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
     final lang = app.language;
     final monthOptions = _monthOptions();
     final selectedMonth = _resolvedSelectedMonth(monthOptions);
-
-    final grouped = _groupByCategory();
-    final categoryKeys = grouped.keys.toList()
-      ..sort((a, b) {
-        final byUsage =
-            _categoryUsageRank(grouped[b]!).compareTo(_categoryUsageRank(grouped[a]!));
-        if (byUsage != 0) return byUsage;
-        return _categoryLabel(app, a).compareTo(_categoryLabel(app, b));
-      });
 
     final contextSubtitle = widget.learner.contextSubtitle;
 
@@ -678,66 +584,34 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
             ),
           ),
           const SizedBox(height: AppSpacing.sm),
-          if (_loadingStats)
-            const Padding(
-              padding: EdgeInsets.all(AppSpacing.xxl),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (_stats.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(AppSpacing.xxl),
-              child: Center(
-                child: Text(
-                  AppStrings.noPhraseUsage(lang),
-                  style: GoogleFonts.poppins(
-                    color: theme.textMain.withValues(alpha: 0.7),
-                  ),
-                ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(_cardRadius),
+                border: Border.all(color: const Color(0xFFE9EEF2)),
               ),
-            )
-          else
-            ...categoryKeys.map((categoryKey) {
-              final items = grouped[categoryKey]!;
-              final categoryLabel = _categoryLabel(app, categoryKey);
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.lg,
-                      AppSpacing.md,
-                      AppSpacing.lg,
-                      AppSpacing.sm,
-                    ),
-                    child: Text(
-                      categoryLabel,
-                      style: GoogleFonts.poppins(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: theme.textMain,
+              child: _loadingStats
+                  ? const Padding(
+                      padding: EdgeInsets.all(AppSpacing.xl),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  : FrequentlyUsedSection(
+                      stats: _stats,
+                      theme: theme,
+                      lang: lang,
+                      reloadNonce: _reloadNonce,
+                      labelForCategory: (key) => _categoryLabel(app, key),
+                      labelForPhrase: (stat) => app.localizedPhrase(
+                        stat.text,
+                        stat.categoryKey,
                       ),
                     ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-                    child: Column(
-                      children: [
-                        for (final stat in items)
-                          _phraseStatCard(
-                            theme: theme,
-                            lang: lang,
-                            phrase: app.localizedPhrase(
-                              stat.text,
-                              stat.categoryKey,
-                            ),
-                            count: stat.count,
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            }),
+            ),
+          ),
           const SizedBox(height: AppSpacing.lg),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
