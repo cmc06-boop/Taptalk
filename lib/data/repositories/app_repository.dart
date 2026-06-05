@@ -959,6 +959,7 @@ class AppRepository {
     required int learnerUserId,
     required DateTime rangeStart,
     required DateTime rangeEnd,
+    List<RemoteLearnerActivity> cloudActivities = const [],
   }) async {
     final db = await _dbHelper.database;
     final rows = await db.query(
@@ -973,6 +974,44 @@ class AppRepository {
     );
 
     final aggregate = <String, _LessonProgressAgg>{};
+    void absorbLessonActivity({
+      required String text,
+      required String categoryKey,
+      required DateTime createdAt,
+      String? className,
+      String? lessonTitle,
+    }) {
+      final item = HistoryModel(
+        id: 0,
+        userId: learnerUserId,
+        text: text,
+        categoryKey: categoryKey,
+        createdAt: createdAt,
+        className: className,
+        lessonTitle: lessonTitle,
+      );
+      if (!item.isLessonEntry) return;
+      final ctx = item.lessonContext!;
+      final key = '${ctx.className}:::${ctx.lessonTitle}';
+      final agg = aggregate.putIfAbsent(
+        key,
+        () => _LessonProgressAgg(
+          className: ctx.className,
+          lessonTitle: ctx.lessonTitle,
+        ),
+      );
+      agg.totalInteractions++;
+      if (agg.lastAccessed == null || createdAt.isAfter(agg.lastAccessed!)) {
+        agg.lastAccessed = createdAt;
+      }
+      final canonical = ContentLocalization.canonicalPhrase(text);
+      final lessonCanonical =
+          ContentLocalization.canonicalPhrase(ctx.lessonTitle);
+      if (canonical != lessonCanonical) {
+        agg.practicedPhrases.add(canonical);
+      }
+    }
+
     for (final row in rows) {
       final item = HistoryModel.fromMap(row);
       if (!item.isLessonEntry) continue;
@@ -996,6 +1035,16 @@ class AppRepository {
       if (canonical != lessonCanonical) {
         agg.practicedPhrases.add(canonical);
       }
+    }
+
+    for (final activity in cloudActivities) {
+      absorbLessonActivity(
+        text: activity.phraseText,
+        categoryKey: activity.categoryKey,
+        createdAt: activity.createdAt,
+        className: activity.className,
+        lessonTitle: activity.lessonTitle,
+      );
     }
 
     final results = <ChildLessonProgressEntry>[];
@@ -1860,6 +1909,32 @@ class AppRepository {
     return rows.isNotEmpty;
   }
 
+  Future<int?> classIdForLesson(int lessonId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'class_lessons',
+      columns: ['class_id'],
+      where: 'id = ?',
+      whereArgs: [lessonId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['class_id'] as int?;
+  }
+
+  Future<int?> classIdForLessonPhrase(int phraseId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT cl.class_id
+      FROM lesson_phrases lp
+      INNER JOIN class_lessons cl ON cl.id = lp.lesson_id
+      WHERE lp.id = ?
+      LIMIT 1
+    ''', [phraseId]);
+    if (rows.isEmpty) return null;
+    return rows.first['class_id'] as int?;
+  }
+
   Future<bool> _teacherOwnsLesson(int teacherUserId, int lessonId) async {
     final db = await _dbHelper.database;
     final rows = await db.rawQuery('''
@@ -1904,6 +1979,217 @@ class AppRepository {
         .toList();
   }
 
+  static String? imagePathForCloudSync(String? imagePath) {
+    if (imagePath == null || imagePath.trim().isEmpty) return null;
+    final trimmed = imagePath.trim();
+    final lower = trimmed.toLowerCase();
+    if (lower.startsWith('http://') ||
+        lower.startsWith('https://') ||
+        lower.startsWith('assets/')) {
+      return trimmed;
+    }
+    return null;
+  }
+
+  Future<RemoteClassContent?> buildRemoteClassContent({
+    required int teacherUserId,
+    required int classId,
+    required String classCode,
+    required String teacherFirebaseUid,
+  }) async {
+    if (!await _teacherOwnsClass(teacherUserId, classId)) return null;
+    final lessons = await getClassLessons(
+      teacherUserId: teacherUserId,
+      classId: classId,
+    );
+    final db = await _dbHelper.database;
+    final remoteLessons = <RemoteClassLessonContent>[];
+    for (final lesson in lessons) {
+      final lessonRows = await db.query(
+        'class_lessons',
+        where: 'id = ?',
+        whereArgs: [lesson.id],
+        limit: 1,
+      );
+      if (lessonRows.isEmpty) continue;
+      var lessonKey = lessonRows.first['cloud_lesson_key'] as String?;
+      if (lessonKey == null || lessonKey.trim().isEmpty) {
+        lessonKey = lesson.id.toString();
+        await db.update(
+          'class_lessons',
+          {'cloud_lesson_key': lessonKey},
+          where: 'id = ?',
+          whereArgs: [lesson.id],
+        );
+      }
+      final phraseRows = await db.query(
+        'lesson_phrases',
+        where: 'lesson_id = ?',
+        whereArgs: [lesson.id],
+        orderBy: 'sort_order ASC, id ASC',
+      );
+      final remotePhrases = <RemoteLessonPhraseContent>[];
+      for (final phraseRow in phraseRows) {
+        final phraseId = phraseRow['id'] as int;
+        var phraseKey = phraseRow['cloud_phrase_key'] as String?;
+        if (phraseKey == null || phraseKey.trim().isEmpty) {
+          phraseKey = phraseId.toString();
+          await db.update(
+            'lesson_phrases',
+            {'cloud_phrase_key': phraseKey},
+            where: 'id = ?',
+            whereArgs: [phraseId],
+          );
+        }
+        remotePhrases.add(
+          RemoteLessonPhraseContent(
+            phraseKey: phraseKey,
+            text: ContentLocalization.canonicalPhrase(
+              phraseRow['phrase_text'] as String,
+            ),
+            sortOrder: phraseRow['sort_order'] as int? ?? 0,
+            imagePath: imagePathForCloudSync(phraseRow['image_path'] as String?),
+          ),
+        );
+      }
+      remoteLessons.add(
+        RemoteClassLessonContent(
+          lessonKey: lessonKey,
+          title: lesson.title,
+          sortOrder: lessonRows.first['sort_order'] as int? ?? 0,
+          createdAt: lesson.createdAt,
+          phrases: remotePhrases,
+        ),
+      );
+    }
+    return RemoteClassContent(
+      classCode: normalizeClassCode(classCode),
+      teacherFirebaseUid: teacherFirebaseUid.trim(),
+      updatedAt: DateTime.now(),
+      lessons: remoteLessons,
+    );
+  }
+
+  Future<void> mergeRemoteClassContent({
+    required int classId,
+    required RemoteClassContent content,
+  }) async {
+    if (content.lessons.isEmpty) return;
+    final db = await _dbHelper.database;
+    final remoteLessonKeys = <String>{};
+
+    for (final remoteLesson in content.lessons) {
+      final lessonKey = remoteLesson.lessonKey.trim();
+      if (lessonKey.isEmpty) continue;
+      remoteLessonKeys.add(lessonKey);
+
+      final existingLessonRows = await db.query(
+        'class_lessons',
+        where: 'class_id = ? AND cloud_lesson_key = ?',
+        whereArgs: [classId, lessonKey],
+        limit: 1,
+      );
+
+      int lessonId;
+      if (existingLessonRows.isEmpty) {
+        lessonId = await db.insert('class_lessons', {
+          'class_id': classId,
+          'title': ContentLocalization.canonicalPhrase(remoteLesson.title),
+          'created_at': remoteLesson.createdAt.millisecondsSinceEpoch,
+          'sort_order': remoteLesson.sortOrder,
+          'cloud_lesson_key': lessonKey,
+        });
+      } else {
+        lessonId = existingLessonRows.first['id'] as int;
+        await db.update(
+          'class_lessons',
+          {
+            'title': ContentLocalization.canonicalPhrase(remoteLesson.title),
+            'sort_order': remoteLesson.sortOrder,
+          },
+          where: 'id = ?',
+          whereArgs: [lessonId],
+        );
+      }
+
+      final remotePhraseKeys = <String>{};
+      for (final remotePhrase in remoteLesson.phrases) {
+        final phraseKey = remotePhrase.phraseKey.trim();
+        if (phraseKey.isEmpty) continue;
+        remotePhraseKeys.add(phraseKey);
+        final canonical = ContentLocalization.canonicalPhrase(remotePhrase.text);
+        if (canonical.isEmpty) continue;
+
+        final existingPhraseRows = await db.query(
+          'lesson_phrases',
+          where: 'lesson_id = ? AND cloud_phrase_key = ?',
+          whereArgs: [lessonId, phraseKey],
+          limit: 1,
+        );
+        final imagePath = imagePathForCloudSync(remotePhrase.imagePath);
+        if (existingPhraseRows.isEmpty) {
+          await db.insert('lesson_phrases', {
+            'lesson_id': lessonId,
+            'phrase_text': canonical,
+            'image_path': imagePath,
+            'sort_order': remotePhrase.sortOrder,
+            'created_at': DateTime.now().millisecondsSinceEpoch,
+            'cloud_phrase_key': phraseKey,
+          });
+        } else {
+          await db.update(
+            'lesson_phrases',
+            {
+              'phrase_text': canonical,
+              'image_path': imagePath,
+              'sort_order': remotePhrase.sortOrder,
+            },
+            where: 'id = ?',
+            whereArgs: [existingPhraseRows.first['id']],
+          );
+        }
+      }
+
+      final stalePhrases = await db.query(
+        'lesson_phrases',
+        where: 'lesson_id = ? AND cloud_phrase_key IS NOT NULL',
+        whereArgs: [lessonId],
+      );
+      for (final row in stalePhrases) {
+        final key = (row['cloud_phrase_key'] as String?)?.trim() ?? '';
+        if (key.isNotEmpty && !remotePhraseKeys.contains(key)) {
+          await db.delete(
+            'lesson_phrases',
+            where: 'id = ?',
+            whereArgs: [row['id']],
+          );
+        }
+      }
+    }
+
+    final staleLessons = await db.query(
+      'class_lessons',
+      where: 'class_id = ? AND cloud_lesson_key IS NOT NULL',
+      whereArgs: [classId],
+    );
+    for (final row in staleLessons) {
+      final key = (row['cloud_lesson_key'] as String?)?.trim() ?? '';
+      if (key.isNotEmpty && !remoteLessonKeys.contains(key)) {
+        final staleLessonId = row['id'] as int;
+        await db.delete(
+          'lesson_phrases',
+          where: 'lesson_id = ?',
+          whereArgs: [staleLessonId],
+        );
+        await db.delete(
+          'class_lessons',
+          where: 'id = ?',
+          whereArgs: [staleLessonId],
+        );
+      }
+    }
+  }
+
   Future<ClassLesson?> createClassLesson({
     required int teacherUserId,
     required int classId,
@@ -1920,6 +2206,12 @@ class AppRepository {
       'created_at': now,
       'sort_order': now,
     });
+    await db.update(
+      'class_lessons',
+      {'cloud_lesson_key': id.toString()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
     return ClassLesson(
       id: id,
       classId: classId,
@@ -2009,6 +2301,12 @@ class AppRepository {
       'sort_order': now,
       'created_at': now,
     });
+    await db.update(
+      'lesson_phrases',
+      {'cloud_phrase_key': id.toString()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
     return LessonPhrase(
       id: id,
       lessonId: lessonId,

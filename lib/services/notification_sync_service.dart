@@ -300,6 +300,25 @@ class NotificationSyncService {
     return _cloud.getTeacherClassByCode(classCode);
   }
 
+  Future<void> syncClassContent(RemoteClassContent content) async {
+    if (!_cloud.isAvailable || content.classCode.trim().isEmpty) return;
+    try {
+      await _cloud.upsertClassContent(content);
+    } catch (e, st) {
+      debugPrint('syncClassContent failed: $e\n$st');
+    }
+  }
+
+  Future<RemoteClassContent?> getClassContentFromCloud(String classCode) async {
+    if (!_cloud.isAvailable || classCode.trim().isEmpty) return null;
+    try {
+      return await _cloud.getClassContentByCode(classCode);
+    } catch (e, st) {
+      debugPrint('getClassContentFromCloud failed: $e\n$st');
+      return null;
+    }
+  }
+
   Future<RemoteLearnerProfile?> findLearnerProfileByCodeFromCloud(
     String profileCode,
   ) async {

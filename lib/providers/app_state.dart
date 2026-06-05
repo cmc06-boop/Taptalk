@@ -1487,6 +1487,7 @@ class AppState extends ChangeNotifier {
 
   Future<List<ClassLesson>> getClassLessons(int classId) async {
     if (_user == null || !_user!.isTeacher) return [];
+    unawaited(_pushClassContentToCloud(classId));
     return _repo.getClassLessons(
       teacherUserId: _user!.id,
       classId: classId,
@@ -1495,6 +1496,14 @@ class AppState extends ChangeNotifier {
 
   Future<List<ClassLesson>> getEnrolledClassLessons(int classId) async {
     if (_user == null || !_user!.isLearner) return [];
+    final classRow = await _repo.findClassById(classId);
+    final classCode = (classRow?['class_code'] as String?) ?? '';
+    if (classCode.isNotEmpty) {
+      await _syncClassLessonsFromCloud(
+        classId: classId,
+        classCode: classCode,
+      );
+    }
     return _repo.getEnrolledClassLessons(
       learnerUserId: _user!.id,
       classId: classId,
@@ -1503,6 +1512,17 @@ class AppState extends ChangeNotifier {
 
   Future<List<LessonPhrase>> getEnrolledLessonPhrases(int lessonId) async {
     if (_user == null || !_user!.isLearner) return [];
+    final classId = await _repo.classIdForLesson(lessonId);
+    if (classId != null) {
+      final classRow = await _repo.findClassById(classId);
+      final classCode = (classRow?['class_code'] as String?) ?? '';
+      if (classCode.isNotEmpty) {
+        await _syncClassLessonsFromCloud(
+          classId: classId,
+          classCode: classCode,
+        );
+      }
+    }
     return _repo.getEnrolledLessonPhrases(
       learnerUserId: _user!.id,
       lessonId: lessonId,
@@ -1511,28 +1531,42 @@ class AppState extends ChangeNotifier {
 
   Future<ClassLesson?> createClassLesson(int classId, String title) async {
     if (_user == null || !_user!.isTeacher) return null;
-    return _repo.createClassLesson(
+    final lesson = await _repo.createClassLesson(
       teacherUserId: _user!.id,
       classId: classId,
       title: ContentLocalization.canonicalPhrase(title.trim()),
     );
+    if (lesson != null) {
+      unawaited(_pushClassContentToCloud(classId));
+    }
+    return lesson;
   }
 
   Future<bool> updateClassLesson(int lessonId, String title) async {
     if (_user == null || !_user!.isTeacher) return false;
-    return _repo.updateClassLesson(
+    final classId = await _repo.classIdForLesson(lessonId);
+    final updated = await _repo.updateClassLesson(
       teacherUserId: _user!.id,
       lessonId: lessonId,
       title: ContentLocalization.canonicalPhrase(title.trim()),
     );
+    if (updated && classId != null) {
+      unawaited(_pushClassContentToCloud(classId));
+    }
+    return updated;
   }
 
   Future<bool> deleteClassLesson(int lessonId) async {
     if (_user == null || !_user!.isTeacher) return false;
-    return _repo.deleteClassLesson(
+    final classId = await _repo.classIdForLesson(lessonId);
+    final deleted = await _repo.deleteClassLesson(
       teacherUserId: _user!.id,
       lessonId: lessonId,
     );
+    if (deleted && classId != null) {
+      unawaited(_pushClassContentToCloud(classId));
+    }
+    return deleted;
   }
 
   Future<List<LessonPhrase>> getLessonPhrases(int lessonId) async {
@@ -1550,21 +1584,29 @@ class AppState extends ChangeNotifier {
   }) async {
     if (_user == null || text.trim().isEmpty) return null;
     final saved = await persistPhraseImageIfNeeded(imagePath);
+    final classId = await _repo.classIdForLesson(lessonId);
     final phrase = await _repo.addLessonPhrase(
       teacherUserId: _user!.id,
       lessonId: lessonId,
       text: ContentLocalization.canonicalPhrase(text),
       imagePath: saved,
     );
+    if (phrase != null && classId != null) {
+      unawaited(_pushClassContentToCloud(classId));
+    }
     return phrase == null ? AppStrings.unableAddPhrase(_language) : null;
   }
 
   Future<void> deleteLessonPhrase(int phraseId) async {
     if (_user == null || !_user!.isTeacher) return;
+    final classId = await _repo.classIdForLessonPhrase(phraseId);
     await _repo.deleteLessonPhrase(
       teacherUserId: _user!.id,
       phraseId: phraseId,
     );
+    if (classId != null) {
+      unawaited(_pushClassContentToCloud(classId));
+    }
   }
 
   Future<bool> updateLessonPhrase(
@@ -1576,12 +1618,61 @@ class AppState extends ChangeNotifier {
     if (_user == null || !_user!.isTeacher) return false;
     final savedImage =
         clearImage ? null : await persistPhraseImageIfNeeded(imagePath);
-    return _repo.updateLessonPhrase(
+    final classId = await _repo.classIdForLessonPhrase(phraseId);
+    final updated = await _repo.updateLessonPhrase(
       teacherUserId: _user!.id,
       phraseId: phraseId,
       text: text,
       imagePath: savedImage,
     );
+    if (updated && classId != null) {
+      unawaited(_pushClassContentToCloud(classId));
+    }
+    return updated;
+  }
+
+  Future<void> _pushClassContentToCloud(int classId) async {
+    if (_user == null || !_user!.isTeacher || !_notificationSync.isCloudAvailable) {
+      return;
+    }
+    final classRow = await _repo.findClassById(classId);
+    if (classRow == null) return;
+    final classCode = (classRow['class_code'] as String?) ?? '';
+    final teacherFirebaseUid =
+        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (classCode.isEmpty ||
+        teacherFirebaseUid == null ||
+        teacherFirebaseUid.isEmpty) {
+      return;
+    }
+    try {
+      final content = await _repo.buildRemoteClassContent(
+        teacherUserId: _user!.id,
+        classId: classId,
+        classCode: classCode,
+        teacherFirebaseUid: teacherFirebaseUid,
+      );
+      if (content == null) return;
+      await _notificationSync.syncClassContent(content);
+    } catch (e, st) {
+      debugPrint('Push class content to cloud failed: $e\n$st');
+    }
+  }
+
+  Future<void> _syncClassLessonsFromCloud({
+    required int classId,
+    required String classCode,
+  }) async {
+    if (!_notificationSync.isCloudAvailable) return;
+    try {
+      final remote = await _notificationSync
+          .getClassContentFromCloud(classCode)
+          .timeout(const Duration(seconds: 12));
+      if (remote == null || remote.lessons.isEmpty) return;
+      await _repo.mergeRemoteClassContent(classId: classId, content: remote);
+    } catch (e, st) {
+      debugPrint('Sync class lessons from cloud failed: $e\n$st');
+    }
   }
 
   /// Returns the roster for a class, merging cloud enrollments into local SQLite
@@ -1935,6 +2026,56 @@ class AppState extends ChangeNotifier {
     );
   }
 
+  Future<String?> _resolveLearnerFirebaseUid(int learnerUserId) async {
+    final fromUser = await _repo.getFirebaseUidForUser(learnerUserId);
+    if (fromUser != null && fromUser.isNotEmpty) return fromUser;
+
+    if (!_notificationSync.isCloudAvailable || _user == null) return null;
+    final parentFirebaseUid =
+        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (parentFirebaseUid == null || parentFirebaseUid.isEmpty) return null;
+
+    try {
+      final links = await _notificationSync
+          .getParentChildLinksFromCloud(parentFirebaseUid)
+          .timeout(const Duration(seconds: 8));
+      for (final link in links) {
+        final uid = link.learnerFirebaseUid.trim();
+        if (uid.isEmpty) continue;
+        if (link.learnerUserId == learnerUserId) return uid;
+        final learner = await _repo.findUserByFirebaseUid(uid);
+        if (learner?.id == learnerUserId) return uid;
+      }
+    } catch (e, st) {
+      debugPrint('Resolve learner firebase uid failed: $e\n$st');
+    }
+    return null;
+  }
+
+  Future<List<RemoteLearnerActivity>> _fetchLearnerCloudActivities({
+    required int learnerUserId,
+    required DateTime rangeStart,
+    required DateTime rangeEnd,
+  }) async {
+    if (!_notificationSync.isCloudAvailable) return const [];
+    final learnerFirebaseUid = await _resolveLearnerFirebaseUid(learnerUserId);
+    if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) {
+      return const [];
+    }
+    try {
+      return await _notificationSync
+          .getLearnerActivitiesFromCloud(
+            learnerFirebaseUid: learnerFirebaseUid,
+            rangeStart: rangeStart,
+            rangeEnd: rangeEnd,
+          )
+          .timeout(const Duration(seconds: 12));
+    } catch (e, st) {
+      debugPrint('Fetch learner cloud activities failed: $e\n$st');
+      return const [];
+    }
+  }
+
   Future<List<PhraseUsageStat>> getChildPhraseStats({
     required int learnerUserId,
     required ChildUsagePeriod period,
@@ -1947,51 +2088,36 @@ class AppState extends ChangeNotifier {
       rangeEnd: range.$2,
     );
 
-    // Merge cloud activity so teacher/parent on another phone sees updates.
-    if (_notificationSync.isCloudAvailable) {
-      final learnerFirebaseUid =
-          await _repo.getFirebaseUidForUser(learnerUserId);
-      if (learnerFirebaseUid != null && learnerFirebaseUid.isNotEmpty) {
-        try {
-          final remoteActivities = await _notificationSync
-              .getLearnerActivitiesFromCloud(
-                learnerFirebaseUid: learnerFirebaseUid,
-                rangeStart: range.$1,
-                rangeEnd: range.$2,
-              )
-              .timeout(const Duration(seconds: 12));
-          if (remoteActivities.isNotEmpty) {
-            // Merge remote into local stat map.
-            final merged = <String, int>{};
-            for (final s in localStats) {
-              final key = '${s.categoryKey}|${s.text}';
-              merged[key] = (merged[key] ?? 0) + s.count;
-            }
-            for (final a in remoteActivities) {
-              final canonical = ContentLocalization.canonicalPhrase(a.phraseText);
-              final key = '${AppRepository.normalizeCategoryKey(a.categoryKey)}|$canonical';
-              merged[key] = (merged[key] ?? 0) + 1;
-            }
-            final result = merged.entries.map((e) {
-              final parts = e.key.split('|');
-              return PhraseUsageStat(
-                categoryKey: parts[0],
-                text: parts.sublist(1).join('|'),
-                count: e.value,
-              );
-            }).toList()
-              ..sort((a, b) {
-                final c = b.count.compareTo(a.count);
-                return c != 0 ? c : a.text.compareTo(b.text);
-              });
-            return result;
-          }
-        } catch (e, st) {
-          debugPrint('Cloud phrase stats merge failed: $e\n$st');
-        }
-      }
+    final remoteActivities = await _fetchLearnerCloudActivities(
+      learnerUserId: learnerUserId,
+      rangeStart: range.$1,
+      rangeEnd: range.$2,
+    );
+    if (remoteActivities.isEmpty) return localStats;
+
+    final merged = <String, int>{};
+    for (final s in localStats) {
+      final key = '${s.categoryKey}|${s.text}';
+      merged[key] = (merged[key] ?? 0) + s.count;
     }
-    return localStats;
+    for (final a in remoteActivities) {
+      final canonical = ContentLocalization.canonicalPhrase(a.phraseText);
+      final key =
+          '${AppRepository.normalizeCategoryKey(a.categoryKey)}|$canonical';
+      merged[key] = (merged[key] ?? 0) + 1;
+    }
+    return merged.entries.map((e) {
+      final parts = e.key.split('|');
+      return PhraseUsageStat(
+        categoryKey: parts[0],
+        text: parts.sublist(1).join('|'),
+        count: e.value,
+      );
+    }).toList()
+      ..sort((a, b) {
+        final c = b.count.compareTo(a.count);
+        return c != 0 ? c : a.text.compareTo(b.text);
+      });
   }
 
   Future<VocabularyGrowthSummary> getChildVocabularyGrowth({
@@ -2054,10 +2180,16 @@ class AppState extends ChangeNotifier {
     DateTime? month,
   }) async {
     final range = _dateRangeForPeriod(period, month: month);
+    final cloudActivities = await _fetchLearnerCloudActivities(
+      learnerUserId: learnerUserId,
+      rangeStart: range.$1,
+      rangeEnd: range.$2,
+    );
     return _repo.getChildLessonProgress(
       learnerUserId: learnerUserId,
       rangeStart: range.$1,
       rangeEnd: range.$2,
+      cloudActivities: cloudActivities,
     );
   }
 
@@ -2072,10 +2204,20 @@ class AppState extends ChangeNotifier {
       rangeStart: range.$1,
       rangeEnd: range.$2,
     );
+    final cloudActivities = await _fetchLearnerCloudActivities(
+      learnerUserId: learnerUserId,
+      rangeStart: range.$1,
+      rangeEnd: range.$2,
+    );
+    final allEvents = List<DateTime>.from(events);
+    for (final activity in cloudActivities) {
+      allEvents.add(activity.createdAt);
+    }
+    allEvents.sort();
     final locale =
         _language == AppLanguage.filipino ? 'fil_PH' : 'en_US';
     return SessionUsageCalculator.summarize(
-      events: events,
+      events: allEvents,
       period: period,
       rangeStart: range.$1,
       rangeEnd: range.$2,

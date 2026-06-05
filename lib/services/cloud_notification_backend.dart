@@ -212,6 +212,50 @@ class RemoteLearnerActivity {
   final String? lessonTitle;
 }
 
+class RemoteLessonPhraseContent {
+  const RemoteLessonPhraseContent({
+    required this.phraseKey,
+    required this.text,
+    required this.sortOrder,
+    this.imagePath,
+  });
+
+  final String phraseKey;
+  final String text;
+  final int sortOrder;
+  final String? imagePath;
+}
+
+class RemoteClassLessonContent {
+  const RemoteClassLessonContent({
+    required this.lessonKey,
+    required this.title,
+    required this.sortOrder,
+    required this.createdAt,
+    required this.phrases,
+  });
+
+  final String lessonKey;
+  final String title;
+  final int sortOrder;
+  final DateTime createdAt;
+  final List<RemoteLessonPhraseContent> phrases;
+}
+
+class RemoteClassContent {
+  const RemoteClassContent({
+    required this.classCode,
+    required this.teacherFirebaseUid,
+    required this.updatedAt,
+    required this.lessons,
+  });
+
+  final String classCode;
+  final String teacherFirebaseUid;
+  final DateTime updatedAt;
+  final List<RemoteClassLessonContent> lessons;
+}
+
 class TeacherClassCloudEvent {
   const TeacherClassCloudEvent({
     required this.classCode,
@@ -321,6 +365,10 @@ abstract class CloudNotificationBackend {
   );
 
   Future<RemoteTeacherClass?> getTeacherClassByCode(String classCode);
+
+  Future<void> upsertClassContent(RemoteClassContent content);
+
+  Future<RemoteClassContent?> getClassContentByCode(String classCode);
 
   Future<RemoteLearnerProfile?> findLearnerByProfileCode(String profileCode);
 
@@ -434,6 +482,13 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
 
   @override
   Future<RemoteTeacherClass?> getTeacherClassByCode(String classCode) async =>
+      null;
+
+  @override
+  Future<void> upsertClassContent(RemoteClassContent content) async {}
+
+  @override
+  Future<RemoteClassContent?> getClassContentByCode(String classCode) async =>
       null;
 
   @override

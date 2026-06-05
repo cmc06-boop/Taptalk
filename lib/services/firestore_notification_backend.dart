@@ -14,6 +14,7 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   static const String learnerProfileCollectionName = 'learner_profiles';
   static const String userProfileCollectionName = 'user_profiles';
   static const String activityCollectionName = 'learner_activity';
+  static const String classContentCollectionName = 'class_content_cloud';
 
   @override
   bool get isAvailable => FirebaseService.instance.isAvailable;
@@ -186,26 +187,138 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       final snapshot = await FirebaseFirestore.instance
           .collection(activityCollectionName)
           .where('learnerFirebaseUid', isEqualTo: learnerFirebaseUid.trim())
-          .where('createdAt',
-              isGreaterThanOrEqualTo:
-                  Timestamp.fromDate(rangeStart.toUtc()))
-          .where('createdAt',
-              isLessThan: Timestamp.fromDate(rangeEnd.toUtc()))
           .get();
-      return snapshot.docs.map((doc) {
+      final rangeStartUtc = rangeStart.toUtc();
+      final rangeEndUtc = rangeEnd.toUtc();
+      final activities = <RemoteLearnerActivity>[];
+      for (final doc in snapshot.docs) {
         final data = doc.data();
-        return RemoteLearnerActivity(
-          phraseText: (data['phraseText'] as String?) ?? '',
-          categoryKey: (data['categoryKey'] as String?) ?? '',
-          createdAt: _readTimestamp(data['createdAt']),
-          className: data['className'] as String?,
-          lessonTitle: data['lessonTitle'] as String?,
+        final createdAt = _readTimestamp(data['createdAt']).toUtc();
+        if (createdAt.isBefore(rangeStartUtc) || !createdAt.isBefore(rangeEndUtc)) {
+          continue;
+        }
+        activities.add(
+          RemoteLearnerActivity(
+            phraseText: (data['phraseText'] as String?) ?? '',
+            categoryKey: (data['categoryKey'] as String?) ?? '',
+            createdAt: createdAt.toLocal(),
+            className: data['className'] as String?,
+            lessonTitle: data['lessonTitle'] as String?,
+          ),
         );
-      }).toList();
+      }
+      activities.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      return activities;
     } catch (e, st) {
       debugPrint('getLearnerActivities failed: $e\n$st');
       return const [];
     }
+  }
+
+  @override
+  Future<void> upsertClassContent(RemoteClassContent content) async {
+    if (!isAvailable ||
+        content.classCode.trim().isEmpty ||
+        content.teacherFirebaseUid.trim().isEmpty) {
+      return;
+    }
+    final docId = AppRepository.normalizeClassCode(content.classCode);
+    final payload = <String, Object?>{
+      'classCode': docId,
+      'teacherFirebaseUid': content.teacherFirebaseUid.trim(),
+      'updatedAt': Timestamp.fromDate(content.updatedAt.toUtc()),
+      'lessons': content.lessons.map((lesson) {
+        return <String, Object?>{
+          'lessonKey': lesson.lessonKey,
+          'title': lesson.title,
+          'sortOrder': lesson.sortOrder,
+          'createdAt': lesson.createdAt.toUtc().toIso8601String(),
+          'phrases': lesson.phrases.map((phrase) {
+            return <String, Object?>{
+              'phraseKey': phrase.phraseKey,
+              'text': phrase.text,
+              'sortOrder': phrase.sortOrder,
+              if (phrase.imagePath != null && phrase.imagePath!.trim().isNotEmpty)
+                'imagePath': phrase.imagePath!.trim(),
+            };
+          }).toList(),
+        };
+      }).toList(),
+    };
+    await FirebaseFirestore.instance
+        .collection(classContentCollectionName)
+        .doc(docId)
+        .set(payload);
+  }
+
+  @override
+  Future<RemoteClassContent?> getClassContentByCode(String classCode) async {
+    if (!isAvailable || classCode.trim().isEmpty) return null;
+    try {
+      final docId = AppRepository.normalizeClassCode(classCode);
+      final doc = await FirebaseFirestore.instance
+          .collection(classContentCollectionName)
+          .doc(docId)
+          .get();
+      if (!doc.exists) return null;
+      return _classContentFromDocument(docId, doc.data() ?? {});
+    } catch (e, st) {
+      debugPrint('getClassContentByCode failed: $e\n$st');
+      return null;
+    }
+  }
+
+  RemoteClassContent _classContentFromDocument(
+    String classCode,
+    Map<String, dynamic> data,
+  ) {
+    final lessonsRaw = data['lessons'];
+    final lessons = <RemoteClassLessonContent>[];
+    if (lessonsRaw is List) {
+      for (final rawLesson in lessonsRaw) {
+        if (rawLesson is! Map) continue;
+        final lessonMap = Map<String, dynamic>.from(rawLesson);
+        final phrasesRaw = lessonMap['phrases'];
+        final phrases = <RemoteLessonPhraseContent>[];
+        if (phrasesRaw is List) {
+          for (final rawPhrase in phrasesRaw) {
+            if (rawPhrase is! Map) continue;
+            final phraseMap = Map<String, dynamic>.from(rawPhrase);
+            phrases.add(
+              RemoteLessonPhraseContent(
+                phraseKey: (phraseMap['phraseKey'] as String?) ?? '',
+                text: (phraseMap['text'] as String?) ?? '',
+                sortOrder: phraseMap['sortOrder'] as int? ?? 0,
+                imagePath: phraseMap['imagePath'] as String?,
+              ),
+            );
+          }
+        }
+        phrases.sort((a, b) {
+          final byOrder = a.sortOrder.compareTo(b.sortOrder);
+          return byOrder != 0 ? byOrder : a.phraseKey.compareTo(b.phraseKey);
+        });
+        lessons.add(
+          RemoteClassLessonContent(
+            lessonKey: (lessonMap['lessonKey'] as String?) ?? '',
+            title: (lessonMap['title'] as String?) ?? '',
+            sortOrder: lessonMap['sortOrder'] as int? ?? 0,
+            createdAt: _readTimestamp(lessonMap['createdAt']),
+            phrases: phrases,
+          ),
+        );
+      }
+    }
+    lessons.sort((a, b) {
+      final byOrder = a.sortOrder.compareTo(b.sortOrder);
+      return byOrder != 0 ? byOrder : a.lessonKey.compareTo(b.lessonKey);
+    });
+    return RemoteClassContent(
+      classCode: classCode,
+      teacherFirebaseUid: (data['teacherFirebaseUid'] as String?) ?? '',
+      updatedAt: _readTimestamp(data['updatedAt']),
+      lessons: lessons,
+    );
   }
 
   @override

@@ -30,7 +30,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 12,
+      version: 13,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE users (
@@ -134,6 +134,19 @@ class DatabaseHelper {
         if (oldVersion < 12) {
           await _canonicalizeLessonContent(db);
         }
+        if (oldVersion < 13) {
+          await db.execute(
+            'ALTER TABLE class_lessons ADD COLUMN cloud_lesson_key TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE lesson_phrases ADD COLUMN cloud_phrase_key TEXT',
+          );
+          await db.execute(
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_class_lessons_cloud_key '
+            'ON class_lessons(class_id, cloud_lesson_key) '
+            'WHERE cloud_lesson_key IS NOT NULL',
+          );
+        }
       },
     );
   }
@@ -167,7 +180,8 @@ class DatabaseHelper {
         class_id INTEGER NOT NULL,
         title TEXT NOT NULL,
         created_at INTEGER NOT NULL,
-        sort_order INTEGER NOT NULL DEFAULT 0
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        cloud_lesson_key TEXT
       )
     ''');
     await db.execute('''
@@ -177,9 +191,15 @@ class DatabaseHelper {
         phrase_text TEXT NOT NULL,
         image_path TEXT,
         sort_order INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        cloud_phrase_key TEXT
       )
     ''');
+    await db.execute(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_class_lessons_cloud_key '
+      'ON class_lessons(class_id, cloud_lesson_key) '
+      'WHERE cloud_lesson_key IS NOT NULL',
+    );
   }
 
   Future<void> _createParentNotificationsTable(Database db) async {
