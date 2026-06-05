@@ -1042,6 +1042,34 @@ abstract final class AppStrings {
   static String categoryCountLabel(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'kategorya' : 'categories';
 
+  static String categoriesUsedInfoTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Mga kategorya' : 'Categories used';
+
+  static String categoriesUsedInfoBody(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Ipinapakita ang For Me na kategorya sa napiling panahon. '
+          'Ang bilog sa gitna ay kabuuang bilang ng kategorya. '
+          'Bawat slice ay isang kategorya; ipinapakita kung ilang beses pinindot ang mga parirala.'
+      : 'Shows For Me categories for the selected period. '
+          'The center number is the total category count. '
+          'Each slice is one category; labels show how many times phrases were tapped.';
+
+  static String categoryLegendDetail({
+    required int wordCount,
+    required int equalPercent,
+    required AppLanguage lang,
+  }) {
+    final words = vocabularyWords(wordCount, lang);
+    final percent = wordCount == 0 ? 0 : equalPercent;
+    return '$words · $percent%';
+  }
+
+  static String seeAll(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Tingnan lahat' : 'See all';
+
+  static String allCategoriesTitle(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Lahat ng kategorya'
+      : 'All categories';
+
   static String trendByWeek(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Linggo' : 'Weeks';
 
@@ -1061,8 +1089,29 @@ abstract final class AppStrings {
 
   static String lessonProgressSubtitle(AppLanguage lang) =>
       lang == AppLanguage.filipino
-          ? 'Mga klase at aralin na binuksan ng bata sa panahong ito.'
-          : 'Classes and lessons your child opened in this period.';
+          ? 'Piliin ang klase at aralin para makita kung ginamit ng bata.'
+          : 'Choose a class and lesson to see if your child used it.';
+
+  static String selectClass(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Piliin ang klase' : 'Select class';
+
+  static String selectLesson(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Piliin ang aralin' : 'Select lesson';
+
+  static String noClassesEnrolled(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Walang klase na kasali ang bata.'
+      : 'No classes enrolled yet.';
+
+  static String noLessonsInClass(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Walang aralin sa klaseng ito.'
+      : 'No lessons in this class yet.';
+
+  static String lessonNotUsedYet(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Hindi pa ginamit'
+      : 'Not used yet';
+
+  static String wordsTappedFraction(int tapped, int total, AppLanguage lang) =>
+      lang == AppLanguage.filipino ? '$tapped/$total salita' : '$tapped/$total words';
 
   static String noLessonProgress(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Walang aralin na ginamit sa panahong ito.'

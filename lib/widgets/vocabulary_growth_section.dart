@@ -5,26 +5,20 @@ import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../core/utils/vocabulary_growth_calculator.dart';
-import '../data/models/category_model.dart';
 import '../data/models/vocabulary_growth_summary.dart';
-import 'category_usage_pie_chart.dart';
 import 'vocabulary_growth_chart.dart';
 
 class VocabularyGrowthSection extends StatefulWidget {
   const VocabularyGrowthSection({
     super.key,
     required this.summary,
-    required this.allCategories,
     required this.theme,
     required this.lang,
-    required this.labelForCategory,
   });
 
   final VocabularyGrowthSummary summary;
-  final List<CategoryModel> allCategories;
   final TapTalkThemeToken theme;
   final AppLanguage lang;
-  final String Function(String categoryKey) labelForCategory;
 
   @override
   State<VocabularyGrowthSection> createState() => _VocabularyGrowthSectionState();
@@ -107,23 +101,6 @@ class _VocabularyGrowthSectionState extends State<VocabularyGrowthSection> {
           theme: theme,
           lang: lang,
           showCumulative: _showCumulative,
-        ),
-        const SizedBox(height: AppSpacing.lg),
-        Text(
-          AppStrings.categoriesUsed(lang),
-          style: GoogleFonts.poppins(
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            color: theme.textMain,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        CategoryUsagePieChart(
-          slices: summary.categorySlices,
-          allCategories: widget.allCategories,
-          theme: theme,
-          lang: lang,
-          labelForCategory: widget.labelForCategory,
         ),
       ],
     );

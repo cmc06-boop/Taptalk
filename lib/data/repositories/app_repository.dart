@@ -1157,7 +1157,9 @@ class AppRepository {
     results.sort((a, b) {
       final byClass = a.className.compareTo(b.className);
       if (byClass != 0) return byClass;
-      return b.lastAccessed.compareTo(a.lastAccessed);
+      final aTime = a.lastAccessed ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final bTime = b.lastAccessed ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return bTime.compareTo(aTime);
     });
     return results;
   }
@@ -1562,6 +1564,130 @@ class AppRepository {
           ),
         )
         .toList();
+  }
+
+  Future<List<ClassLesson>> getClassLessonsByClassId(int classId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT
+        cl.id,
+        cl.class_id,
+        cl.title,
+        cl.created_at,
+        (SELECT COUNT(*) FROM lesson_phrases lp WHERE lp.lesson_id = cl.id) AS phrase_count
+      FROM class_lessons cl
+      WHERE cl.class_id = ?
+      ORDER BY cl.sort_order ASC, cl.created_at DESC
+    ''', [classId]);
+    return rows
+        .map(
+          (row) => ClassLesson(
+            id: row['id'] as int,
+            classId: row['class_id'] as int,
+            title: ContentLocalization.canonicalPhrase(row['title'] as String),
+            createdAt: DateTime.fromMillisecondsSinceEpoch(
+              row['created_at'] as int,
+            ),
+            phraseCount: row['phrase_count'] as int? ?? 0,
+          ),
+        )
+        .toList();
+  }
+
+  Future<ChildLessonProgressEntry> getLessonProgressForLesson({
+    required int learnerUserId,
+    required String className,
+    required String lessonTitle,
+    required DateTime rangeStart,
+    required DateTime rangeEnd,
+    List<RemoteLearnerActivity> cloudActivities = const [],
+  }) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'history',
+      where: 'user_id = ? AND created_at >= ? AND created_at < ?',
+      whereArgs: [
+        learnerUserId,
+        rangeStart.millisecondsSinceEpoch,
+        rangeEnd.millisecondsSinceEpoch,
+      ],
+      orderBy: 'created_at DESC',
+    );
+
+    final practiced = <String>{};
+    var totalInteractions = 0;
+    DateTime? lastAccessed;
+    final lessonCanonical = ContentLocalization.canonicalPhrase(lessonTitle);
+    final classCanonical = className.trim();
+
+    void absorb({
+      required String text,
+      required String categoryKey,
+      required DateTime createdAt,
+      String? activityClassName,
+      String? activityLessonTitle,
+    }) {
+      final item = HistoryModel(
+        id: 0,
+        userId: learnerUserId,
+        text: text,
+        categoryKey: categoryKey,
+        createdAt: createdAt,
+        className: activityClassName,
+        lessonTitle: activityLessonTitle,
+      );
+      if (!item.isLessonEntry) return;
+      final ctx = item.lessonContext!;
+      if (ctx.className.trim() != classCanonical) return;
+      if (ContentLocalization.canonicalPhrase(ctx.lessonTitle) !=
+          lessonCanonical) {
+        return;
+      }
+      totalInteractions++;
+      if (lastAccessed == null || createdAt.isAfter(lastAccessed!)) {
+        lastAccessed = createdAt;
+      }
+      final canonical = ContentLocalization.canonicalPhrase(text);
+      if (canonical != lessonCanonical) {
+        practiced.add(canonical);
+      }
+    }
+
+    for (final row in rows) {
+      final item = HistoryModel.fromMap(row);
+      if (!item.isLessonEntry) continue;
+      absorb(
+        text: item.text,
+        categoryKey: item.categoryKey,
+        createdAt: item.createdAt,
+        activityClassName: item.className,
+        activityLessonTitle: item.lessonTitle,
+      );
+    }
+
+    for (final activity in cloudActivities) {
+      absorb(
+        text: activity.phraseText,
+        categoryKey: activity.categoryKey,
+        createdAt: activity.createdAt,
+        activityClassName: activity.className,
+        activityLessonTitle: activity.lessonTitle,
+      );
+    }
+
+    final totalPhrases = await _lessonPhraseCountForTitle(
+      className: className,
+      lessonTitle: lessonTitle,
+    );
+
+    return ChildLessonProgressEntry(
+      className: className,
+      lessonTitle: lessonTitle,
+      practicedPhrases: practiced.length,
+      totalInteractions: totalInteractions,
+      lastAccessed: lastAccessed,
+      totalPhrases: totalPhrases,
+    );
   }
 
   Future<List<LessonPhrase>> getEnrolledLessonPhrases({

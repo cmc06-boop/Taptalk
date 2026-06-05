@@ -26,6 +26,68 @@ class CategoryUsagePieChart extends StatelessWidget {
   final AppLanguage lang;
   final String Function(String categoryKey) labelForCategory;
 
+  static const slicePalette = [
+    Color(0xFF4A90D9),
+    Color(0xFF50C878),
+    Color(0xFFE87C4C),
+    Color(0xFF9B59B6),
+    Color(0xFFE74C3C),
+    Color(0xFF1ABC9C),
+    Color(0xFFF1C40F),
+    Color(0xFF34495E),
+    Color(0xFFE91E63),
+    Color(0xFF795548),
+    Color(0xFF00BCD4),
+    Color(0xFF8BC34A),
+  ];
+
+  static void showInfoDialog(
+    BuildContext context, {
+    required AppLanguage lang,
+    required TapTalkThemeToken theme,
+  }) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          AppStrings.categoriesUsedInfoTitle(lang),
+          style: GoogleFonts.poppins(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+            color: theme.textMain,
+          ),
+        ),
+        content: Text(
+          AppStrings.categoriesUsedInfoBody(lang),
+          style: GoogleFonts.poppins(
+            fontSize: 13,
+            height: 1.45,
+            color: theme.textMain.withValues(alpha: 0.82),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              AppStrings.ok(lang),
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                color: theme.bgAccent,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static List<Color> sliceColors(int count) {
+    return List.generate(math.max(count, 1), (i) {
+      return slicePalette[i % slicePalette.length];
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final fullSlices = AppRepository.buildCategorySlicesForAllCategories(
@@ -48,116 +110,696 @@ class CategoryUsagePieChart extends StatelessWidget {
       );
     }
 
-    final categoryCount = fullSlices.length;
-    final equalShare = categoryCount > 0 ? 100 / categoryCount : 0;
-    final colors = _sliceColors(theme, fullSlices.length);
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 132,
-          height: 132,
-          child: CustomPaint(
-            painter: _DonutPainter(
-              values: List.filled(fullSlices.length, 1.0),
-              colors: colors,
-              strokeWidth: 22,
-              centerLabel: '$categoryCount',
-              centerSubLabel: AppStrings.categoryCountLabel(lang),
-              labelColor: theme.textMain,
-            ),
-          ),
-        ),
-        const SizedBox(width: AppSpacing.md),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (var i = 0; i < fullSlices.length; i++)
-                _LegendRow(
-                  color: colors[i % colors.length],
-                  label: labelForCategory(fullSlices[i].categoryKey),
-                  detail: AppStrings.vocabularyWords(
-                    fullSlices[i].wordCount,
-                    lang,
-                  ),
-                  percent: equalShare.round(),
-                  textColor: theme.textMain,
-                ),
-            ],
-          ),
-        ),
-      ],
+    return _InteractiveCategoryDonut(
+      slices: fullSlices,
+      colors: sliceColors(fullSlices.length),
+      theme: theme,
+      lang: lang,
+      labelForCategory: labelForCategory,
     );
-  }
-
-  static List<Color> _sliceColors(TapTalkThemeToken theme, int count) {
-    final base = theme.bgAccent;
-    return List.generate(math.max(count, 1), (i) {
-      final t = i / math.max(count - 1, 1);
-      return Color.lerp(
-        base.withValues(alpha: 0.95),
-        base.withValues(alpha: 0.35),
-        t * 0.75,
-      )!;
-    });
   }
 }
 
-class _LegendRow extends StatelessWidget {
-  const _LegendRow({
-    required this.color,
-    required this.label,
-    required this.detail,
-    required this.percent,
-    required this.textColor,
+class _CategoryLegendLayout {
+  const _CategoryLegendLayout({
+    required this.columns,
+    required this.previewItemCount,
   });
 
-  final Color color;
-  final String label;
-  final String detail;
-  final int percent;
-  final Color textColor;
+  final int columns;
+  final int previewItemCount;
+
+  static const _previewRows = 2;
+  static const _columnSpacing = AppSpacing.sm;
+  static const _cellHorizontalInset = 28.0;
+  static const _minCellWidth = 68.0;
+
+  static TextStyle labelStyle(Color textColor) => GoogleFonts.poppins(
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
+        color: textColor,
+        height: 1.15,
+      );
+
+  static TextStyle detailStyle(Color textColor) => GoogleFonts.poppins(
+        fontSize: 9,
+        fontWeight: FontWeight.w500,
+        color: textColor.withValues(alpha: 0.55),
+        height: 1.15,
+      );
+
+  static _CategoryLegendLayout forWidth({
+    required double width,
+    required List<CategoryVocabularySlice> slices,
+    required String Function(String categoryKey) labelForCategory,
+    required int equalPercent,
+    required AppLanguage lang,
+    required Color textColor,
+  }) {
+    final labels = <String>[];
+    final details = <String>[];
+    for (final slice in slices) {
+      labels.add(labelForCategory(slice.categoryKey));
+      details.add(
+        AppStrings.categoryLegendDetail(
+          wordCount: slice.wordCount,
+          equalPercent: equalPercent,
+          lang: lang,
+        ),
+      );
+    }
+
+    final labelTextStyle = labelStyle(textColor);
+    final detailTextStyle = detailStyle(textColor);
+    final columns = _columnsForWidth(
+      width: width,
+      itemCount: slices.length,
+      labels: labels,
+      details: details,
+      labelStyle: labelTextStyle,
+      detailStyle: detailTextStyle,
+    );
+    final previewItemCount = math.min(slices.length, columns * _previewRows);
+
+    return _CategoryLegendLayout(
+      columns: columns,
+      previewItemCount: previewItemCount,
+    );
+  }
+
+  static int _columnsForWidth({
+    required double width,
+    required int itemCount,
+    required List<String> labels,
+    required List<String> details,
+    required TextStyle labelStyle,
+    required TextStyle detailStyle,
+  }) {
+    if (itemCount <= 0 || width <= 0) return 1;
+
+    final maxColumns = itemCount;
+    for (var cols = maxColumns; cols >= 1; cols--) {
+      final cellWidth = (width - _columnSpacing * (cols - 1)) / cols;
+      if (cellWidth < _minCellWidth) continue;
+
+      final textMaxWidth = cellWidth - _cellHorizontalInset;
+      if (textMaxWidth <= 0) continue;
+
+      if (_allLinesFit(
+        maxWidth: textMaxWidth,
+        labels: labels,
+        details: details,
+        labelStyle: labelStyle,
+        detailStyle: detailStyle,
+      )) {
+        return cols;
+      }
+    }
+
+    return 1;
+  }
+
+  static bool _allLinesFit({
+    required double maxWidth,
+    required List<String> labels,
+    required List<String> details,
+    required TextStyle labelStyle,
+    required TextStyle detailStyle,
+  }) {
+    for (var i = 0; i < labels.length; i++) {
+      if (!_lineFits(labels[i], labelStyle, maxWidth)) return false;
+      if (!_lineFits(details[i], detailStyle, maxWidth)) return false;
+    }
+    return true;
+  }
+
+  static bool _lineFits(String text, TextStyle style, double maxWidth) {
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      maxLines: 1,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: maxWidth);
+    return !painter.didExceedMaxLines;
+  }
+}
+
+class _InteractiveCategoryDonut extends StatefulWidget {
+  const _InteractiveCategoryDonut({
+    required this.slices,
+    required this.colors,
+    required this.theme,
+    required this.lang,
+    required this.labelForCategory,
+  });
+
+  final List<CategoryVocabularySlice> slices;
+  final List<Color> colors;
+  final TapTalkThemeToken theme;
+  final AppLanguage lang;
+  final String Function(String categoryKey) labelForCategory;
+
+  @override
+  State<_InteractiveCategoryDonut> createState() =>
+      _InteractiveCategoryDonutState();
+}
+
+class _InteractiveCategoryDonutState extends State<_InteractiveCategoryDonut> {
+  static const _chartSize = 118.0;
+  static const _strokeWidth = 18.0;
+
+  int? _selectedIndex;
+
+  int _equalPercent() {
+    final count = widget.slices.length;
+    return count > 0 ? (100 / count).round() : 0;
+  }
+
+  void _selectIndex(int? index) {
+    setState(() {
+      _selectedIndex = _selectedIndex == index ? null : index;
+    });
+  }
+
+  Future<void> _showAllCategoriesSheet() async {
+    final selected = await showModalBottomSheet<int?>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _AllCategoriesSheet(
+        slices: widget.slices,
+        colors: widget.colors,
+        theme: widget.theme,
+        lang: widget.lang,
+        labelForCategory: widget.labelForCategory,
+        equalPercent: _equalPercent(),
+        selectedIndex: _selectedIndex,
+      ),
+    );
+    if (!mounted) return;
+    setState(() => _selectedIndex = selected);
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: Row(
-        children: [
-          Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: textColor,
+    final theme = widget.theme;
+    final lang = widget.lang;
+    final slices = widget.slices;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final layout = _CategoryLegendLayout.forWidth(
+          width: constraints.maxWidth,
+          slices: slices,
+          labelForCategory: widget.labelForCategory,
+          equalPercent: _equalPercent(),
+          lang: lang,
+          textColor: theme.textMain,
+        );
+        final previewIndices =
+            List.generate(layout.previewItemCount, (index) => index);
+        final hasMore = slices.length > layout.previewItemCount;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: _CategoryDonutChart(
+                size: _chartSize,
+                strokeWidth: _strokeWidth,
+                slices: slices,
+                colors: widget.colors,
+                theme: theme,
+                lang: lang,
+                selectedIndex: _selectedIndex,
+                onSliceTap: _selectIndex,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            _CategoriesLegendGrid(
+              slices: slices,
+              colors: widget.colors,
+              theme: theme,
+              lang: lang,
+              labelForCategory: widget.labelForCategory,
+              equalPercent: _equalPercent(),
+              indices: previewIndices,
+              columns: layout.columns,
+              selectedIndex: _selectedIndex,
+              onSelect: _selectIndex,
+            ),
+            if (hasMore) ...[
+              const SizedBox(height: AppSpacing.xs),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: _showAllCategoriesSheet,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                      vertical: AppSpacing.xs,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    AppStrings.seeAll(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: theme.bgAccent,
+                    ),
                   ),
                 ),
-                Text(
-                  '$detail · $percent%',
-                  style: GoogleFonts.poppins(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w500,
-                    color: textColor.withValues(alpha: 0.58),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _AllCategoriesSheet extends StatefulWidget {
+  const _AllCategoriesSheet({
+    required this.slices,
+    required this.colors,
+    required this.theme,
+    required this.lang,
+    required this.labelForCategory,
+    required this.equalPercent,
+    required this.selectedIndex,
+  });
+
+  final List<CategoryVocabularySlice> slices;
+  final List<Color> colors;
+  final TapTalkThemeToken theme;
+  final AppLanguage lang;
+  final String Function(String categoryKey) labelForCategory;
+  final int equalPercent;
+  final int? selectedIndex;
+
+  @override
+  State<_AllCategoriesSheet> createState() => _AllCategoriesSheetState();
+}
+
+class _AllCategoriesSheetState extends State<_AllCategoriesSheet> {
+  static const _chartSize = 132.0;
+  static const _strokeWidth = 20.0;
+
+  late int? _selectedIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedIndex = widget.selectedIndex;
+  }
+
+  void _close() {
+    Navigator.pop(context, _selectedIndex);
+  }
+
+  void _selectIndex(int index) {
+    setState(() {
+      _selectedIndex = _selectedIndex == index ? null : index;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = widget.theme;
+    final lang = widget.lang;
+    final slices = widget.slices;
+    final allIndices = List.generate(slices.length, (index) => index);
+    final sheetHeight = MediaQuery.sizeOf(context).height * 0.88;
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          0,
+          AppSpacing.md,
+          AppSpacing.md,
+        ),
+        child: SizedBox(
+          height: sheetHeight,
+          child: Material(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                const SizedBox(height: AppSpacing.sm),
+                Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: theme.textMain.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.md,
+                    AppSpacing.md,
+                    AppSpacing.md,
+                    AppSpacing.sm,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          AppStrings.allCategoriesTitle(lang),
+                          style: GoogleFonts.poppins(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: theme.textMain,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: _close,
+                        icon: Icon(
+                          Icons.close_rounded,
+                          color: theme.textMain.withValues(alpha: 0.55),
+                        ),
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 32,
+                          minHeight: 32,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1, color: Color(0xFFE9EEF2)),
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final layout = _CategoryLegendLayout.forWidth(
+                        width: constraints.maxWidth - (AppSpacing.md * 2),
+                        slices: slices,
+                        labelForCategory: widget.labelForCategory,
+                        equalPercent: widget.equalPercent,
+                        lang: lang,
+                        textColor: theme.textMain,
+                      );
+
+                      return SingleChildScrollView(
+                        padding: const EdgeInsets.all(AppSpacing.md),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Center(
+                              child: _CategoryDonutChart(
+                                size: _chartSize,
+                                strokeWidth: _strokeWidth,
+                                slices: slices,
+                                colors: widget.colors,
+                                theme: theme,
+                                lang: lang,
+                                selectedIndex: _selectedIndex,
+                                onSliceTap: _selectIndex,
+                              ),
+                            ),
+                            const SizedBox(height: AppSpacing.lg),
+                            _CategoriesLegendGrid(
+                              slices: slices,
+                              colors: widget.colors,
+                              theme: theme,
+                              lang: lang,
+                              labelForCategory: widget.labelForCategory,
+                              equalPercent: widget.equalPercent,
+                              indices: allIndices,
+                              columns: layout.columns,
+                              selectedIndex: _selectedIndex,
+                              onSelect: _selectIndex,
+                            ),
+                          ],
+                        ),
+                      );
+                    },
                   ),
                 ),
               ],
             ),
           ),
-        ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryDonutChart extends StatelessWidget {
+  const _CategoryDonutChart({
+    required this.size,
+    required this.strokeWidth,
+    required this.slices,
+    required this.colors,
+    required this.theme,
+    required this.lang,
+    required this.selectedIndex,
+    required this.onSliceTap,
+  });
+
+  final double size;
+  final double strokeWidth;
+  final List<CategoryVocabularySlice> slices;
+  final List<Color> colors;
+  final TapTalkThemeToken theme;
+  final AppLanguage lang;
+  final int? selectedIndex;
+  final ValueChanged<int> onSliceTap;
+
+  int? _sliceIndexAt(Offset local) {
+    final count = slices.length;
+    if (count <= 0) return null;
+
+    final center = Offset(size / 2, size / 2);
+    final dx = local.dx - center.dx;
+    final dy = local.dy - center.dy;
+    final dist = math.sqrt(dx * dx + dy * dy);
+    final radius = size / 2 - strokeWidth / 2;
+    final inner = radius - strokeWidth / 2;
+    final outer = radius + strokeWidth / 2;
+    if (dist < inner || dist > outer) return null;
+
+    var fromTop = math.atan2(dy, dx) + math.pi / 2;
+    if (fromTop < 0) fromTop += 2 * math.pi;
+
+    final sweep = 2 * math.pi / count;
+    return (fromTop / sweep).floor().clamp(0, count - 1);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (details) {
+        final index = _sliceIndexAt(details.localPosition);
+        if (index == null) return;
+        onSliceTap(index);
+      },
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: CustomPaint(
+          painter: _DonutPainter(
+            values: List.filled(slices.length, 1.0),
+            colors: colors,
+            strokeWidth: strokeWidth,
+            centerLabel: '${slices.length}',
+            centerSubLabel: AppStrings.categoryCountLabel(lang),
+            labelColor: theme.textMain,
+            selectedIndex: selectedIndex,
+            dimUnselected: selectedIndex != null,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoriesLegendGrid extends StatelessWidget {
+  const _CategoriesLegendGrid({
+    required this.slices,
+    required this.colors,
+    required this.theme,
+    required this.lang,
+    required this.labelForCategory,
+    required this.equalPercent,
+    required this.indices,
+    required this.columns,
+    required this.selectedIndex,
+    required this.onSelect,
+  });
+
+  final List<CategoryVocabularySlice> slices;
+  final List<Color> colors;
+  final TapTalkThemeToken theme;
+  final AppLanguage lang;
+  final String Function(String categoryKey) labelForCategory;
+  final int equalPercent;
+  final List<int> indices;
+  final int columns;
+  final int? selectedIndex;
+  final ValueChanged<int> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = <Widget>[];
+
+    for (var i = 0; i < indices.length; i += columns) {
+      final rowIndices = indices.sublist(
+        i,
+        math.min(i + columns, indices.length),
+      );
+      rows.add(
+        Padding(
+          padding: EdgeInsets.only(
+            bottom: i + columns < indices.length ? AppSpacing.sm : 0,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var col = 0; col < columns; col++)
+                Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      right: col < columns - 1 ? AppSpacing.sm : 0,
+                    ),
+                    child: col < rowIndices.length
+                        ? _LegendChip(
+                            color: colors[rowIndices[col] % colors.length],
+                            label: labelForCategory(
+                              slices[rowIndices[col]].categoryKey,
+                            ),
+                            detailLine: AppStrings.categoryLegendDetail(
+                              wordCount: slices[rowIndices[col]].wordCount,
+                              equalPercent: equalPercent,
+                              lang: lang,
+                            ),
+                            textColor: theme.textMain,
+                            selected: selectedIndex == rowIndices[col],
+                            onTap: () => onSelect(rowIndices[col]),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Column(children: rows);
+  }
+}
+
+class _LegendChip extends StatelessWidget {
+  const _LegendChip({
+    required this.color,
+    required this.label,
+    required this.detailLine,
+    required this.textColor,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final Color color;
+  final String label;
+  final String detailLine;
+  final Color textColor;
+  final bool selected;
+  final VoidCallback onTap;
+
+  static const _cellPadding = EdgeInsets.symmetric(
+    horizontal: AppSpacing.sm,
+    vertical: AppSpacing.xs + 2,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final labelStyle = _CategoryLegendLayout.labelStyle(textColor);
+    final detailStyle = _CategoryLegendLayout.detailStyle(textColor);
+
+    final content = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _ScaledLegendLine(text: label, style: labelStyle),
+              _ScaledLegendLine(
+                text: detailLine,
+                style: detailStyle,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: '$label. $detailLine.',
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          width: double.infinity,
+          padding: _cellPadding,
+          decoration: selected
+              ? BoxDecoration(
+                  color: color.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: color.withValues(alpha: 0.55),
+                    width: 1.5,
+                  ),
+                )
+              : null,
+          child: content,
+        ),
+      ),
+    );
+  }
+}
+
+class _ScaledLegendLine extends StatelessWidget {
+  const _ScaledLegendLine({
+    required this.text,
+    required this.style,
+  });
+
+  final String text;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Text(
+          text,
+          maxLines: 1,
+          softWrap: false,
+          style: style,
+        ),
       ),
     );
   }
@@ -171,6 +813,8 @@ class _DonutPainter extends CustomPainter {
     required this.centerLabel,
     required this.centerSubLabel,
     required this.labelColor,
+    this.selectedIndex,
+    this.dimUnselected = false,
   });
 
   final List<double> values;
@@ -179,6 +823,8 @@ class _DonutPainter extends CustomPainter {
   final String centerLabel;
   final String centerSubLabel;
   final Color labelColor;
+  final int? selectedIndex;
+  final bool dimUnselected;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -199,10 +845,15 @@ class _DonutPainter extends CustomPainter {
       var start = -math.pi / 2;
       for (var i = 0; i < values.length; i++) {
         final sweep = (values[i] / total) * 2 * math.pi;
+        final isSelected = selectedIndex == i;
+        final isDimmed = dimUnselected && selectedIndex != null && !isSelected;
+        final sliceColor = isDimmed
+            ? colors[i % colors.length].withValues(alpha: 0.28)
+            : colors[i % colors.length];
         final paint = Paint()
-          ..color = colors[i % colors.length]
+          ..color = sliceColor
           ..style = PaintingStyle.stroke
-          ..strokeWidth = strokeWidth
+          ..strokeWidth = isSelected ? strokeWidth + 3 : strokeWidth
           ..strokeCap = StrokeCap.butt;
         canvas.drawArc(
           Rect.fromCircle(center: center, radius: radius),
@@ -220,7 +871,7 @@ class _DonutPainter extends CustomPainter {
         text: centerLabel,
         style: TextStyle(
           color: labelColor,
-          fontSize: 20,
+          fontSize: 18,
           fontWeight: FontWeight.w800,
         ),
       ),
@@ -228,7 +879,7 @@ class _DonutPainter extends CustomPainter {
     )..layout();
     titleTp.paint(
       canvas,
-      Offset(center.dx - titleTp.width / 2, center.dy - titleTp.height / 2 - 4),
+      Offset(center.dx - titleTp.width / 2, center.dy - titleTp.height / 2 - 3),
     );
 
     final subTp = TextPainter(
@@ -236,7 +887,7 @@ class _DonutPainter extends CustomPainter {
         text: centerSubLabel,
         style: TextStyle(
           color: labelColor.withValues(alpha: 0.55),
-          fontSize: 10,
+          fontSize: 9,
           fontWeight: FontWeight.w600,
         ),
       ),
@@ -244,12 +895,15 @@ class _DonutPainter extends CustomPainter {
     )..layout();
     subTp.paint(
       canvas,
-      Offset(center.dx - subTp.width / 2, center.dy + 6),
+      Offset(center.dx - subTp.width / 2, center.dy + 5),
     );
   }
 
   @override
   bool shouldRepaint(covariant _DonutPainter oldDelegate) {
-    return oldDelegate.values != values || oldDelegate.colors != colors;
+    return oldDelegate.values != values ||
+        oldDelegate.colors != colors ||
+        oldDelegate.selectedIndex != selectedIndex ||
+        oldDelegate.dimUnselected != dimUnselected;
   }
 }

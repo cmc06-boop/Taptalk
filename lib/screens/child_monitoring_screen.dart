@@ -9,13 +9,13 @@ import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../data/models/category_model.dart';
-import '../data/models/child_lesson_progress.dart';
 import '../data/models/child_session_summary.dart';
 import '../data/models/monitored_learner.dart';
 import '../data/models/phrase_usage_stat.dart';
 import '../data/models/vocabulary_growth_summary.dart';
 import '../data/repositories/app_repository.dart';
 import '../providers/app_state.dart';
+import '../widgets/categories_used_section.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/lesson_progress_section.dart';
 import '../widgets/session_usage_chart.dart';
@@ -44,8 +44,8 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
   List<CategoryModel> _childCategories = [];
   ChildSessionSummary _sessionSummary = ChildSessionSummary.empty;
   VocabularyGrowthSummary _vocabularyGrowth = VocabularyGrowthSummary.empty;
-  List<ChildLessonProgressEntry> _lessonProgress = [];
   bool _loadingStats = false;
+  int _reloadNonce = 0;
   bool _monthPickerExpanded = false;
   Timer? _liveSessionTimer;
 
@@ -92,18 +92,12 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
       month: month,
       linkedAt: widget.learner.trackingSince,
     );
-    final lessonProgressFuture = app.getChildLessonProgress(
-      learnerUserId: widget.learner.learnerId,
-      period: _period,
-      month: month,
-    );
     final categoriesFuture =
         app.getCategoriesForMonitoring(widget.learner.learnerId);
     final results = await Future.wait([
       statsFuture,
       sessionFuture,
       vocabularyFuture,
-      lessonProgressFuture,
       categoriesFuture,
     ]);
     if (mounted) {
@@ -111,9 +105,9 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
         _stats = results[0] as List<PhraseUsageStat>;
         _sessionSummary = results[1] as ChildSessionSummary;
         _vocabularyGrowth = results[2] as VocabularyGrowthSummary;
-        _lessonProgress = results[3] as List<ChildLessonProgressEntry>;
-        _childCategories = results[4] as List<CategoryModel>;
+        _childCategories = results[3] as List<CategoryModel>;
         _loadingStats = false;
+        _reloadNonce++;
       });
     }
   }
@@ -593,6 +587,41 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                     )
                   : VocabularyGrowthSection(
                       summary: _vocabularyGrowth,
+                      theme: theme,
+                      lang: lang,
+                    ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            child: Text(
+              AppStrings.categoriesUsed(lang),
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: theme.textMain,
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(_cardRadius),
+                border: Border.all(color: const Color(0xFFE9EEF2)),
+              ),
+              child: _loadingStats
+                  ? const Padding(
+                      padding: EdgeInsets.all(AppSpacing.xl),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  : CategoriesUsedSection(
+                      slices: _vocabularyGrowth.categorySlices,
                       allCategories: _childCategories,
                       theme: theme,
                       lang: lang,
@@ -623,17 +652,17 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                 borderRadius: BorderRadius.circular(_cardRadius),
                 border: Border.all(color: const Color(0xFFE9EEF2)),
               ),
-              child: _loadingStats
-                  ? const Padding(
-                      padding: EdgeInsets.all(AppSpacing.xl),
-                      child: Center(child: CircularProgressIndicator()),
-                    )
-                  : LessonProgressSection(
-                      entries: _lessonProgress,
-                      theme: theme,
-                      lang: lang,
-                      labelForContent: app.localizedContent,
-                    ),
+              child: LessonProgressSection(
+                learnerUserId: widget.learner.learnerId,
+                period: _period,
+                month: _period == ChildUsagePeriod.month
+                    ? _resolvedSelectedMonth(_monthOptions())
+                    : null,
+                reloadNonce: _reloadNonce,
+                theme: theme,
+                lang: lang,
+                labelForContent: app.localizedContent,
+              ),
             ),
           ),
           const SizedBox(height: AppSpacing.lg),

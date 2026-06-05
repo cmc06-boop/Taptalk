@@ -2445,6 +2445,80 @@ class AppState extends ChangeNotifier {
     );
   }
 
+  Future<void> _syncLearnerEnrollmentsFromCloudForUser(int learnerUserId) async {
+    if (!_notificationSync.isCloudAvailable) return;
+    final uid = await _resolveLearnerFirebaseUid(learnerUserId);
+    if (uid == null || uid.isEmpty) return;
+    try {
+      final remoteEnrollments = await _notificationSync
+          .getClassEnrollmentsForLearnerFromCloud(uid)
+          .timeout(const Duration(seconds: 12));
+      for (final enrollment in remoteEnrollments) {
+        final code = AppRepository.normalizeClassCode(enrollment.classCode);
+        if (!AppRepository.isValidClassCodeFormat(code)) continue;
+        var classRow = await _repo.findClassByCode(code);
+        if (classRow == null) {
+          final remoteClass = await _notificationSync
+              .getTeacherClassByCodeFromCloud(code)
+              .timeout(const Duration(seconds: 8));
+          if (remoteClass != null) {
+            classRow =
+                await _repo.importRemoteTeacherClassForEnrollment(remoteClass);
+          }
+        }
+        if (classRow == null) continue;
+        final classId = classRow['id'] as int;
+        if (!await _repo.isLearnerEnrolled(learnerUserId, classId)) {
+          await _repo.enrollLearnerInClass(learnerUserId, classId);
+        }
+        await _syncClassLessonsFromCloud(classId: classId, classCode: code);
+      }
+    } catch (e, st) {
+      debugPrint('Sync learner enrollments for monitoring failed: $e\n$st');
+    }
+  }
+
+  Future<List<EnrolledClassModel>> getEnrolledClassesForMonitoring(
+    int learnerUserId,
+  ) async {
+    await _syncLearnerEnrollmentsFromCloudForUser(learnerUserId);
+    return _repo.getEnrolledClasses(learnerUserId);
+  }
+
+  Future<List<ClassLesson>> getClassLessonsForMonitoring({
+    required int classId,
+    required String classCode,
+  }) async {
+    await _syncClassLessonsFromCloud(
+      classId: classId,
+      classCode: classCode,
+    );
+    return _repo.getClassLessonsByClassId(classId);
+  }
+
+  Future<ChildLessonProgressEntry> getLessonProgressForMonitoring({
+    required int learnerUserId,
+    required String className,
+    required String lessonTitle,
+    required ChildUsagePeriod period,
+    DateTime? month,
+  }) async {
+    final range = _dateRangeForPeriod(period, month: month);
+    final cloudActivities = await _fetchLearnerCloudActivities(
+      learnerUserId: learnerUserId,
+      rangeStart: range.$1,
+      rangeEnd: range.$2,
+    );
+    return _repo.getLessonProgressForLesson(
+      learnerUserId: learnerUserId,
+      className: className,
+      lessonTitle: lessonTitle,
+      rangeStart: range.$1,
+      rangeEnd: range.$2,
+      cloudActivities: cloudActivities,
+    );
+  }
+
   Future<ChildSessionSummary> getChildSessionSummary({
     required int learnerUserId,
     required ChildUsagePeriod period,
