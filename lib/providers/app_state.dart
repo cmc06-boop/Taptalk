@@ -1541,9 +1541,17 @@ class AppState extends ChangeNotifier {
         AppStrings.alertNotAuthorized(_language),
     };
 
-    final contacts = await _repo.getEmergencyContactsForLearner(learnerUserId);
-    final smsText =
-        '[TapTalk] $title\n$body\nLearner: $learnerName\nClass: $className';
+    final localContacts =
+        await _repo.getEmergencyContactsForLearner(learnerUserId);
+    final learnerFirebaseUid =
+        await _repo.getFirebaseUidForUser(learnerUserId);
+    final contacts = await _notificationSync.resolveEmergencyContacts(
+      learnerUserId: learnerUserId,
+      localContacts: localContacts,
+      learnerFirebaseUid: learnerFirebaseUid,
+    );
+    // Keep SMS short (single-part) for reliable delivery on budget Android phones.
+    final smsText = '[TapTalk] $title ($className)';
 
     if (contacts.isEmpty) {
       return TeacherAlertDeliveryResult(
@@ -1559,6 +1567,7 @@ class AppState extends ChangeNotifier {
 
     final offline = await NetworkStatus.isOffline();
     final sms = await _deviceSms.sendEmergencyAlert(
+      language: _language,
       rawContacts: contacts,
       message: smsText,
     );
@@ -1573,6 +1582,7 @@ class AppState extends ChangeNotifier {
         invalidContacts: sms.invalidContacts,
         errorMessage: sms.errorMessage,
         sentViaDevice: true,
+        openedComposer: sms.openedComposer,
       ),
     );
   }

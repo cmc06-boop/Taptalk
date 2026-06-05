@@ -243,11 +243,13 @@ class _TeacherClassMonitoringScreenState
     final smsError = delivery.sms.errorMessage;
     final smsSummary = smsError != null
         ? 'SMS: $smsError'
-        : AppStrings.smsSentViaPhone(
-            lang,
-            delivery.sms.sent,
-            delivery.sms.attempted,
-          );
+        : delivery.sms.openedComposer
+            ? AppStrings.smsTapSendToDeliver(lang)
+            : AppStrings.smsSentViaPhone(
+                lang,
+                delivery.sms.sent,
+                delivery.sms.attempted,
+              );
     final resultMessage = delivery.inAppError == null
         ? '${AppStrings.alertSent(lang, student.fullName)}\n$smsSummary'
         : '${delivery.inAppError}\n$smsSummary';

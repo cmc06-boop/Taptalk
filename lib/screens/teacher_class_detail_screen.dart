@@ -60,6 +60,7 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
     );
     if (!mounted || created != true) return;
     await _load();
+    if (!mounted) return;
     await TapTalkResultDialog.showSuccess(
       context,
       title: AppStrings.lessonCreatedTitle(lang),

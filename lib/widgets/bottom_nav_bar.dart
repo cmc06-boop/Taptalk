@@ -24,12 +24,14 @@ class TapTalkBottomNav extends StatelessWidget {
     final theme = app.theme;
     final lang = app.language;
 
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+
     return Container(
-      padding: const EdgeInsets.fromLTRB(
+      padding: EdgeInsets.fromLTRB(
         AppSpacing.sm,
         AppSpacing.md,
         AppSpacing.sm,
-        AppSpacing.lg,
+        AppSpacing.lg + bottomInset,
       ),
       decoration: BoxDecoration(
         color: theme.bgMid,

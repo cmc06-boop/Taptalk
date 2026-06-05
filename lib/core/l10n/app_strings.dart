@@ -439,14 +439,30 @@ abstract final class AppStrings {
       ? 'Walang emergency contact ang learner. Idagdag sa profile ng learner.'
       : 'Learner has no emergency contacts. Add them in the learner profile.';
 
+  static String smsPermissionDenied(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Payagan ang SMS permission sa settings ng phone para maipadala ang alert.'
+      : 'Allow SMS permission in phone settings to send the alert.';
+
+  static String smsSendFailed(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Hindi naipadala ang SMS. Suriin ang SIM, load, at emergency contacts.'
+      : 'SMS could not be sent. Check SIM, load, and emergency contacts.';
+
+  static String smsNoSignal(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Walang cellular signal. Hindi maipadala ang SMS.'
+      : 'No cellular signal. SMS could not be sent.';
+
   static String inAppNeedsInternet(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Kailangan ng internet ang in-app alert sa magulang. Naipadala (o inihanda) ang SMS sa emergency contacts.'
-      : 'In-app parent alerts need internet. SMS was sent (or opened) for emergency contacts.';
+      ? 'Kailangan ng internet ang in-app alert sa magulang. Naipadala ang SMS sa emergency contacts.'
+      : 'In-app parent alerts need internet. SMS was sent to emergency contacts.';
 
   static String smsSentViaPhone(AppLanguage lang, int sent, int attempted) =>
       lang == AppLanguage.filipino
-          ? 'SMS (cellular, walang internet): $sent/$attempted'
-          : 'SMS via phone signal (no internet): $sent/$attempted';
+          ? 'Naipadala ang SMS sa $sent/$attempted contact(s).'
+          : 'SMS sent to $sent/$attempted contact(s).';
+
+  static String smsTapSendToDeliver(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Hindi ma-send ng automatic ang SMS sa phone na ito. Binuksan ang Messages — i-tap ang Send.'
+      : 'Automatic SMS is blocked on this phone. Messages app opened — tap Send.';
 
   static String chooseAlertType(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Piliin ang uri ng alert'

@@ -67,8 +67,13 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final lang = app.language;
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom >
+            MediaQuery.paddingOf(context).bottom
+        ? MediaQuery.viewInsetsOf(context).bottom
+        : MediaQuery.paddingOf(context).bottom;
 
     return TapTalkShell(
+      coloredHeader: true,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final isWide = constraints.maxWidth >= 500;
@@ -118,148 +123,154 @@ class _LoginScreenState extends State<LoginScreen> {
                       top: Radius.circular(52),
                     ),
                     clipBehavior: Clip.antiAlias,
-                    child: Padding(
+                    child: SingleChildScrollView(
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
                       padding: EdgeInsets.fromLTRB(
                         contentHorizontal,
                         contentTop,
                         contentHorizontal,
-                        compactHeight ? 14 : 18,
+                        (compactHeight ? 14 : 18) + bottomInset,
                       ),
                       child: Form(
                         key: _formKey,
                         child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Center(child: TapTalkLogo(size: logoSize)),
-                          SizedBox(height: sectionGap),
-                          Text(
-                            AppStrings.loginTitle(lang),
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.poppins(
-                              fontSize: compactHeight ? 22 : 24,
-                              fontWeight: FontWeight.w700,
-                              color: const Color(0xFF5BB88A),
-                            ),
-                          ),
-                          if (_error != null) ...[
-                            const SizedBox(height: AppSpacing.md),
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Center(child: TapTalkLogo(size: logoSize)),
+                            SizedBox(height: sectionGap),
                             Text(
-                              _error!,
+                              AppStrings.loginTitle(lang),
                               textAlign: TextAlign.center,
-                              style: const TextStyle(color: Color(0xFFC62828)),
-                            ),
-                          ],
-                          SizedBox(height: sectionGap),
-                          _field(
-                            AppStrings.email(lang),
-                            _email,
-                            keyboard: TextInputType.emailAddress,
-                            textInputAction: TextInputAction.next,
-                            autocorrect: false,
-                            validator: (value) {
-                              if (value == null || value.trim().isEmpty) {
-                                return AppStrings.fillAllFields(lang);
-                              }
-                              if (!AuthValidation.isValidEmail(value)) {
-                                return AppStrings.invalidEmail(lang);
-                              }
-                              return null;
-                            },
-                          ),
-                          SizedBox(height: fieldGap),
-                          _field(
-                            AppStrings.password(lang),
-                            _password,
-                            obscure: _obscurePassword,
-                            textInputAction: TextInputAction.done,
-                            onFieldSubmitted: (_) => _submit(),
-                            onToggleObscure: () =>
-                                setState(() => _obscurePassword = !_obscurePassword),
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return AppStrings.fillAllFields(lang);
-                              }
-                              return null;
-                            },
-                          ),
-                          SizedBox(height: compactHeight ? 6 : 8),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton(
-                              onPressed: _busy
-                                  ? null
-                                  : () => app.setRoute(AppRoute.forgotPassword),
-                              style: TextButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                  vertical: 0,
-                                ),
-                                minimumSize: Size.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                              child: Text(
-                                AppStrings.forgotPassword(lang),
-                                style: GoogleFonts.poppins(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: const Color(0xFF5BB88A),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const Spacer(),
-                          FilledButton(
-                            onPressed: _busy ? null : _submit,
-                            style: FilledButton.styleFrom(
-                              backgroundColor: Colors.black,
-                              padding: EdgeInsets.symmetric(vertical: compactHeight ? 14 : 16),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                            ),
-                            child: _busy
-                                ? const SizedBox(
-                                    height: 22,
-                                    width: 22,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : Text(
-                                    AppStrings.loginTitle(lang),
-                                    style:
-                                        GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 16),
-                                  ),
-                          ),
-                          SizedBox(height: compactHeight ? 10 : 14),
-                          Text.rich(
-                            textAlign: TextAlign.center,
-                            TextSpan(
-                              text: '${AppStrings.noAccount(lang)} ',
                               style: GoogleFonts.poppins(
-                                fontSize: 14,
-                                color: const Color(0xFF2F5E48),
+                                fontSize: compactHeight ? 22 : 24,
+                                fontWeight: FontWeight.w700,
+                                color: const Color(0xFF5BB88A),
                               ),
-                              children: [
-                                WidgetSpan(
-                                  child: GestureDetector(
-                                    onTap: () =>
-                                        app.setRoute(AppRoute.register),
-                                    child: Text(
-                                      AppStrings.signUp(lang),
+                            ),
+                            if (_error != null) ...[
+                              const SizedBox(height: AppSpacing.md),
+                              Text(
+                                _error!,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(color: Color(0xFFC62828)),
+                              ),
+                            ],
+                            SizedBox(height: sectionGap),
+                            _field(
+                              AppStrings.email(lang),
+                              _email,
+                              keyboard: TextInputType.emailAddress,
+                              textInputAction: TextInputAction.next,
+                              autocorrect: false,
+                              validator: (value) {
+                                if (value == null || value.trim().isEmpty) {
+                                  return AppStrings.fillAllFields(lang);
+                                }
+                                if (!AuthValidation.isValidEmail(value)) {
+                                  return AppStrings.invalidEmail(lang);
+                                }
+                                return null;
+                              },
+                            ),
+                            SizedBox(height: fieldGap),
+                            _field(
+                              AppStrings.password(lang),
+                              _password,
+                              obscure: _obscurePassword,
+                              textInputAction: TextInputAction.done,
+                              onFieldSubmitted: (_) => _submit(),
+                              onToggleObscure: () => setState(
+                                () => _obscurePassword = !_obscurePassword,
+                              ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return AppStrings.fillAllFields(lang);
+                                }
+                                return null;
+                              },
+                            ),
+                            SizedBox(height: compactHeight ? 6 : 8),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton(
+                                onPressed: _busy
+                                    ? null
+                                    : () => app.setRoute(AppRoute.forgotPassword),
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 0,
+                                  ),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                child: Text(
+                                  AppStrings.forgotPassword(lang),
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: const Color(0xFF5BB88A),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            SizedBox(height: sectionGap),
+                            FilledButton(
+                              onPressed: _busy ? null : _submit,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.black,
+                                padding: EdgeInsets.symmetric(
+                                  vertical: compactHeight ? 14 : 16,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: _busy
+                                  ? const SizedBox(
+                                      height: 22,
+                                      width: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : Text(
+                                      AppStrings.loginTitle(lang),
                                       style: GoogleFonts.poppins(
                                         fontWeight: FontWeight.w700,
-                                        color: const Color(0xFF5BB88A),
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                            ),
+                            SizedBox(height: compactHeight ? 10 : 14),
+                            Text.rich(
+                              textAlign: TextAlign.center,
+                              TextSpan(
+                                text: '${AppStrings.noAccount(lang)} ',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 14,
+                                  color: const Color(0xFF2F5E48),
+                                ),
+                                children: [
+                                  WidgetSpan(
+                                    child: GestureDetector(
+                                      onTap: () => app.setRoute(AppRoute.register),
+                                      child: Text(
+                                        AppStrings.signUp(lang),
+                                        style: GoogleFonts.poppins(
+                                          fontWeight: FontWeight.w700,
+                                          color: const Color(0xFF5BB88A),
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                          SizedBox(height: compactHeight ? 4 : 6),
-                        ],
+                            SizedBox(height: compactHeight ? 4 : 6),
+                          ],
                         ),
                       ),
                     ),

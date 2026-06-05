@@ -199,6 +199,31 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   }
 
   @override
+  Future<List<String>> getLearnerEmergencyContacts(
+    String learnerFirebaseUid,
+  ) async {
+    if (!isAvailable || learnerFirebaseUid.trim().isEmpty) return const [];
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection(learnerProfileCollectionName)
+          .doc(learnerFirebaseUid.trim())
+          .get();
+      if (!doc.exists) return const [];
+      final contacts = doc.data()?['emergencyContacts'];
+      if (contacts is! List) return const [];
+      return contacts
+          .whereType<String>()
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .take(2)
+          .toList();
+    } catch (e, st) {
+      debugPrint('getLearnerEmergencyContacts failed: $e\n$st');
+      return const [];
+    }
+  }
+
+  @override
   Future<void> markParentNotificationRead(String remoteId) async {
     if (!isAvailable || remoteId.trim().isEmpty) return;
     try {

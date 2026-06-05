@@ -217,6 +217,8 @@ abstract class CloudNotificationBackend {
     required List<String> contacts,
   });
 
+  Future<List<String>> getLearnerEmergencyContacts(String learnerFirebaseUid);
+
   Stream<List<RemoteParentNotification>> watchParentNotifications({
     required int parentUserId,
     required String parentFirebaseUid,
@@ -295,6 +297,12 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
     required String learnerFirebaseUid,
     required List<String> contacts,
   }) async {}
+
+  @override
+  Future<List<String>> getLearnerEmergencyContacts(
+    String learnerFirebaseUid,
+  ) async =>
+      const [];
 
   @override
   Stream<List<RemoteParentNotification>> watchParentNotifications({

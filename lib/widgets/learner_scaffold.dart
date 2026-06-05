@@ -45,6 +45,8 @@ class LearnerScaffold extends StatelessWidget {
     final effectiveShowBottomNav =
         showBottomNav && (!forMeOnlyNav || _forMeShowsBottomNav(currentRoute));
 
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+
     return TapTalkShell(
       child: Stack(
         children: [
@@ -64,7 +66,14 @@ class LearnerScaffold extends StatelessWidget {
                   onAlerts: () => app.setRoute(AppRoute.teacherMonitoring),
                   onProfile: () => app.setRoute(AppRoute.profile),
                 ),
-                Expanded(child: body),
+                Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      bottom: effectiveShowBottomNav ? 0 : bottomInset,
+                    ),
+                    child: body,
+                  ),
+                ),
                 if (effectiveShowBottomNav)
                   TapTalkBottomNav(
                     current: currentRoute,

@@ -141,9 +141,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final lang = app.language;
-    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom >
+            MediaQuery.paddingOf(context).bottom
+        ? MediaQuery.viewInsetsOf(context).bottom
+        : MediaQuery.paddingOf(context).bottom;
 
     return TapTalkShell(
+      coloredHeader: true,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final isWide = constraints.maxWidth >= 500;

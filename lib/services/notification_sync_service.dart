@@ -270,6 +270,29 @@ class NotificationSyncService {
     );
   }
 
+  /// Local SQLite first; falls back to Firestore when the teacher device has no
+  /// copy of the learner's emergency contacts (typical cross-device setup).
+  Future<List<String>> resolveEmergencyContacts({
+    required int learnerUserId,
+    required List<String> localContacts,
+    String? learnerFirebaseUid,
+  }) async {
+    if (localContacts.isNotEmpty) return localContacts;
+    final uid = learnerFirebaseUid?.trim();
+    if (!_cloud.isAvailable || uid == null || uid.isEmpty) {
+      return localContacts;
+    }
+    try {
+      final cloudContacts = await _cloud.getLearnerEmergencyContacts(uid);
+      if (cloudContacts.isEmpty) return localContacts;
+      await _repository.updateEmergencyContacts(learnerUserId, cloudContacts);
+      return cloudContacts;
+    } catch (e, st) {
+      debugPrint('Cloud emergency contact fetch failed: $e\n$st');
+      return localContacts;
+    }
+  }
+
   Future<void> startParentSync({
     required int parentUserId,
     required String parentFirebaseUid,

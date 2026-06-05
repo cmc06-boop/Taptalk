@@ -42,9 +42,9 @@ class _ChooseThemeScreenState extends State<ChooseThemeScreen> {
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(
+            padding: EdgeInsets.fromLTRB(
               AppSpacing.lg,
-              AppSpacing.lg,
+              AppSpacing.lg + MediaQuery.paddingOf(context).top,
               AppSpacing.lg,
               AppSpacing.sm,
             ),
@@ -149,11 +149,11 @@ class _ChooseThemeScreenState extends State<ChooseThemeScreen> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(
+            padding: EdgeInsets.fromLTRB(
               AppSpacing.lg,
               0,
               AppSpacing.lg,
-              AppSpacing.lg,
+              AppSpacing.lg + MediaQuery.paddingOf(context).bottom,
             ),
             child: Text(
               AppStrings.chooseThemeFooter(lang),

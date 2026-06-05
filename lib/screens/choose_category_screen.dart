@@ -48,9 +48,9 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(
+            padding: EdgeInsets.fromLTRB(
               AppSpacing.lg,
-              AppSpacing.md,
+              AppSpacing.md + MediaQuery.paddingOf(context).top,
               AppSpacing.lg,
               AppSpacing.sm,
             ),
@@ -147,7 +147,12 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.all(AppSpacing.lg),
+            padding: EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              AppSpacing.lg,
+              AppSpacing.lg,
+              AppSpacing.lg + MediaQuery.paddingOf(context).bottom,
+            ),
             child: SizedBox(
               width: double.infinity,
               child: FilledButton(

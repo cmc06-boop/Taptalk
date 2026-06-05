@@ -36,6 +36,7 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
     final created = await CreateClassDialog.show(context);
     if (!mounted || created != true) return;
     await _refreshCounts();
+    if (!mounted) return;
     await TapTalkResultDialog.showSuccess(
       context,
       title: AppStrings.classCreatedTitle(lang),

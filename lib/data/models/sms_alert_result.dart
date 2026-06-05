@@ -6,6 +6,7 @@ class SmsAlertResult {
     this.invalidContacts = const [],
     this.errorMessage,
     this.sentViaDevice = false,
+    this.openedComposer = false,
   });
 
   final int attempted;
@@ -13,8 +14,10 @@ class SmsAlertResult {
   final int failed;
   final List<String> invalidContacts;
   final String? errorMessage;
-  /// True when SMS used the phone's cellular SMS (works without internet).
+  /// True when SMS used the phone's cellular SIM (works without internet).
   final bool sentViaDevice;
+  /// True when silent send failed and the Messages app was opened instead.
+  final bool openedComposer;
 
   bool get isSuccess => errorMessage == null && sent > 0;
 

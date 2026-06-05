@@ -38,10 +38,12 @@ class AppHeader extends StatelessWidget {
     final app = context.watch<AppState>();
     final theme = app.theme;
 
+    final topInset = MediaQuery.paddingOf(context).top;
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
+      padding: EdgeInsets.fromLTRB(
         AppSpacing.lg,
-        AppSpacing.sm,
+        AppSpacing.sm + topInset,
         AppSpacing.lg,
         AppSpacing.md,
       ),

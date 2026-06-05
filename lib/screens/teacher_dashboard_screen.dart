@@ -202,7 +202,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
                   itemCount: _recentLessons.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
+                  separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
                   itemBuilder: (context, index) {
                     final lesson = _recentLessons[index];
                     return ClassColorCard(

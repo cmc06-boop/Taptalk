@@ -75,6 +75,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     final lang = app.language;
 
     return TapTalkShell(
+      coloredHeader: true,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final isWide = constraints.maxWidth >= 500;
@@ -129,7 +130,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                         contentHorizontal,
                         contentTop,
                         contentHorizontal,
-                        compactHeight ? 14 : 18,
+                        (compactHeight ? 14 : 18) +
+                            MediaQuery.paddingOf(context).bottom,
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,

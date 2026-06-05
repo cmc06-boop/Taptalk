@@ -105,17 +105,17 @@ class SourceDrawer extends StatelessWidget {
                           if (app.user?.isParent ?? false) ...[
                             _DrawerItem(
                               theme: theme,
-                              icon: Icons.child_care_outlined,
-                              label: AppStrings.myChild(lang),
-                              active: app.route == AppRoute.myChild,
-                              onTap: () => app.setRoute(AppRoute.myChild),
-                            ),
-                            _DrawerItem(
-                              theme: theme,
                               icon: Icons.person_outline,
                               label: AppStrings.forMe(lang),
                               active: _isForMeRoute(app.route),
                               onTap: () => app.setRoute(AppRoute.home),
+                            ),
+                            _DrawerItem(
+                              theme: theme,
+                              icon: Icons.child_care_outlined,
+                              label: AppStrings.myChild(lang),
+                              active: app.route == AppRoute.myChild,
+                              onTap: () => app.setRoute(AppRoute.myChild),
                             ),
                             _DrawerItem(
                               theme: theme,
@@ -127,26 +127,25 @@ class SourceDrawer extends StatelessWidget {
                           ] else if (app.user?.isLearner ?? false) ...[
                             _DrawerItem(
                               theme: theme,
+                              icon: Icons.person_outline,
+                              label: AppStrings.forMe(lang),
+                              active: _isForMeRoute(app.route),
+                              onTap: () => app.setRoute(AppRoute.home),
+                            ),
+                            _DrawerItem(
+                              theme: theme,
                               icon: Icons.school_outlined,
                               label: AppStrings.classes(lang),
                               active: app.route == AppRoute.classes,
                               onTap: () => app.setRoute(AppRoute.classes),
                             ),
+                          ] else if (app.user?.isTeacher ?? false) ...[
                             _DrawerItem(
                               theme: theme,
                               icon: Icons.person_outline,
                               label: AppStrings.forMe(lang),
                               active: _isForMeRoute(app.route),
                               onTap: () => app.setRoute(AppRoute.home),
-                            ),
-                          ] else if (app.user?.isTeacher ?? false) ...[
-                            _DrawerItem(
-                              theme: theme,
-                              icon: Icons.dashboard_outlined,
-                              label: AppStrings.dashboard(lang),
-                              active: app.route == AppRoute.teacherDashboard,
-                              onTap: () =>
-                                  app.setRoute(AppRoute.teacherDashboard),
                             ),
                             _DrawerItem(
                               theme: theme,
@@ -158,18 +157,19 @@ class SourceDrawer extends StatelessWidget {
                             ),
                             _DrawerItem(
                               theme: theme,
+                              icon: Icons.dashboard_outlined,
+                              label: AppStrings.dashboard(lang),
+                              active: app.route == AppRoute.teacherDashboard,
+                              onTap: () =>
+                                  app.setRoute(AppRoute.teacherDashboard),
+                            ),
+                            _DrawerItem(
+                              theme: theme,
                               icon: Icons.monitor_heart_outlined,
                               label: AppStrings.monitoring(lang),
                               active: app.route == AppRoute.teacherMonitoring,
                               onTap: () =>
                                   app.setRoute(AppRoute.teacherMonitoring),
-                            ),
-                            _DrawerItem(
-                              theme: theme,
-                              icon: Icons.person_outline,
-                              label: AppStrings.forMe(lang),
-                              active: _isForMeRoute(app.route),
-                              onTap: () => app.setRoute(AppRoute.home),
                             ),
                             _DrawerItem(
                               theme: theme,
