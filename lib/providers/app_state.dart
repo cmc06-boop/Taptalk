@@ -27,6 +27,7 @@ import '../data/models/parent_notification.dart';
 import '../data/models/teacher_recent_alert.dart';
 import '../data/models/teacher_recent_lesson.dart';
 import '../data/models/phrase_model.dart';
+import '../data/models/phrase_first_use.dart';
 import '../data/models/phrase_usage_stat.dart';
 import '../data/models/class_lesson.dart';
 import '../data/models/lesson_phrase.dart';
@@ -365,6 +366,8 @@ class AppState extends ChangeNotifier {
       }
       await _resyncLearnerEnrollmentsToCloud();
       await _syncUserProfileToCloud();
+      await _syncLearnerCategoriesToCloud();
+      unawaited(_backfillLearnerActivityToCloud());
     } catch (e, st) {
       debugPrint('Learner cloud sync failed: $e\n$st');
     }
@@ -907,6 +910,7 @@ class AppState extends ChangeNotifier {
     if (_user == null) return AppStrings.notSignedIn(_language);
     try {
       final cat = await _repo.addCategory(_user!.id, name);
+      unawaited(_syncLearnerCategoriesToCloud());
       _selectedCategoryKey = cat.key;
       await _refreshLearnerCollections();
       notifyListeners();
@@ -1004,30 +1008,79 @@ class AppState extends ChangeNotifier {
   }) async {
     if (_user == null || text.trim().isEmpty) return;
     final canonical = ContentLocalization.canonicalPhrase(text);
-    final effectiveCategoryKey = categoryKey ?? _selectedCategoryKey;
+    final baseCategoryKey = categoryKey ?? _selectedCategoryKey;
+    final storedCategoryKey = AppRepository.resolveHistoryCategoryKey(
+      categoryKey: baseCategoryKey,
+      className: className,
+      lessonTitle: lessonTitle,
+    );
     final now = DateTime.now();
     await _repo.addHistory(
       userId: _user!.id,
       text: canonical,
-      categoryKey: effectiveCategoryKey,
+      categoryKey: baseCategoryKey,
       className: className,
       lessonTitle: lessonTitle,
     );
     _history = await _repo.getHistory(_user!.id);
     notifyListeners();
-    // Push to cloud for cross-device monitoring (fire-and-forget).
+    await _pushLearnerActivityToCloud(
+      phraseText: canonical,
+      categoryKey: storedCategoryKey,
+      createdAt: now,
+      className: className,
+      lessonTitle: lessonTitle,
+    );
+  }
+
+  Future<void> _pushLearnerActivityToCloud({
+    required String phraseText,
+    required String categoryKey,
+    required DateTime createdAt,
+    String? className,
+    String? lessonTitle,
+  }) async {
+    if (_user == null || !_notificationSync.isCloudAvailable) return;
     final uid = _user!.firebaseUid ?? FirebaseService.instance.currentUid;
-    if (uid != null && uid.isNotEmpty && _notificationSync.isCloudAvailable) {
-      unawaited(_notificationSync.pushLearnerActivity(
+    if (uid == null || uid.isEmpty) return;
+    try {
+      await _notificationSync.pushLearnerActivity(
         LearnerActivityCloudEvent(
           learnerFirebaseUid: uid,
-          phraseText: canonical,
-          categoryKey: effectiveCategoryKey,
-          createdAt: now,
+          phraseText: phraseText,
+          categoryKey: categoryKey,
+          createdAt: createdAt,
           className: className,
           lessonTitle: lessonTitle,
         ),
-      ));
+      );
+    } catch (e, st) {
+      debugPrint('Push learner activity failed: $e\n$st');
+    }
+  }
+
+  Future<void> _backfillLearnerActivityToCloud() async {
+    if (_user == null || !_user!.isLearner || !_notificationSync.isCloudAvailable) {
+      return;
+    }
+    final uid = _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (uid == null || uid.isEmpty) return;
+    try {
+      final history = await _repo.getHistory(_user!.id);
+      for (final item in history) {
+        await _notificationSync.pushLearnerActivity(
+          LearnerActivityCloudEvent(
+            learnerFirebaseUid: uid,
+            phraseText: ContentLocalization.canonicalPhrase(item.text),
+            categoryKey: AppRepository.normalizeCategoryKey(item.categoryKey),
+            createdAt: item.createdAt,
+            className: item.className,
+            lessonTitle: item.lessonTitle,
+          ),
+        );
+      }
+    } catch (e, st) {
+      debugPrint('Backfill learner activity failed: $e\n$st');
     }
   }
 
@@ -2063,6 +2116,50 @@ class AppState extends ChangeNotifier {
   Future<List<CategoryModel>> categoriesForUser(int userId) =>
       _repo.getCategories(userId);
 
+  Future<void> _syncLearnerCategoriesToCloud() async {
+    if (_user == null || !_user!.isLearner || !_notificationSync.isCloudAvailable) {
+      return;
+    }
+    final uid = _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (uid == null || uid.isEmpty) return;
+    final categories = await _repo.getCategories(_user!.id);
+    if (categories.isEmpty) return;
+    await _notificationSync.syncLearnerCategories(
+      learnerFirebaseUid: uid,
+      categories: categories
+          .map(
+            (c) => RemoteLearnerCategory(
+              key: c.key,
+              name: c.name,
+              iconKey: c.iconKey,
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  /// All learner categories (default + custom), synced from cloud when needed.
+  Future<List<CategoryModel>> getCategoriesForMonitoring(int learnerUserId) async {
+    var categories = await _repo.getCategories(learnerUserId);
+    if (categories.isEmpty) {
+      await _repo.seedLearnerData(learnerUserId);
+      categories = await _repo.getCategories(learnerUserId);
+    }
+    final uid = await _resolveLearnerFirebaseUid(learnerUserId);
+    if (uid != null && uid.isNotEmpty && _notificationSync.isCloudAvailable) {
+      final remote =
+          await _notificationSync.getLearnerCategoriesFromCloud(uid);
+      if (remote.isNotEmpty) {
+        await _repo.mergeRemoteLearnerCategories(
+          learnerUserId: learnerUserId,
+          remoteCategories: remote,
+        );
+        categories = await _repo.getCategories(learnerUserId);
+      }
+    }
+    return categories;
+  }
+
   Future<List<PhraseUsageStat>> getSelectedChildPhraseStats({
     required ChildUsagePeriod period,
     DateTime? month,
@@ -2081,25 +2178,120 @@ class AppState extends ChangeNotifier {
     if (fromUser != null && fromUser.isNotEmpty) return fromUser;
 
     if (!_notificationSync.isCloudAvailable || _user == null) return null;
-    final parentFirebaseUid =
-        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
-    if (parentFirebaseUid == null || parentFirebaseUid.isEmpty) return null;
 
     try {
-      final links = await _notificationSync
-          .getParentChildLinksFromCloud(parentFirebaseUid)
-          .timeout(const Duration(seconds: 8));
-      for (final link in links) {
-        final uid = link.learnerFirebaseUid.trim();
-        if (uid.isEmpty) continue;
-        if (link.learnerUserId == learnerUserId) return uid;
-        final learner = await _repo.findUserByFirebaseUid(uid);
-        if (learner?.id == learnerUserId) return uid;
+      if (_user!.isTeacher) {
+        final teacherFirebaseUid =
+            _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+        if (teacherFirebaseUid != null && teacherFirebaseUid.isNotEmpty) {
+          await _syncTeacherClassesFromCloud();
+          final enrollments = await _notificationSync
+              .getClassEnrollmentsFromCloud(teacherFirebaseUid)
+              .timeout(const Duration(seconds: 10));
+          final learner = await _repo.findUserById(learnerUserId);
+          final learnerName = learner?.fullName.trim().toLowerCase();
+          for (final enrollment in enrollments) {
+            final uid = enrollment.learnerFirebaseUid.trim();
+            if (uid.isEmpty) continue;
+            if (enrollment.learnerUserId == learnerUserId) {
+              await _repo.linkFirebaseUid(learnerUserId, uid);
+              return uid;
+            }
+            if (learnerName != null &&
+                learnerName.isNotEmpty &&
+                enrollment.learnerName.trim().toLowerCase() == learnerName) {
+              await _repo.linkFirebaseUid(learnerUserId, uid);
+              return uid;
+            }
+            final byUid = await _repo.findUserByFirebaseUid(uid);
+            if (byUid?.id == learnerUserId) {
+              await _repo.linkFirebaseUid(learnerUserId, uid);
+              return uid;
+            }
+          }
+        }
+      }
+
+      if (_user!.isParent) {
+        for (final child in _linkedChildren) {
+          if (child.learnerId != learnerUserId) continue;
+          final uid = await _repo.getFirebaseUidForUser(child.learnerId);
+          if (uid != null && uid.isNotEmpty) return uid;
+        }
+        final parentFirebaseUid =
+            _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+        if (parentFirebaseUid != null && parentFirebaseUid.isNotEmpty) {
+          final links = await _notificationSync
+              .getParentChildLinksFromCloud(parentFirebaseUid)
+              .timeout(const Duration(seconds: 8));
+          final learner = await _repo.findUserById(learnerUserId);
+          final learnerName = learner?.fullName.trim().toLowerCase();
+          for (final link in links) {
+            final uid = link.learnerFirebaseUid.trim();
+            if (uid.isEmpty) continue;
+            if (link.learnerUserId == learnerUserId) {
+              await _repo.linkFirebaseUid(learnerUserId, uid);
+              return uid;
+            }
+            if (learnerName != null &&
+                learnerName.isNotEmpty &&
+                link.learnerName.trim().toLowerCase() == learnerName) {
+              await _repo.linkFirebaseUid(learnerUserId, uid);
+              return uid;
+            }
+            final byUid = await _repo.findUserByFirebaseUid(uid);
+            if (byUid?.id == learnerUserId) {
+              await _repo.linkFirebaseUid(learnerUserId, uid);
+              return uid;
+            }
+          }
+        }
       }
     } catch (e, st) {
       debugPrint('Resolve learner firebase uid failed: $e\n$st');
     }
     return null;
+  }
+
+  List<PhraseFirstUse> _mergePhraseFirstUses({
+    required List<PhraseFirstUse> local,
+    required List<RemoteLearnerActivity> cloud,
+  }) {
+    final merged = <String, PhraseFirstUse>{};
+    for (final entry in local) {
+      final key =
+          '${AppRepository.normalizeCategoryKey(entry.categoryKey)}|${entry.text}';
+      merged[key] = entry;
+    }
+    for (final activity in cloud) {
+      final canonical = ContentLocalization.canonicalPhrase(activity.phraseText);
+      if (canonical.isEmpty) continue;
+      final categoryKey =
+          AppRepository.normalizeCategoryKey(activity.categoryKey);
+      final key = '$categoryKey|$canonical';
+      final existing = merged[key];
+      if (existing == null ||
+          activity.createdAt.isBefore(existing.firstUsedAt)) {
+        merged[key] = PhraseFirstUse(
+          text: canonical,
+          categoryKey: categoryKey,
+          firstUsedAt: activity.createdAt,
+        );
+      }
+    }
+    return merged.values.toList()
+      ..sort((a, b) => a.firstUsedAt.compareTo(b.firstUsedAt));
+  }
+
+  /// Ensures cloud links are fresh before parent/teacher monitoring reloads.
+  Future<void> refreshChildMonitoringData(int learnerUserId) async {
+    if (_user == null) return;
+    if (_user!.isTeacher) {
+      await _syncTeacherClassesFromCloud();
+    } else if (_user!.isParent) {
+      await _loadLinkedChildren(syncCloudInBackground: false);
+    }
+    await _resolveLearnerFirebaseUid(learnerUserId);
   }
 
   Future<List<RemoteLearnerActivity>> _fetchLearnerCloudActivities({
@@ -2176,13 +2368,22 @@ class AppState extends ChangeNotifier {
     DateTime? month,
     DateTime? linkedAt,
   }) async {
-    final firstUses = await _repo.getPhraseFirstUses(
+    final linked = linkedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+    final allCloudActivities = await _fetchLearnerCloudActivities(
       learnerUserId: learnerUserId,
+      rangeStart: linked,
+      rangeEnd: DateTime.now().add(const Duration(days: 1)),
+    );
+    final localFirstUses = await _repo.getPhraseFirstUses(
+      learnerUserId: learnerUserId,
+    );
+    final firstUses = _mergePhraseFirstUses(
+      local: localFirstUses,
+      cloud: allCloudActivities,
     );
     final range = _dateRangeForPeriod(period, month: month);
     final locale =
         _language == AppLanguage.filipino ? 'fil_PH' : 'en_US';
-    final linked = linkedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
     final earliest = linked.isAfter(range.$1) ? linked : range.$1;
 
     final periodStats = await getChildPhraseStats(
@@ -2194,6 +2395,7 @@ class AppState extends ChangeNotifier {
     final wordsByCategory = <String, int>{};
     final seenInPeriod = <String>{};
     for (final stat in periodStats) {
+      if (!AppRepository.isPersonalCategoryKey(stat.categoryKey)) continue;
       usageByCategory.update(
         stat.categoryKey,
         (v) => v + stat.count,

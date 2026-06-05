@@ -57,7 +57,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
       const Duration(seconds: 30),
       (_) {
         if (_period == ChildUsagePeriod.today) {
-          _reloadSessionSummary();
+          _reloadStats();
         }
       },
     );
@@ -69,24 +69,10 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
     super.dispose();
   }
 
-  Future<void> _reloadSessionSummary() async {
-    if (!mounted) return;
-    final app = context.read<AppState>();
-    final month = _period == ChildUsagePeriod.month
-        ? _resolvedSelectedMonth(_monthOptions())
-        : null;
-    final summary = await app.getChildSessionSummary(
-      learnerUserId: widget.learner.learnerId,
-      period: _period,
-      month: month,
-    );
-    if (!mounted) return;
-    setState(() => _sessionSummary = summary);
-  }
-
   Future<void> _reloadStats() async {
     final app = context.read<AppState>();
     setState(() => _loadingStats = true);
+    await app.refreshChildMonitoringData(widget.learner.learnerId);
     final month = _period == ChildUsagePeriod.month
         ? _resolvedSelectedMonth(_monthOptions())
         : null;
@@ -111,7 +97,8 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
       period: _period,
       month: month,
     );
-    final categoriesFuture = app.categoriesForUser(widget.learner.learnerId);
+    final categoriesFuture =
+        app.getCategoriesForMonitoring(widget.learner.learnerId);
     final results = await Future.wait([
       statsFuture,
       sessionFuture,
@@ -606,6 +593,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                     )
                   : VocabularyGrowthSection(
                       summary: _vocabularyGrowth,
+                      allCategories: _childCategories,
                       theme: theme,
                       lang: lang,
                       labelForCategory: (key) => _categoryLabel(app, key),

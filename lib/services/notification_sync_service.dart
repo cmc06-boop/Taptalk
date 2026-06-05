@@ -360,6 +360,33 @@ class NotificationSyncService {
     );
   }
 
+  Future<void> syncLearnerCategories({
+    required String learnerFirebaseUid,
+    required List<RemoteLearnerCategory> categories,
+  }) async {
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return;
+    try {
+      await _cloud.upsertLearnerCategories(
+        learnerFirebaseUid: learnerFirebaseUid,
+        categories: categories,
+      );
+    } catch (e, st) {
+      debugPrint('syncLearnerCategories failed: $e\n$st');
+    }
+  }
+
+  Future<List<RemoteLearnerCategory>> getLearnerCategoriesFromCloud(
+    String learnerFirebaseUid,
+  ) async {
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return const [];
+    try {
+      return await _cloud.getLearnerCategories(learnerFirebaseUid);
+    } catch (e, st) {
+      debugPrint('getLearnerCategoriesFromCloud failed: $e\n$st');
+      return const [];
+    }
+  }
+
   /// Local SQLite first; falls back to Firestore when the teacher device has no
   /// copy of the learner's emergency contacts (typical cross-device setup).
   Future<List<String>> resolveEmergencyContacts({

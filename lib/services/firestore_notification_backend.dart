@@ -168,11 +168,16 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   @override
   Future<void> appendLearnerActivity(LearnerActivityCloudEvent event) async {
     if (!isAvailable || event.learnerFirebaseUid.trim().isEmpty) return;
+    final uid = event.learnerFirebaseUid.trim();
+    final ts = event.createdAt.toUtc().millisecondsSinceEpoch;
+    final textKey = event.phraseText.trim().hashCode;
+    final docId = '${uid}_${ts}_$textKey';
     final payload = event.toFirestoreMap()
       ..['createdAt'] = Timestamp.fromDate(event.createdAt.toUtc());
     await FirebaseFirestore.instance
         .collection(activityCollectionName)
-        .add(payload);
+        .doc(docId)
+        .set(payload, SetOptions(merge: true));
   }
 
   @override
@@ -501,6 +506,50 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
         .collection(learnerProfileCollectionName)
         .doc(learnerFirebaseUid.trim())
         .set(payload, SetOptions(merge: true));
+  }
+
+  @override
+  Future<void> upsertLearnerCategories({
+    required String learnerFirebaseUid,
+    required List<RemoteLearnerCategory> categories,
+  }) async {
+    if (!isAvailable || learnerFirebaseUid.trim().isEmpty) return;
+    await FirebaseFirestore.instance
+        .collection(learnerProfileCollectionName)
+        .doc(learnerFirebaseUid.trim())
+        .set(
+          {
+            'categories': categories.map((c) => c.toFirestoreMap()).toList(),
+            'categoriesUpdatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+  }
+
+  @override
+  Future<List<RemoteLearnerCategory>> getLearnerCategories(
+    String learnerFirebaseUid,
+  ) async {
+    if (!isAvailable || learnerFirebaseUid.trim().isEmpty) return const [];
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection(learnerProfileCollectionName)
+          .doc(learnerFirebaseUid.trim())
+          .get();
+      if (!doc.exists) return const [];
+      final raw = doc.data()?['categories'];
+      if (raw is! List) return const [];
+      return raw
+          .whereType<Map>()
+          .map((e) => RemoteLearnerCategory.fromMap(
+                Map<String, dynamic>.from(e),
+              ))
+          .where((c) => c.key.trim().isNotEmpty)
+          .toList();
+    } catch (e, st) {
+      debugPrint('getLearnerCategories failed: $e\n$st');
+      return const [];
+    }
   }
 
   @override

@@ -17,7 +17,9 @@ abstract final class VocabularyGrowthCalculator {
     required String localeName,
     List<CategoryVocabularySlice>? periodCategorySlices,
   }) {
-    if (firstUses.isEmpty) {
+    final hasPeriodSlices =
+        periodCategorySlices != null && periodCategorySlices.isNotEmpty;
+    if (firstUses.isEmpty && !hasPeriodSlices) {
       return VocabularyGrowthSummary.empty;
     }
 
@@ -31,24 +33,32 @@ abstract final class VocabularyGrowthCalculator {
       if (!entry.firstUsedAt.isBefore(monthStart)) newThisMonth++;
     }
 
-    final weeklyTrend = _buildWeeklyTrend(
-      firstUses: firstUses,
-      now: now,
-      rangeStart: rangeStart,
-      localeName: localeName,
-    );
-    final monthlyTrend = _buildMonthlyTrend(
-      firstUses: firstUses,
-      now: now,
-      rangeStart: rangeStart,
-      localeName: localeName,
-    );
+    final weeklyTrend = firstUses.isEmpty
+        ? const <VocabularyGrowthPoint>[]
+        : _buildWeeklyTrend(
+            firstUses: firstUses,
+            now: now,
+            rangeStart: rangeStart,
+            localeName: localeName,
+          );
+    final monthlyTrend = firstUses.isEmpty
+        ? const <VocabularyGrowthPoint>[]
+        : _buildMonthlyTrend(
+            firstUses: firstUses,
+            now: now,
+            rangeStart: rangeStart,
+            localeName: localeName,
+          );
 
     final categorySlices = periodCategorySlices ??
         _categorySlicesFromFirstUses(firstUses);
 
+    final totalVocabulary = firstUses.isEmpty
+        ? categorySlices.fold<int>(0, (sum, s) => sum + s.wordCount)
+        : firstUses.length;
+
     return VocabularyGrowthSummary(
-      totalVocabulary: firstUses.length,
+      totalVocabulary: totalVocabulary,
       newWordsThisWeek: newThisWeek,
       newWordsThisMonth: newThisMonth,
       weeklyTrend: weeklyTrend,

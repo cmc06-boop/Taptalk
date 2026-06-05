@@ -6,25 +6,34 @@ import 'package:google_fonts/google_fonts.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
+import '../data/models/category_model.dart';
 import '../data/models/vocabulary_growth_summary.dart';
+import '../data/repositories/app_repository.dart';
 
 class CategoryUsagePieChart extends StatelessWidget {
   const CategoryUsagePieChart({
     super.key,
     required this.slices,
+    required this.allCategories,
     required this.theme,
     required this.lang,
     required this.labelForCategory,
   });
 
   final List<CategoryVocabularySlice> slices;
+  final List<CategoryModel> allCategories;
   final TapTalkThemeToken theme;
   final AppLanguage lang;
   final String Function(String categoryKey) labelForCategory;
 
   @override
   Widget build(BuildContext context) {
-    if (slices.isEmpty) {
+    final fullSlices = AppRepository.buildCategorySlicesForAllCategories(
+      categories: allCategories,
+      usageSlices: slices,
+    );
+
+    if (fullSlices.isEmpty) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
         child: Center(
@@ -39,10 +48,9 @@ class CategoryUsagePieChart extends StatelessWidget {
       );
     }
 
-    final total = slices.fold<int>(0, (sum, s) => sum + s.usageCount);
-    final colors = _sliceColors(theme, slices.length);
-    final topSlices = slices.take(6).toList();
-    final otherCount = slices.skip(6).fold<int>(0, (sum, s) => sum + s.usageCount);
+    final categoryCount = fullSlices.length;
+    final equalShare = categoryCount > 0 ? 100 / categoryCount : 0;
+    final colors = _sliceColors(theme, fullSlices.length);
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -52,17 +60,11 @@ class CategoryUsagePieChart extends StatelessWidget {
           height: 132,
           child: CustomPaint(
             painter: _DonutPainter(
-              values: [
-                ...topSlices.map((s) => s.usageCount.toDouble()),
-                if (otherCount > 0) otherCount.toDouble(),
-              ],
-              colors: [
-                ...colors.take(topSlices.length),
-                theme.textMain.withValues(alpha: 0.22),
-              ],
+              values: List.filled(fullSlices.length, 1.0),
+              colors: colors,
               strokeWidth: 22,
-              centerLabel: total > 0 ? '$total' : '0',
-              centerSubLabel: lang == AppLanguage.filipino ? 'gamit' : 'uses',
+              centerLabel: '$categoryCount',
+              centerSubLabel: AppStrings.categoryCountLabel(lang),
               labelColor: theme.textMain,
             ),
           ),
@@ -72,28 +74,15 @@ class CategoryUsagePieChart extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (var i = 0; i < topSlices.length; i++)
+              for (var i = 0; i < fullSlices.length; i++)
                 _LegendRow(
-                  color: colors[i],
-                  label: labelForCategory(topSlices[i].categoryKey),
+                  color: colors[i % colors.length],
+                  label: labelForCategory(fullSlices[i].categoryKey),
                   detail: AppStrings.vocabularyWords(
-                    topSlices[i].wordCount,
+                    fullSlices[i].wordCount,
                     lang,
                   ),
-                  percent: total > 0
-                      ? (topSlices[i].usageCount / total * 100).round()
-                      : 0,
-                  textColor: theme.textMain,
-                ),
-              if (otherCount > 0)
-                _LegendRow(
-                  color: theme.textMain.withValues(alpha: 0.22),
-                  label: lang == AppLanguage.filipino ? 'Iba pa' : 'Other',
-                  detail: AppStrings.vocabularyWords(
-                    slices.skip(6).fold<int>(0, (s, e) => s + e.wordCount),
-                    lang,
-                  ),
-                  percent: total > 0 ? (otherCount / total * 100).round() : 0,
+                  percent: equalShare.round(),
                   textColor: theme.textMain,
                 ),
             ],

@@ -130,6 +130,32 @@ class RemoteLearnerProfile {
   final int learnerUserId;
 }
 
+class RemoteLearnerCategory {
+  const RemoteLearnerCategory({
+    required this.key,
+    required this.name,
+    this.iconKey = 'custom',
+  });
+
+  final String key;
+  final String name;
+  final String iconKey;
+
+  Map<String, Object?> toFirestoreMap() => {
+        'key': key,
+        'name': name,
+        'iconKey': iconKey,
+      };
+
+  factory RemoteLearnerCategory.fromMap(Map<String, dynamic> map) {
+    return RemoteLearnerCategory(
+      key: (map['key'] as String?) ?? '',
+      name: (map['name'] as String?) ?? '',
+      iconKey: (map['iconKey'] as String?) ?? 'custom',
+    );
+  }
+}
+
 class RemoteParentChildLink {
   const RemoteParentChildLink({
     required this.parentFirebaseUid,
@@ -392,6 +418,15 @@ abstract class CloudNotificationBackend {
 
   Future<List<String>> getLearnerEmergencyContacts(String learnerFirebaseUid);
 
+  Future<void> upsertLearnerCategories({
+    required String learnerFirebaseUid,
+    required List<RemoteLearnerCategory> categories,
+  });
+
+  Future<List<RemoteLearnerCategory>> getLearnerCategories(
+    String learnerFirebaseUid,
+  );
+
   Stream<List<RemoteParentNotification>> watchParentNotifications({
     required int parentUserId,
     required String parentFirebaseUid,
@@ -522,6 +557,18 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
 
   @override
   Future<List<String>> getLearnerEmergencyContacts(
+    String learnerFirebaseUid,
+  ) async =>
+      const [];
+
+  @override
+  Future<void> upsertLearnerCategories({
+    required String learnerFirebaseUid,
+    required List<RemoteLearnerCategory> categories,
+  }) async {}
+
+  @override
+  Future<List<RemoteLearnerCategory>> getLearnerCategories(
     String learnerFirebaseUid,
   ) async =>
       const [];

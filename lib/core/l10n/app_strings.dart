@@ -1039,6 +1039,9 @@ abstract final class AppStrings {
       ? 'Mga kategorya'
       : 'Categories used';
 
+  static String categoryCountLabel(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'kategorya' : 'categories';
+
   static String trendByWeek(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Linggo' : 'Weeks';
 

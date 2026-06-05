@@ -5,7 +5,9 @@ import 'package:crypto/crypto.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../../core/l10n/content_localization.dart';
+import '../../services/cloud_notification_backend.dart';
 import '../database/database_helper.dart';
+import '../models/vocabulary_growth_summary.dart';
 import '../models/category_model.dart';
 import '../models/favorite_model.dart';
 import '../models/history_model.dart';
@@ -23,7 +25,6 @@ import '../models/lesson_phrase.dart';
 import '../models/teacher_alert_result.dart';
 import '../models/teacher_class_student.dart';
 import '../models/user_model.dart';
-import '../../services/cloud_notification_backend.dart';
 
 class AppRepository {
   AppRepository(this._dbHelper);
@@ -69,6 +70,17 @@ class AppRepository {
         .trim()
         .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
         .replaceAll(RegExp(r'^_+|_+$'), '');
+  }
+
+  /// True for learner "For Me" categories — excludes class/lesson phrase buckets.
+  static bool isPersonalCategoryKey(String categoryKey) {
+    if (HistoryModel.decodeLessonCategoryKey(categoryKey) != null) {
+      return false;
+    }
+    final trimmed = categoryKey.trim().toLowerCase();
+    if (trimmed == 'lesson') return false;
+    if (trimmed.startsWith(HistoryModel.lessonCategoryPrefix)) return false;
+    return true;
   }
 
   Future<UserModel?> findUserByEmail(String email) async {
@@ -516,6 +528,65 @@ class AppRepository {
     return rows.map(CategoryModel.fromMap).toList();
   }
 
+  Future<void> mergeRemoteLearnerCategories({
+    required int learnerUserId,
+    required List<RemoteLearnerCategory> remoteCategories,
+  }) async {
+    if (remoteCategories.isEmpty) return;
+    final db = await _dbHelper.database;
+    for (final remote in remoteCategories) {
+      final key = normalizeCategoryKey(remote.key);
+      if (key.isEmpty) continue;
+      final existing = await db.query(
+        'categories',
+        where: 'user_id = ? AND category_key = ?',
+        whereArgs: [learnerUserId, key],
+        limit: 1,
+      );
+      if (existing.isNotEmpty) continue;
+      await db.insert('categories', {
+        'user_id': learnerUserId,
+        'category_key': key,
+        'category_name':
+            remote.name.trim().isEmpty ? key : remote.name.trim(),
+        'icon_key': remote.iconKey.trim().isEmpty ? 'custom' : remote.iconKey,
+      });
+    }
+  }
+
+  static List<CategoryVocabularySlice> buildCategorySlicesForAllCategories({
+    required List<CategoryModel> categories,
+    required List<CategoryVocabularySlice> usageSlices,
+  }) {
+    final usageByKey = <String, CategoryVocabularySlice>{};
+    for (final slice in usageSlices) {
+      if (!isPersonalCategoryKey(slice.categoryKey)) continue;
+      final key = normalizeCategoryKey(slice.categoryKey);
+      usageByKey[key] = slice;
+    }
+
+    final results = <CategoryVocabularySlice>[];
+    final seen = <String>{};
+    for (final category in categories) {
+      final key = normalizeCategoryKey(category.key);
+      if (key.isEmpty || !seen.add(key)) continue;
+      final usage = usageByKey[key];
+      results.add(
+        CategoryVocabularySlice(
+          categoryKey: category.key,
+          wordCount: usage?.wordCount ?? 0,
+          usageCount: usage?.usageCount ?? 0,
+        ),
+      );
+    }
+
+    for (final entry in usageByKey.entries) {
+      if (seen.contains(entry.key)) continue;
+      results.add(entry.value);
+    }
+    return results;
+  }
+
   Future<CategoryModel> addCategory(int userId, String name) async {
     final db = await _dbHelper.database;
     final key = normalizeCategoryKey(name);
@@ -687,6 +758,25 @@ class AppRepository {
     return rows.map(HistoryModel.fromMap).toList();
   }
 
+  static String resolveHistoryCategoryKey({
+    required String categoryKey,
+    String? className,
+    String? lessonTitle,
+  }) {
+    final trimmedClass = className?.trim();
+    final trimmedLesson = lessonTitle?.trim();
+    if (trimmedClass != null &&
+        trimmedClass.isNotEmpty &&
+        trimmedLesson != null &&
+        trimmedLesson.isNotEmpty) {
+      return HistoryModel.encodeLessonCategoryKey(
+        className: trimmedClass,
+        lessonTitle: trimmedLesson,
+      );
+    }
+    return categoryKey;
+  }
+
   Future<void> addHistory({
     required int userId,
     required String text,
@@ -702,12 +792,11 @@ class AppRepository {
         trimmedClass.isNotEmpty &&
         trimmedLesson != null &&
         trimmedLesson.isNotEmpty;
-    final effectiveCategoryKey = hasLessonContext
-        ? HistoryModel.encodeLessonCategoryKey(
-            className: trimmedClass,
-            lessonTitle: trimmedLesson,
-          )
-        : categoryKey;
+    final effectiveCategoryKey = resolveHistoryCategoryKey(
+      categoryKey: categoryKey,
+      className: className,
+      lessonTitle: lessonTitle,
+    );
     final row = <String, Object?>{
       'user_id': userId,
       'phrase_text': text.trim(),
@@ -1082,8 +1171,8 @@ class AppRepository {
       SELECT
         (SELECT COUNT(*) FROM lesson_phrases lp WHERE lp.lesson_id = cl.id) AS phrase_count
       FROM class_lessons cl
-      INNER JOIN classes c ON c.id = cl.class_id
-      WHERE c.class_name = ? AND cl.title = ?
+      INNER JOIN teacher_classes tc ON tc.id = cl.class_id
+      WHERE tc.class_name = ? AND cl.title = ?
       LIMIT 1
     ''', [className, lessonTitle]);
     if (rows.isEmpty) return null;
