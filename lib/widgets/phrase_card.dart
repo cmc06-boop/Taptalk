@@ -17,12 +17,14 @@ class PhraseCard extends StatelessWidget {
     required this.onDelete,
     required this.onFavorite,
     required this.isFavorite,
+    this.displayText,
     this.showFavorite = true,
     this.showDelete = true,
     this.dense = false,
   });
 
   final PhraseModel phrase;
+  final String? displayText;
   final VoidCallback onTap;
   final VoidCallback onSpeak;
   final VoidCallback onDelete;
@@ -43,7 +45,7 @@ class PhraseCard extends StatelessWidget {
     final actionIcon = dense ? 14.0 : 15.0;
     final labelSize = dense ? 9.0 : 10.0;
     final titleSize = dense ? 9.5 : 11.0;
-    final phraseText = app.localizedPhraseText(phrase);
+    final phraseText = displayText ?? app.localizedPhraseText(phrase);
 
     return Material(
       color: theme.bgMid,

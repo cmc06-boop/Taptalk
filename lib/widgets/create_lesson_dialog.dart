@@ -7,14 +7,32 @@ import '../core/l10n/app_strings.dart';
 import '../providers/app_state.dart';
 
 class CreateLessonDialog extends StatefulWidget {
-  const CreateLessonDialog({super.key, required this.classId});
+  const CreateLessonDialog({
+    super.key,
+    required this.classId,
+    this.lessonId,
+    this.initialTitle,
+  });
 
   final int classId;
+  final int? lessonId;
+  final String? initialTitle;
 
-  static Future<bool?> show(BuildContext context, {required int classId}) {
+  bool get isEditing => lessonId != null;
+
+  static Future<bool?> show(
+    BuildContext context, {
+    required int classId,
+    int? lessonId,
+    String? initialTitle,
+  }) {
     return showDialog<bool>(
       context: context,
-      builder: (_) => CreateLessonDialog(classId: classId),
+      builder: (_) => CreateLessonDialog(
+        classId: classId,
+        lessonId: lessonId,
+        initialTitle: initialTitle,
+      ),
     );
   }
 
@@ -23,9 +41,15 @@ class CreateLessonDialog extends StatefulWidget {
 }
 
 class _CreateLessonDialogState extends State<CreateLessonDialog> {
-  final _controller = TextEditingController();
+  late final TextEditingController _controller;
   bool _busy = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialTitle ?? '');
+  }
 
   @override
   void dispose() {
@@ -45,14 +69,26 @@ class _CreateLessonDialogState extends State<CreateLessonDialog> {
       _busy = true;
       _error = null;
     });
-    final lesson = await app.createClassLesson(widget.classId, title);
-    if (!mounted) return;
-    if (lesson == null) {
-      setState(() {
-        _busy = false;
-        _error = AppStrings.enterLessonTitle(lang);
-      });
-      return;
+    if (widget.isEditing) {
+      final updated = await app.updateClassLesson(widget.lessonId!, title);
+      if (!mounted) return;
+      if (!updated) {
+        setState(() {
+          _busy = false;
+          _error = AppStrings.enterLessonTitle(lang);
+        });
+        return;
+      }
+    } else {
+      final lesson = await app.createClassLesson(widget.classId, title);
+      if (!mounted) return;
+      if (lesson == null) {
+        setState(() {
+          _busy = false;
+          _error = AppStrings.enterLessonTitle(lang);
+        });
+        return;
+      }
     }
     Navigator.of(context).pop(true);
   }
@@ -66,7 +102,9 @@ class _CreateLessonDialogState extends State<CreateLessonDialog> {
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       title: Text(
-        AppStrings.createLesson(lang),
+        widget.isEditing
+            ? AppStrings.editLesson(lang)
+            : AppStrings.createLesson(lang),
         style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
       ),
       content: TextField(
@@ -100,7 +138,9 @@ class _CreateLessonDialogState extends State<CreateLessonDialog> {
                   ),
                 )
               : Text(
-                  AppStrings.create(lang),
+                  widget.isEditing
+                      ? AppStrings.saveChanges(lang)
+                      : AppStrings.create(lang),
                   style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
                 ),
         ),

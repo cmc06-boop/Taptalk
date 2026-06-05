@@ -104,9 +104,11 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
     final theme = app.theme;
     final lang = app.language;
     final denseGrid = AppSpacing.phraseGridIsDense(context);
+    final displayLessonTitle = app.localizedContent(widget.lessonTitle);
+    final displayClassName = app.localizedContent(widget.className);
 
     return LearnerScaffold(
-      title: widget.lessonTitle,
+      title: displayLessonTitle,
       currentRoute: AppRoute.teacherMyClasses,
       showBackButton: true,
       showBottomNav: false,
@@ -124,7 +126,7 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  widget.lessonTitle,
+                  displayLessonTitle,
                   style: GoogleFonts.poppins(
                     fontSize: 20,
                     fontWeight: FontWeight.w800,
@@ -133,7 +135,7 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  widget.className,
+                  displayClassName,
                   style: GoogleFonts.poppins(
                     fontSize: 12,
                     color: theme.textMain.withValues(alpha: 0.65),
@@ -199,14 +201,26 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
                 itemBuilder: (context, i) {
                   final lessonPhrase = _phrases[i];
                   final phrase = _asPhraseModel(lessonPhrase);
-                  final label = app.localizedPhrase(phrase.text, phrase.categoryKey);
+                  final displayText = app.localizedPhraseText(phrase);
                   return PhraseCard(
+                    key: ValueKey('lesson_${phrase.id}_${lang.name}'),
                     phrase: phrase,
+                    displayText: displayText,
                     dense: denseGrid,
                     isFavorite: false,
                     showFavorite: false,
-                    onTap: () => speakWithFeedback(context, label, record: false),
-                    onSpeak: () => speakWithFeedback(context, label, record: false),
+                    onTap: () => speakWithFeedback(
+                      context,
+                      phrase.text,
+                      record: false,
+                      categoryKey: phrase.categoryKey,
+                    ),
+                    onSpeak: () => speakWithFeedback(
+                      context,
+                      phrase.text,
+                      record: false,
+                      categoryKey: phrase.categoryKey,
+                    ),
                     onFavorite: () {},
                     onDelete: () => _deletePhrase(lessonPhrase),
                   );

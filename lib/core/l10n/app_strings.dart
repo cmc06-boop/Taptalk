@@ -363,6 +363,14 @@ abstract final class AppStrings {
           ? '$count parirala'
           : '$count phrases';
 
+  static String editLesson(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'I-edit ang aralin'
+      : 'Edit lesson';
+
+  static String lessonUpdated(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Na-update ang aralin.'
+      : 'Lesson updated.';
+
   static String deleteLesson(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Burahin ang aralin'
       : 'Delete lesson';
@@ -768,6 +776,9 @@ abstract final class AppStrings {
   static String lessonCreatedTitle(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Nagawa ang lesson' : 'Lesson created';
 
+  static String lessonUpdatedTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Na-update ang aralin' : 'Lesson updated';
+
   static String copiedTitle(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Nakopya' : 'Copied';
 
@@ -1024,6 +1035,32 @@ abstract final class AppStrings {
 
   static String vocabularyWords(int count, AppLanguage lang) =>
       lang == AppLanguage.filipino ? '$count salita' : '$count words';
+
+  static String lessonProgress(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Pag-unlad sa aralin'
+      : 'Lesson progress';
+
+  static String lessonProgressSubtitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Mga klase at aralin na binuksan ng bata sa panahong ito.'
+          : 'Classes and lessons your child opened in this period.';
+
+  static String noLessonProgress(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Walang aralin na ginamit sa panahong ito.'
+      : 'No lessons used in this period.';
+
+  static String lessonPhrasesPracticed(
+    int practiced,
+    int total,
+    AppLanguage lang,
+  ) =>
+      lang == AppLanguage.filipino
+          ? '$practiced / $total parirala'
+          : '$practiced / $total phrases';
+
+  static String lastUsedAt(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Huling ginamit'
+      : 'Last used';
 
   static String frequentlyUsed(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Madalas gamitin'

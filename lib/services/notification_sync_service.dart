@@ -134,6 +134,8 @@ class NotificationSyncService {
     required int learnerUserId,
     required String parentFirebaseUid,
     required String learnerFirebaseUid,
+    String? learnerName,
+    String? learnerProfileCode,
   }) async {
     if (!_cloud.isAvailable) return;
     await _cloud.upsertParentChildLink(
@@ -141,6 +143,8 @@ class NotificationSyncService {
       learnerUserId: learnerUserId,
       parentFirebaseUid: parentFirebaseUid,
       learnerFirebaseUid: learnerFirebaseUid,
+      learnerName: learnerName,
+      learnerProfileCode: learnerProfileCode,
     );
   }
 
@@ -255,11 +259,43 @@ class NotificationSyncService {
     return _cloud.getClassEnrollmentsForTeacher(teacherFirebaseUid);
   }
 
+  Future<RemoteTeacherClass?> getTeacherClassByCodeFromCloud(
+    String classCode,
+  ) async {
+    if (!_cloud.isAvailable || classCode.trim().isEmpty) return null;
+    return _cloud.getTeacherClassByCode(classCode);
+  }
+
+  Future<RemoteLearnerProfile?> findLearnerProfileByCodeFromCloud(
+    String profileCode,
+  ) async {
+    if (!_cloud.isAvailable || profileCode.trim().isEmpty) return null;
+    return _cloud.findLearnerByProfileCode(profileCode);
+  }
+
+  Future<List<RemoteParentChildLink>> getParentChildLinksFromCloud(
+    String parentFirebaseUid,
+  ) async {
+    if (!_cloud.isAvailable || parentFirebaseUid.trim().isEmpty) return const [];
+    return _cloud.getParentChildLinksForParent(parentFirebaseUid);
+  }
+
+  Future<void> syncUserProfile(RemoteUserProfile profile) async {
+    if (!_cloud.isAvailable) return;
+    await _cloud.upsertUserProfile(profile);
+  }
+
+  Future<RemoteUserProfile?> getUserProfileFromCloud(String firebaseUid) async {
+    if (!_cloud.isAvailable || firebaseUid.trim().isEmpty) return null;
+    return _cloud.getUserProfile(firebaseUid);
+  }
+
   Future<void> syncLearnerEmergencyContacts({
     required int learnerUserId,
     required String learnerName,
     required String learnerFirebaseUid,
     required List<String> contacts,
+    String? profileCode,
   }) async {
     if (!_cloud.isAvailable) return;
     await _cloud.upsertLearnerEmergencyContacts(
@@ -267,6 +303,7 @@ class NotificationSyncService {
       learnerName: learnerName,
       learnerFirebaseUid: learnerFirebaseUid,
       contacts: contacts,
+      profileCode: profileCode,
     );
   }
 

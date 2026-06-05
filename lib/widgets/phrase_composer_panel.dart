@@ -8,7 +8,9 @@ import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
+import '../core/utils/speak_feedback.dart';
 import '../providers/app_state.dart';
+import 'tts_speed_selector.dart';
 
 /// Home-style phrase text box with image attach and add button.
 class PhraseComposerPanel extends StatefulWidget {
@@ -27,7 +29,19 @@ class PhraseComposerPanel extends StatefulWidget {
 
 class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
   final _controller = TextEditingController();
+  final _undoStack = <String>[];
   String? _imagePath;
+
+  @override
+  void initState() {
+    super.initState();
+    _undoStack.add('');
+    _controller.addListener(() {
+      if (_undoStack.isEmpty || _undoStack.last != _controller.text) {
+        _undoStack.add(_controller.text);
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -57,6 +71,7 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
     final app = context.watch<AppState>();
     final theme = app.theme;
     final lang = app.language;
+    final addLabel = widget.addLabel ?? AppStrings.add(lang);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -75,6 +90,15 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
             Row(
               children: [
                 IconButton(
+                  icon: const Icon(Icons.undo_rounded, size: 22),
+                  onPressed: _undoStack.length <= 1
+                      ? null
+                      : () {
+                          _undoStack.removeLast();
+                          _controller.text = _undoStack.last;
+                        },
+                ),
+                IconButton(
                   icon: const Icon(Icons.copy_rounded, size: 22),
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: _controller.text));
@@ -85,7 +109,6 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
                   onPressed: () {
                     app.stopSpeech();
                     _controller.clear();
-                    setState(() => _imagePath = null);
                   },
                 ),
               ],
@@ -133,6 +156,7 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
                 maxLines: 4,
                 style: GoogleFonts.poppins(
                   fontSize: 14,
+                  fontWeight: FontWeight.w400,
                   color: theme.textMain,
                   height: 1.45,
                 ),
@@ -150,22 +174,37 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  OutlinedButton.icon(
-                    onPressed: _pickImage,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: theme.bgAccent,
-                      backgroundColor: Colors.white.withValues(alpha: 0.92),
-                      side: BorderSide(
-                        color: theme.bgAccent.withValues(alpha: 0.45),
-                      ),
-                    ),
-                    icon: Icon(Icons.image_outlined, size: 16, color: theme.bgAccent),
-                    label: Text(
-                      AppStrings.attachImage(lang),
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: theme.bgAccent,
+                  Flexible(
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: OutlinedButton.icon(
+                        onPressed: _pickImage,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: theme.bgAccent,
+                          backgroundColor: Colors.white.withValues(alpha: 0.92),
+                          side: BorderSide(
+                            color: theme.bgAccent.withValues(alpha: 0.45),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.sm,
+                            vertical: AppSpacing.xs,
+                          ),
+                        ),
+                        icon: Icon(
+                          Icons.image_outlined,
+                          size: 16,
+                          color: theme.bgAccent,
+                        ),
+                        label: Text(
+                          AppStrings.attachImage(lang),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: theme.bgAccent,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -175,10 +214,14 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
                     style: FilledButton.styleFrom(
                       backgroundColor: theme.bgAccent,
                       foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.md,
+                        vertical: AppSpacing.sm,
+                      ),
                     ),
                     icon: const Icon(Icons.add_rounded, size: 18),
                     label: Text(
-                      widget.addLabel ?? AppStrings.add(lang),
+                      addLabel,
                       style: GoogleFonts.poppins(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
@@ -189,6 +232,34 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
               ),
             ],
           ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.sm,
+          children: [
+            FilledButton.icon(
+              onPressed: () => speakWithFeedback(
+                context,
+                _controller.text,
+                record: true,
+              ),
+              style: FilledButton.styleFrom(backgroundColor: theme.bgAccent),
+              icon: const Icon(Icons.play_arrow_rounded),
+              label: Text(AppStrings.play(lang)),
+            ),
+            FilledButton.icon(
+              onPressed: () => app.pauseSpeech(),
+              style: FilledButton.styleFrom(backgroundColor: theme.bgAccent),
+              icon: const Icon(Icons.pause_rounded),
+              label: Text(AppStrings.pause(lang)),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        TtsSpeedSelector(
+          showScaleLabels: true,
+          sectionLabel: AppStrings.speechSpeed(lang),
         ),
       ],
     );

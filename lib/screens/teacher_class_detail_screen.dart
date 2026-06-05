@@ -68,6 +68,25 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
     );
   }
 
+  Future<void> _editLesson(ClassLesson lesson) async {
+    final app = context.read<AppState>();
+    final lang = app.language;
+    final updated = await CreateLessonDialog.show(
+      context,
+      classId: widget.classId,
+      lessonId: lesson.id,
+      initialTitle: app.localizedContent(lesson.title),
+    );
+    if (!mounted || updated != true) return;
+    await _load();
+    if (!mounted) return;
+    await TapTalkResultDialog.showSuccess(
+      context,
+      title: AppStrings.lessonUpdatedTitle(lang),
+      message: AppStrings.lessonUpdated(lang),
+    );
+  }
+
   Future<void> _confirmDeleteLesson(ClassLesson lesson) async {
     final app = context.read<AppState>();
     final lang = app.language;
@@ -78,7 +97,12 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
           AppStrings.deleteLesson(lang),
           style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
         ),
-        content: Text(AppStrings.deleteLessonConfirm(lang, lesson.title)),
+        content: Text(
+          AppStrings.deleteLessonConfirm(
+            lang,
+            app.localizedContent(lesson.title),
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -127,9 +151,10 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
     final app = context.watch<AppState>();
     final theme = app.theme;
     final lang = app.language;
+    final displayClassName = app.localizedContent(widget.className);
 
     return LearnerScaffold(
-      title: widget.className,
+      title: displayClassName,
       currentRoute: AppRoute.teacherMyClasses,
       showBackButton: true,
       showBottomNav: false,
@@ -145,7 +170,7 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
             children: [
               _ClassHeaderBanner(
                 classId: widget.classId,
-                className: widget.className,
+                className: displayClassName,
                 classCode: widget.classCode,
                 onCopyCode: _copyCode,
               ),
@@ -184,9 +209,11 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
                     padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                     child: _LessonCard(
                       lesson: lesson,
+                      displayTitle: app.localizedContent(lesson.title),
                       theme: theme,
                       lang: lang,
                       onTap: () => _openLesson(lesson),
+                      onEdit: () => _editLesson(lesson),
                       onDelete: () => _confirmDeleteLesson(lesson),
                     ),
                   ),
@@ -358,16 +385,20 @@ class _ClassCodeChip extends StatelessWidget {
 class _LessonCard extends StatelessWidget {
   const _LessonCard({
     required this.lesson,
+    required this.displayTitle,
     required this.theme,
     required this.lang,
     required this.onTap,
+    required this.onEdit,
     required this.onDelete,
   });
 
   final ClassLesson lesson;
+  final String displayTitle;
   final TapTalkThemeToken theme;
   final AppLanguage lang;
   final VoidCallback onTap;
+  final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   @override
@@ -411,7 +442,7 @@ class _LessonCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      lesson.title,
+                      displayTitle,
                       style: GoogleFonts.poppins(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
@@ -435,14 +466,47 @@ class _LessonCard extends StatelessWidget {
                   color: theme.textMain.withValues(alpha: 0.5),
                 ),
                 onSelected: (v) {
+                  if (v == 'edit') onEdit();
                   if (v == 'delete') onDelete();
                 },
                 itemBuilder: (ctx) => [
                   PopupMenuItem(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.edit_outlined,
+                          size: 20,
+                          color: theme.textMain.withValues(alpha: 0.75),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Text(
+                          AppStrings.editLesson(lang),
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
                     value: 'delete',
-                    child: Text(
-                      AppStrings.deleteLesson(lang),
-                      style: const TextStyle(color: Color(0xFFC62828)),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.delete_outline_rounded,
+                          color: Color(0xFFC62828),
+                          size: 20,
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Text(
+                          AppStrings.deleteLesson(lang),
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w600,
+                            color: const Color(0xFFC62828),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],

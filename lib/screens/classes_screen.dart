@@ -38,10 +38,11 @@ class ClassesScreen extends StatelessWidget {
     final app = context.read<AppState>();
     final lang = app.language;
 
+    final displayClassName = app.localizedContent(className);
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        content: Text(AppStrings.unenrollConfirm(lang, className)),
+        content: Text(AppStrings.unenrollConfirm(lang, displayClassName)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -155,6 +156,7 @@ class ClassesScreen extends StatelessWidget {
                 for (final enrolled in classes)
                   _EnrolledClassCard(
                     enrolled: enrolled,
+                    displayClassName: app.localizedContent(enrolled.className),
                     theme: theme,
                     lang: lang,
                     onOpen: () => _openClass(context, enrolled),
@@ -186,6 +188,7 @@ class ClassesScreen extends StatelessWidget {
 class _EnrolledClassCard extends StatelessWidget {
   const _EnrolledClassCard({
     required this.enrolled,
+    required this.displayClassName,
     required this.theme,
     required this.lang,
     required this.onOpen,
@@ -193,6 +196,7 @@ class _EnrolledClassCard extends StatelessWidget {
   });
 
   final EnrolledClassModel enrolled;
+  final String displayClassName;
   final TapTalkThemeToken theme;
   final AppLanguage lang;
   final VoidCallback onOpen;
@@ -216,7 +220,7 @@ class _EnrolledClassCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        enrolled.className,
+                        displayClassName,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.poppins(

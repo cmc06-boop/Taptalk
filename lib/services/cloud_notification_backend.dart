@@ -116,6 +116,56 @@ class RemoteTeacherClass {
   final DateTime createdAt;
 }
 
+class RemoteLearnerProfile {
+  const RemoteLearnerProfile({
+    required this.learnerFirebaseUid,
+    required this.learnerName,
+    required this.profileCode,
+    required this.learnerUserId,
+  });
+
+  final String learnerFirebaseUid;
+  final String learnerName;
+  final String profileCode;
+  final int learnerUserId;
+}
+
+class RemoteParentChildLink {
+  const RemoteParentChildLink({
+    required this.parentFirebaseUid,
+    required this.learnerFirebaseUid,
+    required this.parentUserId,
+    required this.learnerUserId,
+    required this.learnerName,
+    required this.learnerProfileCode,
+  });
+
+  final String parentFirebaseUid;
+  final String learnerFirebaseUid;
+  final int parentUserId;
+  final int learnerUserId;
+  final String learnerName;
+  final String learnerProfileCode;
+}
+
+class RemoteUserProfile {
+  const RemoteUserProfile({
+    required this.firebaseUid,
+    required this.email,
+    required this.fullName,
+    required this.role,
+    this.themeKey,
+    this.profileCode,
+  });
+
+  final String firebaseUid;
+  final String email;
+  final String fullName;
+  final String role;
+  final String? themeKey;
+  final String? profileCode;
+}
+
 class TeacherClassCloudEvent {
   const TeacherClassCloudEvent({
     required this.classCode,
@@ -182,6 +232,8 @@ abstract class CloudNotificationBackend {
     required int learnerUserId,
     required String parentFirebaseUid,
     required String learnerFirebaseUid,
+    String? learnerName,
+    String? learnerProfileCode,
   });
 
   Future<void> removeParentChildLink({
@@ -210,11 +262,24 @@ abstract class CloudNotificationBackend {
     String teacherFirebaseUid,
   );
 
+  Future<RemoteTeacherClass?> getTeacherClassByCode(String classCode);
+
+  Future<RemoteLearnerProfile?> findLearnerByProfileCode(String profileCode);
+
+  Future<List<RemoteParentChildLink>> getParentChildLinksForParent(
+    String parentFirebaseUid,
+  );
+
+  Future<void> upsertUserProfile(RemoteUserProfile profile);
+
+  Future<RemoteUserProfile?> getUserProfile(String firebaseUid);
+
   Future<void> upsertLearnerEmergencyContacts({
     required int learnerUserId,
     required String learnerName,
     required String learnerFirebaseUid,
     required List<String> contacts,
+    String? profileCode,
   });
 
   Future<List<String>> getLearnerEmergencyContacts(String learnerFirebaseUid);
@@ -249,6 +314,8 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
     required int learnerUserId,
     required String parentFirebaseUid,
     required String learnerFirebaseUid,
+    String? learnerName,
+    String? learnerProfileCode,
   }) async {}
 
   @override
@@ -291,11 +358,34 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
       const [];
 
   @override
+  Future<RemoteTeacherClass?> getTeacherClassByCode(String classCode) async =>
+      null;
+
+  @override
+  Future<RemoteLearnerProfile?> findLearnerByProfileCode(
+    String profileCode,
+  ) async =>
+      null;
+
+  @override
+  Future<List<RemoteParentChildLink>> getParentChildLinksForParent(
+    String parentFirebaseUid,
+  ) async =>
+      const [];
+
+  @override
+  Future<void> upsertUserProfile(RemoteUserProfile profile) async {}
+
+  @override
+  Future<RemoteUserProfile?> getUserProfile(String firebaseUid) async => null;
+
+  @override
   Future<void> upsertLearnerEmergencyContacts({
     required int learnerUserId,
     required String learnerName,
     required String learnerFirebaseUid,
     required List<String> contacts,
+    String? profileCode,
   }) async {}
 
   @override
