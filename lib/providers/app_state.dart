@@ -940,6 +940,31 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<bool> updatePhrase(
+    PhraseModel phrase, {
+    required String text,
+    String? imagePath,
+    required bool clearImage,
+  }) async {
+    if (_user == null) return false;
+    if (phrase.isBuiltin) return false;
+
+    final savedImage = clearImage
+        ? null
+        : await persistPhraseImageIfNeeded(imagePath ?? phrase.imagePath);
+
+    final ok = await _repo.updatePhrase(
+      userId: _user!.id,
+      phraseId: phrase.id,
+      text: text,
+      imagePath: savedImage,
+    );
+    _phrases = await _repo.getPhrases(_user!.id);
+    _favorites = await _repo.getFavorites(_user!.id);
+    notifyListeners();
+    return ok;
+  }
+
   bool isFavorite(PhraseModel phrase) {
     final key = '${phrase.text.trim().toLowerCase()}__${phrase.categoryKey}';
     return _favorites.any((f) => f.dedupeKey == key);
@@ -1429,6 +1454,17 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  Future<bool> updateTeacherClassName(int classId, String className) async {
+    if (_user == null || !_user!.isTeacher) return false;
+    final ok = await _repo.updateTeacherClassName(
+      teacherUserId: _user!.id,
+      classId: classId,
+      className: className,
+    );
+    await refreshTeacherClasses();
+    return ok;
+  }
+
   Future<int> studentCountForClass(int classId) async {
     return _repo.countStudentsInClass(classId);
   }
@@ -1512,6 +1548,22 @@ class AppState extends ChangeNotifier {
     await _repo.deleteLessonPhrase(
       teacherUserId: _user!.id,
       phraseId: phraseId,
+    );
+  }
+
+  Future<bool> updateLessonPhrase(
+    int phraseId, {
+    required String text,
+    String? imagePath,
+    required bool clearImage,
+  }) async {
+    if (_user == null || !_user!.isTeacher) return false;
+    final savedImage = clearImage ? null : await persistPhraseImageIfNeeded(imagePath);
+    return _repo.updateLessonPhrase(
+      teacherUserId: _user!.id,
+      phraseId: phraseId,
+      text: text,
+      imagePath: savedImage,
     );
   }
 

@@ -12,6 +12,7 @@ import '../core/l10n/app_strings.dart';
 import '../core/utils/speak_feedback.dart';
 import '../providers/app_state.dart';
 import '../widgets/add_category_dialog.dart';
+import '../widgets/edit_phrase_dialog.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/panel_card.dart';
 import '../widgets/phrase_card.dart';
@@ -479,6 +480,22 @@ class _HomeScreenState extends State<HomeScreen> {
                   onSpeak: () =>
                       _appendPhrase(app.localizedPhraseText(phrase), speak: true),
                   onFavorite: () => app.toggleFavorite(phrase),
+                  onEdit: () async {
+                    if (phrase.isBuiltin) return;
+                    final result = await EditPhraseDialog.show(
+                      context,
+                      initialText: app.localizedPhraseText(phrase),
+                      initialImagePath: phrase.imagePath,
+                      title: AppStrings.editPhrase(lang),
+                    );
+                    if (result == null || !mounted) return;
+                    await app.updatePhrase(
+                      phrase,
+                      text: result.text,
+                      imagePath: result.imagePath,
+                      clearImage: result.clearImage,
+                    );
+                  },
                   onDelete: () async {
                     final confirm = await showDialog<bool>(
                       context: context,

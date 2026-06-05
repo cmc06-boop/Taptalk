@@ -10,6 +10,7 @@ import '../data/models/class_lesson.dart';
 import '../providers/app_state.dart';
 import '../widgets/class_color_card.dart';
 import '../widgets/create_lesson_dialog.dart';
+import '../widgets/edit_class_dialog.dart';
 import '../widgets/taptalk_result_dialog.dart';
 import '../widgets/learner_scaffold.dart';
 import 'lesson_editor_screen.dart';
@@ -34,10 +35,12 @@ class TeacherClassDetailScreen extends StatefulWidget {
 class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
   List<ClassLesson> _lessons = [];
   bool _loading = true;
+  late String _className;
 
   @override
   void initState() {
     super.initState();
+    _className = widget.className;
     _load();
   }
 
@@ -129,10 +132,33 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
         builder: (_) => LessonEditorScreen(
           lessonId: lesson.id,
           lessonTitle: lesson.title,
-          className: widget.className,
+          className: _className,
         ),
       ),
     ).then((_) => _load());
+  }
+
+  Future<void> _editClassName() async {
+    final app = context.read<AppState>();
+    final lang = app.language;
+    final updated = await EditClassDialog.show(
+      context,
+      classId: widget.classId,
+      initialName: app.localizedContent(_className),
+    );
+    if (!mounted || updated != true) return;
+    setState(() {
+      final refreshed = app.teacherClasses
+          .where((c) => c.id == widget.classId)
+          .map((c) => c.name)
+          .toList();
+      if (refreshed.isNotEmpty) _className = refreshed.first;
+    });
+    await TapTalkResultDialog.showSuccess(
+      context,
+      title: AppStrings.classUpdatedTitle(lang),
+      message: AppStrings.classUpdated(lang),
+    );
   }
 
   Future<void> _copyCode() async {
@@ -151,7 +177,7 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
     final app = context.watch<AppState>();
     final theme = app.theme;
     final lang = app.language;
-    final displayClassName = app.localizedContent(widget.className);
+    final displayClassName = app.localizedContent(_className);
 
     return LearnerScaffold(
       title: displayClassName,
@@ -173,6 +199,7 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
                 className: displayClassName,
                 classCode: widget.classCode,
                 onCopyCode: _copyCode,
+                onEditClassName: _editClassName,
               ),
               const SizedBox(height: AppSpacing.lg),
               Text(
@@ -245,12 +272,14 @@ class _ClassHeaderBanner extends StatelessWidget {
     required this.className,
     required this.classCode,
     required this.onCopyCode,
+    required this.onEditClassName,
   });
 
   final int classId;
   final String className;
   final String classCode;
   final VoidCallback onCopyCode;
+  final VoidCallback onEditClassName;
 
   @override
   Widget build(BuildContext context) {
@@ -300,15 +329,42 @@ class _ClassHeaderBanner extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        className,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white,
-                        ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              className,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.poppins(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          InkWell(
+                            onTap: onEditClassName,
+                            borderRadius: BorderRadius.circular(10),
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.18),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.25),
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.edit_outlined,
+                                size: 16,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 6),
                       _ClassCodeChip(

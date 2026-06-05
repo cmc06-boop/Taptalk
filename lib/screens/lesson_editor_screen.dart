@@ -12,6 +12,7 @@ import '../widgets/learner_scaffold.dart';
 import '../widgets/panel_card.dart';
 import '../widgets/phrase_card.dart';
 import '../widgets/phrase_composer_panel.dart';
+import '../widgets/edit_phrase_dialog.dart';
 
 class LessonEditorScreen extends StatefulWidget {
   const LessonEditorScreen({
@@ -96,6 +97,32 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
     if (confirm != true || !mounted) return;
     await context.read<AppState>().deleteLessonPhrase(phrase.id);
     await _load();
+  }
+
+  Future<void> _editPhrase(LessonPhrase phrase) async {
+    final app = context.read<AppState>();
+    final lang = app.language;
+    final result = await EditPhraseDialog.show(
+      context,
+      initialText: app.localizedPhrase(phrase.text, 'lesson'),
+      initialImagePath: phrase.imagePath,
+      title: AppStrings.editPhrase(lang),
+    );
+    if (result == null || !mounted) return;
+    final ok = await app.updateLessonPhrase(
+      phrase.id,
+      text: result.text,
+      imagePath: result.imagePath,
+      clearImage: result.clearImage,
+    );
+    if (!mounted) return;
+    if (ok) {
+      await _load();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.somethingWentWrong(lang))),
+      );
+    }
   }
 
   @override
@@ -222,6 +249,7 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
                       categoryKey: phrase.categoryKey,
                     ),
                     onFavorite: () {},
+                    onEdit: () => _editPhrase(lessonPhrase),
                     onDelete: () => _deletePhrase(lessonPhrase),
                   );
                 },

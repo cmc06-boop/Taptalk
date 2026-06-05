@@ -7,6 +7,7 @@ import '../core/l10n/app_strings.dart';
 import '../providers/app_state.dart';
 import '../widgets/class_color_card.dart';
 import '../widgets/create_class_dialog.dart';
+import '../widgets/edit_class_dialog.dart';
 import '../widgets/taptalk_result_dialog.dart';
 import '../widgets/learner_scaffold.dart';
 import 'teacher_class_detail_screen.dart';
@@ -91,6 +92,24 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
       context,
       title: AppStrings.classDeletedTitle(lang),
       message: AppStrings.classDeleted(lang),
+    );
+  }
+
+  Future<void> _editClass(({int id, String name, String code}) teacherClass) async {
+    final app = context.read<AppState>();
+    final lang = app.language;
+    final updated = await EditClassDialog.show(
+      context,
+      classId: teacherClass.id,
+      initialName: app.localizedContent(teacherClass.name),
+    );
+    if (!mounted || updated != true) return;
+    await _refreshCounts();
+    if (!mounted) return;
+    await TapTalkResultDialog.showSuccess(
+      context,
+      title: AppStrings.classUpdatedTitle(lang),
+      message: AppStrings.classUpdated(lang),
     );
   }
 
@@ -199,9 +218,25 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
                           color: Colors.white.withValues(alpha: 0.92),
                         ),
                         onSelected: (value) {
+                          if (value == 'edit') _editClass(teacherClass);
                           if (value == 'delete') _confirmDelete(teacherClass);
                         },
                         itemBuilder: (ctx) => [
+                          PopupMenuItem(
+                            value: 'edit',
+                            child: Row(
+                              children: [
+                                const Icon(Icons.edit_outlined, size: 20),
+                                const SizedBox(width: AppSpacing.sm),
+                                Text(
+                                  AppStrings.editClass(lang),
+                                  style: GoogleFonts.poppins(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                           PopupMenuItem(
                             value: 'delete',
                             child: Row(

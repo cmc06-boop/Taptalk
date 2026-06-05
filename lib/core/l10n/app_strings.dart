@@ -19,8 +19,14 @@ abstract final class AppStrings {
   static String enterText(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Maglagay ng teksto' : 'Enter text';
 
+  static String editPhrase(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'I-edit ang parirala' : 'Edit phrase';
+
   static String attachImage(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Mag-attach ng larawan' : 'Attach image';
+
+  static String remove(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Alisin' : 'Remove';
 
   static String play(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'I-play' : 'Play';
@@ -243,6 +249,9 @@ abstract final class AppStrings {
   static String myClasses(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Mga Klase Ko' : 'My Classes';
 
+  static String editClass(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'I-edit ang klase' : 'Edit class';
+
   static String dashboard(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Dashboard' : 'Dashboard';
 
@@ -309,6 +318,10 @@ abstract final class AppStrings {
   static String classCreated(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Nalikha ang klase.'
       : 'Class created.';
+
+  static String classUpdated(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Na-update ang klase.'
+      : 'Class updated.';
 
   static String classDeleted(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Nabura ang klase.'
@@ -763,6 +776,9 @@ abstract final class AppStrings {
 
   static String classCreatedTitle(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Nagawa ang class' : 'Class created';
+
+  static String classUpdatedTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Na-update ang class' : 'Class updated';
 
   static String classDeletedTitle(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Natanggal ang class' : 'Class deleted';

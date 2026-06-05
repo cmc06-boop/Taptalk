@@ -38,16 +38,15 @@ abstract final class AppSpacing {
     return phoneMaxWidth;
   }
 
-  /// Phrase grids: 3 columns on phone, scaling up on wider screens.
+  /// Phrase grids: 2 columns on phone, 3 on wider screens.
   static int phraseGridColumns(BuildContext context) {
     final w = MediaQuery.sizeOf(context).width;
-    if (w >= 1100) return 5;
-    if (w >= 600) return 4;
-    return 3;
+    if (w >= 600) return 3;
+    return 2;
   }
 
   static bool phraseGridIsDense(BuildContext context) =>
-      phraseGridColumns(context) >= 4;
+      phraseGridColumns(context) >= 3;
 
   static double phraseGridChildAspectRatio(BuildContext context) {
     final w = MediaQuery.sizeOf(context).width;
@@ -55,7 +54,7 @@ abstract final class AppSpacing {
     final scaleBoost = textScale > 1.05 ? (textScale - 1) * 0.12 : 0.0;
     if (w >= 1100) return 0.84 - scaleBoost;
     if (w >= 600) return 0.78 - scaleBoost;
-    return 0.68 - scaleBoost;
+    return 0.78 - scaleBoost;
   }
 
   static SliverGridDelegateWithFixedCrossAxisCount phraseGridDelegate(

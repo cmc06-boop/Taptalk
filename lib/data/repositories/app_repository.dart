@@ -588,6 +588,39 @@ class AppRepository {
     );
   }
 
+  Future<bool> updatePhrase({
+    required int userId,
+    required int phraseId,
+    required String text,
+    String? imagePath,
+  }) async {
+    final trimmed = ContentLocalization.canonicalPhrase(text.trim());
+    if (trimmed.isEmpty) return false;
+    final db = await _dbHelper.database;
+    final updated = await db.update(
+      'phrases',
+      {
+        'phrase_text': trimmed,
+        'image_path': imagePath,
+      },
+      where: 'id = ? AND user_id = ? AND is_builtin = 0',
+      whereArgs: [phraseId, userId],
+    );
+    if (updated <= 0) return false;
+
+    // Keep favorites (if any) consistent for this phrase.
+    await db.update(
+      'favorites',
+      {
+        'phrase_text': trimmed,
+        'image_path': imagePath,
+      },
+      where: 'user_id = ? AND phrase_id = ?',
+      whereArgs: [userId, phraseId],
+    );
+    return true;
+  }
+
   Future<List<FavoriteModel>> getFavorites(int userId) async {
     final db = await _dbHelper.database;
     final rows = await db.query(
@@ -1090,6 +1123,23 @@ class AppRepository {
       whereArgs: [classId],
     );
     return true;
+  }
+
+  Future<bool> updateTeacherClassName({
+    required int teacherUserId,
+    required int classId,
+    required String className,
+  }) async {
+    final trimmed = className.trim();
+    if (trimmed.isEmpty) return false;
+    final db = await _dbHelper.database;
+    final updated = await db.update(
+      'teacher_classes',
+      {'class_name': trimmed},
+      where: 'id = ? AND teacher_user_id = ?',
+      whereArgs: [classId, teacherUserId],
+    );
+    return updated > 0;
   }
 
   Future<int> countStudentsInClass(int classId) async {
@@ -1983,6 +2033,39 @@ class AppRepository {
     if (rows.isEmpty) return false;
     await db.delete('lesson_phrases', where: 'id = ?', whereArgs: [phraseId]);
     return true;
+  }
+
+  Future<bool> updateLessonPhrase({
+    required int teacherUserId,
+    required int phraseId,
+    required String text,
+    String? imagePath,
+  }) async {
+    final trimmed = ContentLocalization.canonicalPhrase(text.trim());
+    if (trimmed.isEmpty) return false;
+    final db = await _dbHelper.database;
+
+    // Verify ownership (phrase belongs to a lesson in teacher's class).
+    final rows = await db.rawQuery('''
+      SELECT lp.id
+      FROM lesson_phrases lp
+      INNER JOIN class_lessons cl ON cl.id = lp.lesson_id
+      INNER JOIN teacher_classes tc ON tc.id = cl.class_id
+      WHERE lp.id = ? AND tc.teacher_user_id = ?
+      LIMIT 1
+    ''', [phraseId, teacherUserId]);
+    if (rows.isEmpty) return false;
+
+    final updated = await db.update(
+      'lesson_phrases',
+      {
+        'phrase_text': trimmed,
+        'image_path': imagePath,
+      },
+      where: 'id = ?',
+      whereArgs: [phraseId],
+    );
+    return updated > 0;
   }
 
   List<(ParentAlertType, String, String, Duration, bool)> _filipinoNotificationSamples(
