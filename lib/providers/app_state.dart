@@ -1294,6 +1294,15 @@ class AppState extends ChangeNotifier {
         teacherUserId: _user!.id,
         enrollments: enrollments,
       );
+
+      // Merge cloud lessons into local, then re-push so all devices stay in sync.
+      for (final teacherClass in localClasses) {
+        await _syncClassLessonsFromCloud(
+          classId: teacherClass.id,
+          classCode: teacherClass.code,
+        );
+        await _pushClassContentToCloud(teacherClass.id);
+      }
     } catch (e, st) {
       debugPrint('Teacher class cloud sync failed: $e\n$st');
     }
@@ -1487,7 +1496,7 @@ class AppState extends ChangeNotifier {
 
   Future<List<ClassLesson>> getClassLessons(int classId) async {
     if (_user == null || !_user!.isTeacher) return [];
-    unawaited(_pushClassContentToCloud(classId));
+    await _pushClassContentToCloud(classId);
     return _repo.getClassLessons(
       teacherUserId: _user!.id,
       classId: classId,
@@ -1537,7 +1546,7 @@ class AppState extends ChangeNotifier {
       title: ContentLocalization.canonicalPhrase(title.trim()),
     );
     if (lesson != null) {
-      unawaited(_pushClassContentToCloud(classId));
+      await _pushClassContentToCloud(classId);
     }
     return lesson;
   }
@@ -1551,7 +1560,7 @@ class AppState extends ChangeNotifier {
       title: ContentLocalization.canonicalPhrase(title.trim()),
     );
     if (updated && classId != null) {
-      unawaited(_pushClassContentToCloud(classId));
+      await _pushClassContentToCloud(classId);
     }
     return updated;
   }
@@ -1564,7 +1573,7 @@ class AppState extends ChangeNotifier {
       lessonId: lessonId,
     );
     if (deleted && classId != null) {
-      unawaited(_pushClassContentToCloud(classId));
+      await _pushClassContentToCloud(classId);
     }
     return deleted;
   }
@@ -1592,7 +1601,7 @@ class AppState extends ChangeNotifier {
       imagePath: saved,
     );
     if (phrase != null && classId != null) {
-      unawaited(_pushClassContentToCloud(classId));
+      await _pushClassContentToCloud(classId);
     }
     return phrase == null ? AppStrings.unableAddPhrase(_language) : null;
   }
@@ -1605,7 +1614,7 @@ class AppState extends ChangeNotifier {
       phraseId: phraseId,
     );
     if (classId != null) {
-      unawaited(_pushClassContentToCloud(classId));
+      await _pushClassContentToCloud(classId);
     }
   }
 
@@ -1626,7 +1635,7 @@ class AppState extends ChangeNotifier {
       imagePath: savedImage,
     );
     if (updated && classId != null) {
-      unawaited(_pushClassContentToCloud(classId));
+      await _pushClassContentToCloud(classId);
     }
     return updated;
   }
@@ -1658,6 +1667,13 @@ class AppState extends ChangeNotifier {
         teacherFirebaseUid: teacherFirebaseUid,
       );
       if (content == null) return;
+      // Never overwrite cloud lessons with an empty local copy.
+      if (content.lessons.isEmpty) {
+        final existing = await _notificationSync
+            .getClassContentFromCloud(classCode)
+            .timeout(const Duration(seconds: 8));
+        if (existing != null && existing.lessons.isNotEmpty) return;
+      }
       await _notificationSync.syncClassContent(content);
     } catch (e, st) {
       debugPrint('Push class content to cloud failed: $e\n$st');
@@ -1669,15 +1685,33 @@ class AppState extends ChangeNotifier {
     required String classCode,
   }) async {
     if (!_notificationSync.isCloudAvailable) return;
+    final normalized = AppRepository.normalizeClassCode(classCode);
+    if (!AppRepository.isValidClassCodeFormat(normalized)) return;
     try {
       final remote = await _notificationSync
-          .getClassContentFromCloud(classCode)
+          .getClassContentFromCloud(normalized)
           .timeout(const Duration(seconds: 12));
-      if (remote == null || remote.lessons.isEmpty) return;
+      if (remote == null) {
+        debugPrint('No cloud content for class $normalized');
+        return;
+      }
+      if (remote.lessons.isEmpty) {
+        debugPrint('Cloud class $normalized has no lessons yet');
+        return;
+      }
       await _repo.mergeRemoteClassContent(classId: classId, content: remote);
     } catch (e, st) {
       debugPrint('Sync class lessons from cloud failed: $e\n$st');
     }
+  }
+
+  /// Pull latest lessons/phrases from cloud for an enrolled class (learner).
+  Future<void> refreshEnrolledClassLessons(int classId) async {
+    if (_user == null || !_user!.isLearner) return;
+    final classRow = await _repo.findClassById(classId);
+    final classCode = (classRow?['class_code'] as String?) ?? '';
+    if (classCode.isEmpty) return;
+    await _syncClassLessonsFromCloud(classId: classId, classCode: classCode);
   }
 
   /// Returns the roster for a class, merging cloud enrollments into local SQLite
@@ -1899,6 +1933,7 @@ class AppState extends ChangeNotifier {
         if (!await _repo.isLearnerEnrolled(_user!.id, classId)) {
           await _repo.enrollLearnerInClass(_user!.id, classId);
         }
+        await _syncClassLessonsFromCloud(classId: classId, classCode: code);
       }
     } catch (e, st) {
       debugPrint('Sync enrolled classes from cloud failed: $e\n$st');
@@ -1938,6 +1973,7 @@ class AppState extends ChangeNotifier {
       return AppStrings.invalidClassCode(_language);
     }
     var classRow = await _repo.findClassByCode(normalized);
+    String? teacherFirebaseUidFromRemote;
     if (classRow == null) {
       if (!_notificationSync.isCloudAvailable) {
         return AppStrings.classNotFound(_language);
@@ -1947,6 +1983,7 @@ class AppState extends ChangeNotifier {
             .getTeacherClassByCodeFromCloud(normalized)
             .timeout(const Duration(seconds: 12));
         if (remote != null) {
+          teacherFirebaseUidFromRemote = remote.teacherFirebaseUid;
           classRow = await _repo.importRemoteTeacherClassForEnrollment(remote);
         }
       } catch (e, st) {
@@ -1957,16 +1994,24 @@ class AppState extends ChangeNotifier {
       }
     }
     final classId = classRow['id'] as int;
-    if (await _repo.isLearnerEnrolled(_user!.id, classId)) {
+    final alreadyEnrolled =
+        await _repo.isLearnerEnrolled(_user!.id, classId);
+    if (!alreadyEnrolled) {
+      await _repo.enrollLearnerInClass(_user!.id, classId);
+    }
+    // Always pull lessons from cloud (even if already enrolled).
+    await _syncClassLessonsFromCloud(classId: classId, classCode: normalized);
+    if (alreadyEnrolled) {
+      await _loadEnrolledClasses();
       return AppStrings.classAlreadyEnrolled(_language);
     }
-    await _repo.enrollLearnerInClass(_user!.id, classId);
     final learnerFirebaseUid =
         _user!.firebaseUid ?? FirebaseService.instance.currentUid;
     final teacherUserId = classRow['teacher_user_id'] as int?;
-    final teacherFirebaseUid = teacherUserId == null
-        ? null
-        : await _repo.getFirebaseUidForUser(teacherUserId);
+    final teacherFirebaseUid = teacherFirebaseUidFromRemote ??
+        (teacherUserId == null
+            ? null
+            : await _repo.getFirebaseUidForUser(teacherUserId));
     if (learnerFirebaseUid != null &&
         learnerFirebaseUid.isNotEmpty &&
         teacherFirebaseUid != null &&

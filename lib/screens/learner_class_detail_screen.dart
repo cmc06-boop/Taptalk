@@ -37,9 +37,10 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final lessons = await context
-        .read<AppState>()
-        .getEnrolledClassLessons(widget.enrolledClass.classId);
+    final app = context.read<AppState>();
+    await app.refreshEnrolledClassLessons(widget.enrolledClass.classId);
+    final lessons =
+        await app.getEnrolledClassLessons(widget.enrolledClass.classId);
     if (!mounted) return;
     setState(() {
       _lessons = lessons;
@@ -80,7 +81,9 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
       currentRoute: AppRoute.classes,
       showBackButton: true,
       showBottomNav: false,
-      body: ListView(
+      body: RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
         padding: const EdgeInsets.fromLTRB(
           AppSpacing.lg,
           AppSpacing.sm,
@@ -148,6 +151,7 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
                 ),
               ),
         ],
+        ),
       ),
     );
   }

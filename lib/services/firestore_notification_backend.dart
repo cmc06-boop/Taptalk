@@ -224,6 +224,18 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     }
     final docId = AppRepository.normalizeClassCode(content.classCode);
     final className = content.className.trim();
+    // Ensure class metadata exists before merging lessons (merge never deletes fields).
+    await FirebaseFirestore.instance
+        .collection(teacherClassCollectionName)
+        .doc(docId)
+        .set(
+          {
+            'classCode': docId,
+            'className': className,
+            'teacherFirebaseUid': content.teacherFirebaseUid.trim(),
+          },
+          SetOptions(merge: true),
+        );
     final payload = <String, Object?>{
       'classCode': docId,
       'className': className,
