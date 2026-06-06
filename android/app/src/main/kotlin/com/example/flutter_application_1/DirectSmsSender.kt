@@ -17,6 +17,7 @@ import io.flutter.plugin.common.MethodChannel
 
 object DirectSmsSender {
     private const val SMS_SENT_ACTION = "com.example.flutter_application_1.SMS_SENT"
+    private const val BATCH_DELAY_MS = 1200L
 
     fun send(
         activity: Activity,
@@ -24,32 +25,61 @@ object DirectSmsSender {
         message: String,
         result: MethodChannel.Result,
     ) {
-        if (ContextCompat.checkSelfPermission(activity, Manifest.permission.SEND_SMS)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
+        if (!hasSendPermission(activity)) {
+            result.error("PERMISSION_DENIED", "SEND_SMS permission not granted", null)
+            return
+        }
+        if (sendOne(activity, to, message, to.hashCode())) {
+            result.success(true)
+        } else {
+            result.error("SEND_FAILED", "SMS send failed for $to", null)
+        }
+    }
+
+    fun sendBatch(
+        activity: Activity,
+        recipients: List<String>,
+        message: String,
+        result: MethodChannel.Result,
+    ) {
+        if (!hasSendPermission(activity)) {
             result.error("PERMISSION_DENIED", "SEND_SMS permission not granted", null)
             return
         }
 
-        val candidates = buildAddressCandidates(to)
-        var lastError: Exception? = null
+        val addresses = recipients
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .map { pickSendAddress(it) }
+            .distinct()
 
-        for (address in candidates) {
-            if (trySendFireAndForget(activity, address, message)) {
-                result.success(true)
-                return
-            }
-            if (trySendWithStatusCallback(activity, address, message)) {
-                result.success(true)
-                return
-            }
-            lastError = IllegalStateException("Failed for $address")
+        if (addresses.isEmpty()) {
+            result.error("INVALID_ARGS", "No valid phone numbers", null)
+            return
         }
 
-        result.error(
-            "SEND_FAILED",
-            lastError?.message ?: "SMS send failed for all number formats",
-            null,
+        var sent = 0
+        val failedNumbers = mutableListOf<String>()
+
+        for ((index, address) in addresses.withIndex()) {
+            if (index > 0) {
+                Thread.sleep(BATCH_DELAY_MS)
+            }
+            val requestCode = index + 1
+            if (sendOne(activity, address, message, requestCode)) {
+                sent++
+            } else {
+                failedNumbers.add(address)
+            }
+        }
+
+        result.success(
+            mapOf(
+                "sent" to sent,
+                "failed" to failedNumbers.size,
+                "failedNumbers" to failedNumbers,
+                "attempted" to addresses.size,
+            ),
         )
     }
 
@@ -60,9 +90,18 @@ object DirectSmsSender {
         result: MethodChannel.Result,
     ) {
         try {
-            val address = buildAddressCandidates(to).first()
+            val addresses = to.split(';', ',')
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .map { pickSendAddress(it) }
+                .distinct()
+            if (addresses.isEmpty()) {
+                result.error("OPEN_FAILED", "No valid phone numbers", null)
+                return
+            }
+            val uri = Uri.parse("smsto:${addresses.joinToString(";")}")
             val intent = Intent(Intent.ACTION_SENDTO).apply {
-                data = Uri.parse("smsto:$address")
+                data = uri
                 putExtra("sms_body", message)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
@@ -71,6 +110,33 @@ object DirectSmsSender {
         } catch (error: Exception) {
             result.error("OPEN_FAILED", error.message, null)
         }
+    }
+
+    private fun hasSendPermission(activity: Activity): Boolean {
+        return ContextCompat.checkSelfPermission(activity, Manifest.permission.SEND_SMS) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun pickSendAddress(raw: String): String {
+        return buildAddressCandidates(raw).firstOrNull() ?: raw.trim()
+    }
+
+    private fun sendOne(
+        activity: Activity,
+        to: String,
+        message: String,
+        requestCode: Int,
+    ): Boolean {
+        val candidates = buildAddressCandidates(to)
+        for (address in candidates) {
+            if (trySendFireAndForget(activity, address, message)) {
+                return true
+            }
+            if (trySendWithStatusCallback(activity, address, message, requestCode)) {
+                return true
+            }
+        }
+        return false
     }
 
     private fun trySendFireAndForget(
@@ -96,13 +162,15 @@ object DirectSmsSender {
         activity: Activity,
         to: String,
         message: String,
+        requestCode: Int,
     ): Boolean {
         val smsManager = resolveSmsManager(activity)
         val parts = smsManager.divideMessage(message)
-        val sentIntent = Intent(SMS_SENT_ACTION).setPackage(activity.packageName)
+        val action = "$SMS_SENT_ACTION.$requestCode"
+        val sentIntent = Intent(action).setPackage(activity.packageName)
         val sentPendingIntent = PendingIntent.getBroadcast(
             activity,
-            to.hashCode(),
+            requestCode,
             sentIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -122,7 +190,7 @@ object DirectSmsSender {
             }
         }
 
-        val filter = IntentFilter(SMS_SENT_ACTION)
+        val filter = IntentFilter(action)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             activity.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
@@ -143,7 +211,6 @@ object DirectSmsSender {
                 smsManager.sendTextMessage(to, null, message, sentPendingIntent, null)
             }
 
-            // Wait briefly for the modem callback; many OEMs respond quickly.
             val deadline = System.currentTimeMillis() + 8000
             while (!completed[0] && System.currentTimeMillis() < deadline) {
                 Thread.sleep(50)
@@ -153,7 +220,6 @@ object DirectSmsSender {
                     activity.unregisterReceiver(receiver)
                 } catch (_: IllegalArgumentException) {
                 }
-                // No callback — assume queued successfully (common on Transsion/OEM).
                 true
             } else {
                 success[0]

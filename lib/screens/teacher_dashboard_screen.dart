@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -5,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
+import '../core/utils/class_name_utils.dart';
 import '../data/models/teacher_recent_alert.dart';
 import '../data/models/teacher_recent_lesson.dart';
 import '../providers/app_state.dart';
@@ -20,10 +23,13 @@ class TeacherDashboardScreen extends StatefulWidget {
 }
 
 class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
-  int _studentCount = 0;
   List<TeacherRecentAlert> _recentAlerts = [];
   List<TeacherRecentLesson> _recentLessons = [];
+  List<String> _subjects = [];
+  Map<String, int> _subjectStudentCounts = {};
+  String? _selectedSubject;
   bool _loading = true;
+  int _lastAlertsRevision = 0;
 
   @override
   void initState() {
@@ -31,18 +37,46 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
     _load();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final revision = context.read<AppState>().teacherAlertsRevision;
+    if (revision != _lastAlertsRevision) {
+      _lastAlertsRevision = revision;
+      if (revision > 0) {
+        unawaited(_load());
+      }
+    }
+  }
+
   Future<void> _load() async {
     final app = context.read<AppState>();
     try {
-      await app.refreshTeacherClasses();
-      final studentCount = await app.getTeacherStudentCount();
+      await app.refreshTeacherClasses(cloudSyncInBackground: true);
       final alerts = await app.getTeacherRecentAlerts();
       final lessons = await app.getTeacherRecentLessons();
+      final subjects = <String>{};
+      final classIdsBySubject = <String, List<int>>{};
+      for (final teacherClass in app.teacherClasses) {
+        final subject = ClassNameUtils.subjectFrom(teacherClass.name);
+        subjects.add(subject);
+        classIdsBySubject.putIfAbsent(subject, () => []).add(teacherClass.id);
+      }
+      final subjectStudentCounts = <String, int>{};
+      for (final entry in classIdsBySubject.entries) {
+        subjectStudentCounts[entry.key] =
+            await app.countStudentsInClasses(entry.value);
+      }
       if (!mounted) return;
+      final sortedSubjects = subjects.toList()..sort();
       setState(() {
-        _studentCount = studentCount;
         _recentAlerts = alerts;
         _recentLessons = lessons;
+        _subjects = sortedSubjects;
+        _subjectStudentCounts = subjectStudentCounts;
+        if (_selectedSubject != null && !sortedSubjects.contains(_selectedSubject)) {
+          _selectedSubject = null;
+        }
         _loading = false;
       });
     } catch (_) {
@@ -51,12 +85,27 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
     }
   }
 
+  int _classCountForFilter(AppState app) {
+    if (_selectedSubject == null) return app.teacherClasses.length;
+    return app.teacherClasses
+        .where(
+          (c) => ClassNameUtils.subjectFrom(c.name) == _selectedSubject,
+        )
+        .length;
+  }
+
+  int _studentCountForFilter(AppState app) {
+    if (_selectedSubject == null) return app.teacherStudentCount;
+    return _subjectStudentCounts[_selectedSubject] ?? 0;
+  }
+
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final theme = app.theme;
     final lang = app.language;
-    final classCount = app.teacherClasses.length;
+    final classCount = _classCountForFilter(app);
+    final studentCount = _studentCountForFilter(app);
     final accent = theme.bgAccent;
 
     return LearnerScaffold(
@@ -122,26 +171,34 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                       ),
                     )
                   else
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _ModernStatCard(
-                            theme: theme,
-                            label: AppStrings.totalClasses(lang),
-                            value: '$classCount',
-                            icon: Icons.class_rounded,
+                    IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(
+                            child: _ClassesStatCard(
+                              theme: theme,
+                              label: AppStrings.totalClasses(lang),
+                              value: '$classCount',
+                              subjects: _subjects,
+                              selectedSubject: _selectedSubject,
+                              allSubjectsLabel: AppStrings.allSubjects(lang),
+                              subjectLabel: app.localizedContent,
+                              onSubjectChanged: (value) =>
+                                  setState(() => _selectedSubject = value),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        Expanded(
-                          child: _ModernStatCard(
-                            theme: theme,
-                            label: AppStrings.totalStudents(lang),
-                            value: '$_studentCount',
-                            icon: Icons.groups_rounded,
+                          const SizedBox(width: AppSpacing.sm),
+                          Expanded(
+                            child: _ModernStatCard(
+                              theme: theme,
+                              label: AppStrings.totalStudents(lang),
+                              value: '$studentCount',
+                              icon: Icons.groups_rounded,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                 ],
               ),
@@ -153,7 +210,10 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
               onAction: () => app.setRoute(AppRoute.teacherAlertHistory),
             ),
             if (_loading)
-              const SizedBox.shrink()
+              const Padding(
+                padding: EdgeInsets.all(AppSpacing.lg),
+                child: Center(child: CircularProgressIndicator()),
+              )
             else if (_recentAlerts.isEmpty)
               _EmptySectionCard(
                 theme: theme,
@@ -172,10 +232,10 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                   child: TeacherAlertCard(
                     theme: theme,
                     alertType: alert.alertType,
-                    studentName: AppStrings.shortChildName(alert.childName),
+                    studentName: alert.childName.trim(),
                     timeLabel: AppStrings.timeAgo(alert.createdAt, lang),
                     description: AppStrings.alertTypeLabel(lang, alert.alertType),
-                    className: alert.className,
+                    className: app.localizedContent(alert.className),
                     onTap: () => app.setRoute(AppRoute.teacherAlertHistory),
                   ),
                 ),
@@ -378,6 +438,114 @@ class _EmptySectionCard extends StatelessWidget {
   }
 }
 
+class _ClassesStatCard extends StatelessWidget {
+  const _ClassesStatCard({
+    required this.theme,
+    required this.label,
+    required this.value,
+    required this.subjects,
+    required this.selectedSubject,
+    required this.allSubjectsLabel,
+    required this.subjectLabel,
+    required this.onSubjectChanged,
+  });
+
+  final TapTalkThemeToken theme;
+  final String label;
+  final String value;
+  final List<String> subjects;
+  final String? selectedSubject;
+  final String allSubjectsLabel;
+  final String Function(String text) subjectLabel;
+  final ValueChanged<String?> onSubjectChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: theme.textMain.withValues(alpha: 0.10),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _StatValueIconRow(
+            theme: theme,
+            value: value,
+            icon: Icons.class_rounded,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            textAlign: TextAlign.left,
+            style: GoogleFonts.poppins(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: theme.textMain.withValues(alpha: 0.58),
+            ),
+          ),
+          if (subjects.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              decoration: BoxDecoration(
+                color: theme.bgMid.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFE9EEF2)),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String?>(
+                  value: selectedSubject,
+                  isExpanded: true,
+                  isDense: true,
+                  icon: Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    size: 18,
+                    color: theme.textMain.withValues(alpha: 0.55),
+                  ),
+                  borderRadius: BorderRadius.circular(10),
+                  style: GoogleFonts.poppins(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: theme.textMain,
+                  ),
+                  items: [
+                    DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text(
+                        allSubjectsLabel,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    for (final subject in subjects)
+                      DropdownMenuItem<String?>(
+                        value: subject,
+                        child: Text(
+                          subjectLabel(subject),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                  onChanged: onSubjectChanged,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _ModernStatCard extends StatelessWidget {
   const _ModernStatCard({
     required this.theme,
@@ -409,27 +577,11 @@ class _ModernStatCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: theme.bgAccent.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: theme.bgAccent, size: 22),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Text(
-            value,
-            style: GoogleFonts.poppins(
-              fontSize: 26,
-              fontWeight: FontWeight.w800,
-              color: theme.textMain,
-              height: 1,
-            ),
-          ),
+          _StatValueIconRow(theme: theme, value: value, icon: icon),
           const SizedBox(height: 4),
           Text(
             label,
+            textAlign: TextAlign.left,
             style: GoogleFonts.poppins(
               fontSize: 12,
               fontWeight: FontWeight.w600,
@@ -438,6 +590,46 @@ class _ModernStatCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _StatValueIconRow extends StatelessWidget {
+  const _StatValueIconRow({
+    required this.theme,
+    required this.value,
+    required this.icon,
+  });
+
+  final TapTalkThemeToken theme;
+  final String value;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: theme.bgAccent.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon, color: theme.bgAccent, size: 22),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Text(
+          value,
+          textAlign: TextAlign.left,
+          style: GoogleFonts.poppins(
+            fontSize: 26,
+            fontWeight: FontWeight.w800,
+            color: theme.textMain,
+            height: 1,
+          ),
+        ),
+      ],
     );
   }
 }

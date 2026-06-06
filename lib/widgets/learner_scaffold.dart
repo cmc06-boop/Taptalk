@@ -71,7 +71,12 @@ class LearnerScaffold extends StatelessWidget {
                     padding: EdgeInsets.only(
                       bottom: effectiveShowBottomNav ? 0 : bottomInset,
                     ),
-                    child: body,
+                    child: KeyedSubtree(
+                      key: ValueKey(
+                        'body_${app.language.name}_${app.languageRevision}',
+                      ),
+                      child: body,
+                    ),
                   ),
                 ),
                 if (effectiveShowBottomNav)

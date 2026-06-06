@@ -20,7 +20,6 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
-  GlobalKey<AnimatedListState> _listKey = GlobalKey<AnimatedListState>();
   List<HistoryModel> _items = [];
 
   @override
@@ -32,47 +31,30 @@ class _HistoryScreenState extends State<HistoryScreen> {
   void _mergeNewHistory(List<HistoryModel> source) {
     if (source.isEmpty) {
       if (_items.isNotEmpty) {
-        setState(() {
-          _items = [];
-          _listKey = GlobalKey<AnimatedListState>();
-        });
+        setState(() => _items = []);
       }
       return;
     }
     final hasNewEntries = source.length > _items.length ||
         (_items.isNotEmpty && source.first.id != _items.first.id);
     if (hasNewEntries) {
-      setState(() {
-        _items = List.from(source);
-        _listKey = GlobalKey<AnimatedListState>();
-      });
+      setState(() => _items = List.from(source));
     }
   }
 
   void _removeItem(HistoryModel item) {
     final index = _items.indexWhere((e) => e.id == item.id);
     if (index < 0) return;
-
-    _items.removeAt(index);
-    _listKey.currentState?.removeItem(
-      index,
-      _buildRemoveTransition,
-      duration: const Duration(milliseconds: 120),
-    );
+    setState(() => _items.removeAt(index));
     context.read<AppState>().deleteHistoryItem(item);
-    setState(() {});
   }
 
-  Widget _buildRemoveTransition(BuildContext context, Animation<double> animation) {
-    final curved = CurvedAnimation(
-      parent: animation,
-      curve: Curves.easeInOutCubic,
-    );
-    return SizeTransition(
-      sizeFactor: curved,
-      alignment: Alignment.topCenter,
-      child: const SizedBox.shrink(),
-    );
+  Future<void> _refresh() async {
+    await context.read<AppState>().refreshLearnerCollections();
+    if (!mounted) return;
+    setState(() {
+      _items = List.from(context.read<AppState>().history);
+    });
   }
 
   Future<void> _clearAll(AppLanguage lang) async {
@@ -93,16 +75,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
       ),
     );
     if (confirm != true || !mounted) return;
-    setState(() {
-      _items = [];
-      _listKey = GlobalKey<AnimatedListState>();
-    });
+    setState(() => _items = []);
     await context.read<AppState>().clearAllHistory();
   }
 
-  String _categoryLabel(AppState app, HistoryModel item, AppLanguage lang) {
+  String _categoryLabel(AppState app, HistoryModel item) {
     if (item.isLessonEntry) {
-      return item.lessonContext!.className;
+      return app.localizedContent(item.lessonContext!.className);
     }
     var categoryLabel = item.categoryKey;
     for (final cat in app.categories) {
@@ -117,16 +96,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
     return categoryLabel;
   }
 
-  Widget _buildCard(HistoryModel item) {
+  Widget _buildCard(HistoryModel item, AppLanguage lang) {
     final app = context.read<AppState>();
     final theme = app.theme;
-    final lang = app.language;
     final fmt = DateFormat('d MMM - h:mm a');
 
     return _HistoryCard(
-      key: ValueKey(item.id),
+      key: ValueKey('history_${item.id}_${lang.name}_${app.languageRevision}'),
       item: item,
-      categoryLabel: _categoryLabel(app, item, lang),
       formattedTime: fmt.format(item.createdAt),
       theme: theme,
       lang: lang,
@@ -137,6 +114,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             record: false,
             categoryKey: item.categoryKey,
           ),
+      categoryLabelFor: _categoryLabel,
     );
   }
 
@@ -151,7 +129,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
     return LearnerScaffold(
       title: AppStrings.appName(lang),
       currentRoute: AppRoute.history,
-      body: ListView(
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        color: theme.bgAccent,
+        child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
         children: [
           Padding(
@@ -230,21 +212,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 ),
               ),
             ),
-            AnimatedList(
-              key: _listKey,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              initialItemCount: _items.length,
-              itemBuilder: (context, index, animation) {
-                if (index >= _items.length) return const SizedBox.shrink();
-                return FadeTransition(
-                  opacity: animation,
-                  child: _buildCard(_items[index]),
-                );
-              },
-            ),
+            for (final item in _items)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  0,
+                  AppSpacing.lg,
+                  AppSpacing.sm,
+                ),
+                child: _buildCard(item, lang),
+              ),
           ],
         ],
+        ),
       ),
     );
   }
@@ -254,21 +234,21 @@ class _HistoryCard extends StatefulWidget {
   const _HistoryCard({
     super.key,
     required this.item,
-    required this.categoryLabel,
     required this.formattedTime,
     required this.theme,
     required this.lang,
     required this.onRemove,
     required this.onSpeak,
+    required this.categoryLabelFor,
   });
 
   final HistoryModel item;
-  final String categoryLabel;
   final String formattedTime;
   final TapTalkThemeToken theme;
   final AppLanguage lang;
   final VoidCallback onRemove;
   final VoidCallback onSpeak;
+  final String Function(AppState app, HistoryModel item) categoryLabelFor;
 
   @override
   State<_HistoryCard> createState() => _HistoryCardState();
@@ -321,6 +301,7 @@ class _HistoryCardState extends State<_HistoryCard>
       widget.item.text,
       widget.item.categoryKey,
     );
+    final categoryLabel = widget.categoryLabelFor(app, widget.item);
     final lessonClassName = widget.item.lessonContext == null
         ? null
         : app.localizedContent(widget.item.lessonContext!.className);
@@ -398,7 +379,7 @@ class _HistoryCardState extends State<_HistoryCard>
                                     borderRadius: BorderRadius.circular(999),
                                   ),
                                   child: Text(
-                                    widget.categoryLabel,
+                                    categoryLabel,
                                     style: GoogleFonts.poppins(
                                       fontSize: 11,
                                       fontWeight: FontWeight.w600,

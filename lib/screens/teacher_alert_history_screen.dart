@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -21,11 +23,24 @@ class TeacherAlertHistoryScreen extends StatefulWidget {
 class _TeacherAlertHistoryScreenState extends State<TeacherAlertHistoryScreen> {
   List<TeacherRecentAlert> _alerts = [];
   bool _loading = true;
+  int _lastAlertsRevision = 0;
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final revision = context.read<AppState>().teacherAlertsRevision;
+    if (revision != _lastAlertsRevision) {
+      _lastAlertsRevision = revision;
+      if (revision > 0) {
+        unawaited(_load());
+      }
+    }
   }
 
   Future<void> _load() async {
@@ -154,8 +169,7 @@ class _TeacherAlertHistoryScreenState extends State<TeacherAlertHistoryScreen> {
                                     child: TeacherAlertCard(
                                       theme: theme,
                                       alertType: alert.alertType,
-                                      studentName:
-                                          AppStrings.shortChildName(alert.childName),
+                                      studentName: alert.childName.trim(),
                                       timeLabel: AppStrings.timeAgo(
                                         alert.createdAt,
                                         lang,
@@ -164,7 +178,7 @@ class _TeacherAlertHistoryScreenState extends State<TeacherAlertHistoryScreen> {
                                         lang,
                                         alert.alertType,
                                       ),
-                                      className: alert.className,
+                                      className: app.localizedContent(alert.className),
                                     ),
                                   ),
                               ],

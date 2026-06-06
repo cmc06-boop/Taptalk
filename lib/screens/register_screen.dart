@@ -8,6 +8,7 @@ import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/utils/auth_validation.dart';
 import '../providers/app_state.dart';
+import '../widgets/offline_notice_banner.dart';
 import '../widgets/password_strength_hint.dart';
 import '../widgets/taptalk_logo.dart';
 import '../widgets/taptalk_shell.dart';
@@ -33,18 +34,49 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool? _emailInUse;
   Timer? _emailCheckDebounce;
   int _emailCheckGeneration = 0;
+  final _passwordFieldKey = GlobalKey<FormFieldState<String>>();
+  final _confirmPasswordFieldKey = GlobalKey<FormFieldState<String>>();
 
   @override
   void initState() {
     super.initState();
-    _password.addListener(() => setState(() {}));
+    _password.addListener(_onPasswordChanged);
+    _confirmPassword.addListener(_onConfirmPasswordChanged);
     _email.addListener(_scheduleEmailAvailabilityCheck);
+  }
+
+  void _onPasswordChanged() {
+    _revalidatePasswordFields();
+    setState(() {});
+  }
+
+  void _onConfirmPasswordChanged() {
+    _revalidatePasswordFields(confirmOnly: true);
+    setState(() {});
+  }
+
+  void _revalidatePasswordFields({bool confirmOnly = false}) {
+    if (!confirmOnly) {
+      final passwordState = _passwordFieldKey.currentState;
+      if (passwordState != null &&
+          (_password.text.isNotEmpty || passwordState.hasError)) {
+        passwordState.validate();
+      }
+    }
+
+    final confirmState = _confirmPasswordFieldKey.currentState;
+    if (confirmState != null &&
+        (_confirmPassword.text.isNotEmpty || confirmState.hasError)) {
+      confirmState.validate();
+    }
   }
 
   @override
   void dispose() {
     _emailCheckDebounce?.cancel();
     _email.removeListener(_scheduleEmailAvailabilityCheck);
+    _password.removeListener(_onPasswordChanged);
+    _confirmPassword.removeListener(_onConfirmPasswordChanged);
     _name.dispose();
     _email.dispose();
     _password.dispose();
@@ -240,6 +272,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 color: const Color(0xFF5BB88A),
                               ),
                             ),
+                            OfflineNoticeText(
+                              lang: lang,
+                              noticeContext: OfflineNoticeContext.signUp,
+                            ),
                             if (_error != null) ...[
                               const SizedBox(height: AppSpacing.md),
                               Text(
@@ -287,6 +323,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             _field(
                               AppStrings.password(lang),
                               _password,
+                              fieldKey: _passwordFieldKey,
+                              liveBorderStrength:
+                                  AuthValidation.evaluatePasswordStrength(
+                                _password.text,
+                              ),
                               obscure: _obscurePassword,
                               textInputAction: TextInputAction.next,
                               onToggleObscure: () => setState(
@@ -310,6 +351,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             _field(
                               AppStrings.confirmPassword(lang),
                               _confirmPassword,
+                              fieldKey: _confirmPasswordFieldKey,
                               obscure: _obscureConfirm,
                               textInputAction: TextInputAction.done,
                               onFieldSubmitted: (_) => _submit(),
@@ -518,6 +560,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Widget _field(
     String label,
     TextEditingController controller, {
+    GlobalKey<FormFieldState<String>>? fieldKey,
+    PasswordStrength? liveBorderStrength,
     bool obscure = false,
     VoidCallback? onToggleObscure,
     TextInputType? keyboard,
@@ -526,6 +570,28 @@ class _RegisterScreenState extends State<RegisterScreen> {
     ValueChanged<String>? onFieldSubmitted,
     String? Function(String?)? validator,
   }) {
+    const defaultBorderColor = Color(0xFFDCECE4);
+    const weakBorderColor = Color(0xFFC62828);
+    const focusBorderColor = Color(0xFF5BB88A);
+
+    final borderColor = switch (liveBorderStrength) {
+      PasswordStrength.weak => weakBorderColor,
+      PasswordStrength.strong => defaultBorderColor,
+      _ => defaultBorderColor,
+    };
+    final focusedBorderColor = liveBorderStrength == PasswordStrength.weak
+        ? weakBorderColor
+        : focusBorderColor.withValues(alpha: 0.65);
+    final focusedBorderWidth =
+        liveBorderStrength == PasswordStrength.weak ? 1.0 : 1.6;
+
+    OutlineInputBorder outlineBorder(Color color, {double width = 1}) {
+      return OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: color, width: width),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -535,6 +601,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         ),
         const SizedBox(height: AppSpacing.xs),
         TextFormField(
+          key: fieldKey,
           controller: controller,
           obscureText: obscure,
           keyboardType: keyboard,
@@ -560,29 +627,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     onPressed: onToggleObscure,
                     constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
                   ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFDCECE4)),
+            border: outlineBorder(defaultBorderColor),
+            enabledBorder: outlineBorder(borderColor),
+            focusedBorder: outlineBorder(
+              focusedBorderColor,
+              width: focusedBorderWidth,
             ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFDCECE4)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide(
-                color: const Color(0xFF5BB88A).withValues(alpha: 0.65),
-                width: 1.6,
-              ),
-            ),
-            errorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFC62828)),
-            ),
-            focusedErrorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFC62828), width: 1.6),
-            ),
+            errorBorder: outlineBorder(weakBorderColor),
+            focusedErrorBorder: outlineBorder(weakBorderColor, width: 1.6),
           ),
         ),
       ],

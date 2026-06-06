@@ -10,6 +10,14 @@ abstract final class ContentLocalization {
     'animals': 'Mga Hayop',
   };
 
+  static const Map<String, String> _categoryEn = {
+    'feelings': 'Feelings',
+    'food': 'Food',
+    'drinks': 'Drinks',
+    'activities': 'Activities',
+    'animals': 'Animals',
+  };
+
   /// Exact phrase pairs (canonical English -> Filipino).
   static const Map<String, String> _phraseFil = {
     'I am happy': 'Masaya ako',
@@ -111,6 +119,16 @@ abstract final class ContentLocalization {
   };
 
   static Map<String, String>? _filToEnWords;
+  static List<String>? _knownPhrasesCache;
+
+  static List<String> get _knownPhrasesLongestFirst {
+    _knownPhrasesCache ??= {
+      ..._phraseFil.keys,
+      ..._phraseFil.values,
+    }.toList()
+      ..sort((a, b) => b.length.compareTo(a.length));
+    return _knownPhrasesCache!;
+  }
 
   static Map<String, String> get _filToEn {
     _filToEnWords ??= {
@@ -172,9 +190,18 @@ abstract final class ContentLocalization {
     return _phraseFil[key];
   }
 
+  static final RegExp _phraseBoundaryPattern = RegExp(
+    r"\b(i am|i feel|i want to|i want|i need|you are|you're|gusto kong|gusto ko ng|kailangan ko ng)\b",
+    caseSensitive: false,
+  );
+
+  static bool _hasMultiplePhraseParts(String text) {
+    return _phraseBoundaryPattern.allMatches(text).length > 1;
+  }
+
   static String? _normalizeEnglishPhrase(String text) {
     final lower = text.trim().toLowerCase();
-    if (lower.isEmpty) return null;
+    if (lower.isEmpty || _hasMultiplePhraseParts(lower)) return null;
 
     final iAm = RegExp(r'^i am (.+)$').firstMatch(lower);
     if (iAm != null) return 'I am ${_titleCaseEnglish(iAm.group(1)!)}';
@@ -222,6 +249,254 @@ abstract final class ContentLocalization {
     return '${value[0].toUpperCase()}${value.substring(1)}';
   }
 
+  static bool _isTitleCase(String value) {
+    for (final word in value.split(RegExp(r'\s+'))) {
+      if (word.isEmpty) continue;
+      final letters = word.replaceAll(RegExp(r'[^A-Za-z]'), '');
+      if (letters.isEmpty) continue;
+      if (letters[0] != letters[0].toUpperCase()) return false;
+      if (letters.length > 1 && letters.substring(1) != letters.substring(1).toLowerCase()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  static String _applySourceCasing(String source, String translated) {
+    final sourceLetters = source.replaceAll(RegExp(r'[^A-Za-z]'), '');
+    if (sourceLetters.isEmpty) return translated;
+
+    if (sourceLetters == sourceLetters.toUpperCase()) {
+      return translated.toUpperCase();
+    }
+    if (sourceLetters == sourceLetters.toLowerCase()) {
+      return translated.toLowerCase();
+    }
+    if (_isTitleCase(source)) {
+      return _titleCaseEnglish(translated);
+    }
+    if (source[0] == source[0].toUpperCase()) {
+      return _capitalizeFirst(translated);
+    }
+    return translated;
+  }
+
+  static bool _regionEqualsIgnoreCase(String text, int start, String known) {
+    if (start < 0 || start + known.length > text.length) return false;
+    return text.substring(start, start + known.length).toLowerCase() ==
+        known.toLowerCase();
+  }
+
+  static int _unknownRunEnd(String text, int pos) {
+    for (var i = pos + 1; i <= text.length; i++) {
+      if (i < text.length &&
+          _knownPhrasesLongestFirst.any(
+            (known) => _regionEqualsIgnoreCase(text, i, known),
+          )) {
+        return i;
+      }
+    }
+    return text.length;
+  }
+
+  static bool _isPhraseChar(String char) {
+    return RegExp(r'[A-Za-zÀ-ÿ]').hasMatch(char);
+  }
+
+  static String? _resolveEnglishKey(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return null;
+
+    final exact = _phraseFilKeyFor(trimmed);
+    if (exact != null) return exact;
+
+    for (final entry in _phraseFil.entries) {
+      if (entry.value == trimmed) return entry.key;
+    }
+
+    final lower = trimmed.toLowerCase();
+    for (final entry in _phraseFil.entries) {
+      if (entry.value.toLowerCase() == lower) return entry.key;
+    }
+
+    final fromPattern = _patternToEnglish(trimmed);
+    if (fromPattern != null) return fromPattern;
+
+    final wordByWord = _wordByWordToEnglish(trimmed);
+    if (wordByWord != null) return wordByWord;
+
+    final normalized = _normalizeEnglishPhrase(trimmed);
+    if (normalized != null) {
+      final key = _phraseFilKeyFor(normalized);
+      if (key != null) return key;
+      return normalized;
+    }
+
+    return null;
+  }
+
+  static String? _translateExactToEnglish(String segment) {
+    final trimmed = segment.trim();
+    if (trimmed.isEmpty) return null;
+
+    for (final entry in _phraseFil.entries) {
+      if (entry.value.toLowerCase() == trimmed.toLowerCase()) return entry.key;
+    }
+
+    final exact = _phraseFilKeyFor(trimmed);
+    if (exact != null) return exact;
+
+    final pattern = _patternToEnglish(trimmed);
+    if (pattern != null) return _applySourceCasing(segment, pattern);
+    return null;
+  }
+
+  static String? _translateExactToFilipino(String segment) {
+    final trimmed = segment.trim();
+    if (trimmed.isEmpty) return null;
+
+    final key = _phraseFilKeyFor(trimmed) ??
+        _normalizeEnglishPhrase(trimmed);
+    if (key != null) return _phraseFilValueFor(key);
+
+    return null;
+  }
+
+  static String? _translateSegmentToEnglish(String segment) {
+    final exact = _translateExactToEnglish(segment);
+    if (exact != null) return exact;
+
+    final key = _resolveEnglishKey(segment);
+    if (key == null) return null;
+    return _applySourceCasing(segment, key);
+  }
+
+  static String? _translateSegmentToFilipino(String segment) {
+    final exact = _translateExactToFilipino(segment);
+    if (exact != null) return exact;
+
+    final patternFil = _patternToFilipino(segment);
+    if (patternFil != null) return _applySourceCasing(segment, patternFil);
+
+    final key = _resolveEnglishKey(segment);
+    if (key != null) {
+      final fil = _phraseFilValueFor(key) ?? _patternToFilipino(key);
+      if (fil != null) return _applySourceCasing(segment, fil);
+    }
+
+    final wordFil = _wordByWordToFilipino(segment);
+    if (wordFil != null) return _applySourceCasing(segment, wordFil);
+
+    return null;
+  }
+
+  static String _translateBySegmentation(String text, AppLanguage targetLang) {
+    final whole = targetLang == AppLanguage.english
+        ? _translateExactToEnglish(text)
+        : _translateExactToFilipino(text);
+    if (whole != null) return whole;
+
+    final result = StringBuffer();
+    var pos = 0;
+
+    while (pos < text.length) {
+      if (!_isPhraseChar(text[pos])) {
+        result.write(text[pos]);
+        pos++;
+        continue;
+      }
+
+      String? matchedPhrase;
+      var matchedLen = 0;
+      for (final known in _knownPhrasesLongestFirst) {
+        if (_regionEqualsIgnoreCase(text, pos, known)) {
+          matchedPhrase = known;
+          matchedLen = known.length;
+          break;
+        }
+      }
+
+      if (matchedPhrase != null) {
+        final slice = text.substring(pos, pos + matchedLen);
+        final translated = targetLang == AppLanguage.english
+            ? _translateExactToEnglish(slice) ?? _translateSegmentToEnglish(slice)
+            : _translateExactToFilipino(slice) ?? _translateSegmentToFilipino(slice);
+        result.write(translated ?? slice);
+        pos += matchedLen;
+        continue;
+      }
+
+      final runEnd = _unknownRunEnd(text, pos);
+      final run = text.substring(pos, runEnd);
+      final translated = targetLang == AppLanguage.english
+          ? _translateSegmentToEnglish(run)
+          : _translateSegmentToFilipino(run);
+      result.write(translated ?? run);
+      pos = runEnd;
+    }
+
+    return result.toString();
+  }
+
+  static String _translateText(String storedText, AppLanguage lang) {
+    final trimmed = storedText.trim();
+    if (trimmed.isEmpty) return storedText;
+
+    if (_isTextInLanguage(trimmed, lang)) return trimmed;
+
+    final lower = trimmed.toLowerCase();
+    if (!trimmed.contains(' ')) {
+      if (lang == AppLanguage.filipino && _wordEnFil.containsKey(lower)) {
+        return _applySourceCasing(trimmed, _wordEnFil[lower]!);
+      }
+      if (lang == AppLanguage.english && _filToEn.containsKey(lower)) {
+        return _applySourceCasing(trimmed, _filToEn[lower]!);
+      }
+    }
+
+    if (lang == AppLanguage.filipino) {
+      final patternFil = _patternToFilipino(trimmed);
+      if (patternFil != null) {
+        return _applySourceCasing(trimmed, patternFil);
+      }
+      final exactFil = _translateExactToFilipino(trimmed);
+      if (exactFil != null) return _applySourceCasing(trimmed, exactFil);
+    } else {
+      final patternEn = _patternToEnglish(trimmed);
+      if (patternEn != null) {
+        return _applySourceCasing(trimmed, patternEn);
+      }
+      final exactEn = _translateExactToEnglish(trimmed);
+      if (exactEn != null) return _applySourceCasing(trimmed, exactEn);
+    }
+
+    final translated = _translateBySegmentation(trimmed, lang);
+    if (translated != trimmed) return translated;
+    return trimmed;
+  }
+
+  static bool _isTextInLanguage(String text, AppLanguage lang) {
+    final trimmed = text.trim();
+    final lower = trimmed.toLowerCase();
+
+    if (lang == AppLanguage.filipino) {
+      for (final entry in _phraseFil.entries) {
+        if (entry.value.toLowerCase() == lower) return true;
+      }
+      if (!_hasMultiplePhraseParts(trimmed) && _patternToEnglish(trimmed) != null) {
+        return true;
+      }
+      return false;
+    }
+
+    for (final key in _phraseFil.keys) {
+      if (key.toLowerCase() == lower) return true;
+    }
+    if (_normalizeEnglishPhrase(trimmed) != null) return true;
+    if (!trimmed.contains(' ') && _wordEnFil.containsKey(lower)) return true;
+    return false;
+  }
+
   static String? _translateFragment(String fragment) {
     final lower = fragment.trim().toLowerCase();
     if (lower.isEmpty) return null;
@@ -250,7 +525,7 @@ abstract final class ContentLocalization {
 
   static String? _patternToFilipino(String english) {
     final lower = english.trim().toLowerCase();
-    if (lower.isEmpty) return null;
+    if (lower.isEmpty || _hasMultiplePhraseParts(lower)) return null;
 
     final iAm = RegExp(r'^i am (.+)$').firstMatch(lower);
     if (iAm != null) {
@@ -299,7 +574,7 @@ abstract final class ContentLocalization {
 
   static String? _patternToEnglish(String filipino) {
     final lower = filipino.trim().toLowerCase();
-    if (lower.isEmpty) return null;
+    if (lower.isEmpty || _hasMultiplePhraseParts(lower)) return null;
 
     final fromMap = _filToEn[lower];
     if (fromMap != null) return fromMap;
@@ -331,7 +606,7 @@ abstract final class ContentLocalization {
     final kaPattern = RegExp(r'^(.+) ka$').firstMatch(lower);
     if (kaPattern != null) {
       final enTail = _reverseFragment(kaPattern.group(1)!);
-      if (enTail != null) return 'You are ${enTail.toLowerCase()}';
+      if (enTail != null) return 'You are $enTail';
     }
 
     return null;
@@ -437,6 +712,33 @@ abstract final class ContentLocalization {
     final lower = trimmed.toLowerCase();
     for (final entry in _categoryFil.entries) {
       if (entry.key.toLowerCase() == lower) return entry.value;
+      if (entry.value.toLowerCase() == lower) return entry.value;
+    }
+    return null;
+  }
+
+  static String? _categoryEnForKey(String categoryKey) {
+    final trimmed = categoryKey.trim();
+    if (trimmed.isEmpty) return null;
+
+    final direct = _categoryEn[trimmed];
+    if (direct != null) return direct;
+
+    final normalized = _normalizeCategoryToken(trimmed);
+    if (normalized.isNotEmpty) {
+      final fromNorm = _categoryEn[normalized];
+      if (fromNorm != null) return fromNorm;
+    }
+
+    final lower = trimmed.toLowerCase();
+    for (final entry in _categoryEn.entries) {
+      if (entry.key.toLowerCase() == lower) return entry.value;
+      if (entry.value.toLowerCase() == lower) return entry.value;
+    }
+    for (final entry in _categoryFil.entries) {
+      if (entry.value.toLowerCase() == lower) {
+        return _categoryEn[entry.key];
+      }
     }
     return null;
   }
@@ -446,10 +748,14 @@ abstract final class ContentLocalization {
     String storedName,
     AppLanguage lang,
   ) {
-    if (lang == AppLanguage.english) return storedName;
-    return _categoryFilForKey(categoryKey) ??
-        _categoryFilForKey(storedName) ??
-        storedName;
+    if (lang == AppLanguage.filipino) {
+      return _categoryFilForKey(categoryKey) ??
+          _categoryFilForKey(storedName) ??
+          _translateText(storedName, lang);
+    }
+    return _categoryEnForKey(categoryKey) ??
+        _categoryEnForKey(storedName) ??
+        _translateText(storedName, lang);
   }
 
   static String phrase(
@@ -458,13 +764,7 @@ abstract final class ContentLocalization {
     bool isBuiltin = false,
     required AppLanguage lang,
   }) {
-    final canonical = canonicalPhrase(storedText);
-    if (lang == AppLanguage.english) return canonical;
-
-    return _phraseFilValueFor(canonical) ??
-        _patternToFilipino(canonical) ??
-        _wordByWordToFilipino(canonical) ??
-        canonical;
+    return _translateText(storedText, lang);
   }
 
   /// Localized display for user-entered phrases, lesson titles, and class names.
@@ -472,8 +772,14 @@ abstract final class ContentLocalization {
       phrase(storedText, '', lang: lang);
 
   static String themeName(String themeKey, String storedName, AppLanguage lang) {
-    if (lang == AppLanguage.english) return storedName;
-    return _themeFil[themeKey] ?? storedName;
+    if (lang == AppLanguage.filipino) {
+      return _themeFil[themeKey] ?? _translateText(storedName, lang);
+    }
+    final fil = _themeFil[themeKey];
+    if (fil != null && fil.toLowerCase() == storedName.trim().toLowerCase()) {
+      return storedName;
+    }
+    return _translateText(storedName, lang);
   }
 
   static String role(String roleKey, AppLanguage lang) {

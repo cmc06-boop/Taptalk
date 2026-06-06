@@ -17,6 +17,7 @@ import '../widgets/learner_scaffold.dart';
 import '../widgets/panel_card.dart';
 import '../widgets/phrase_card.dart';
 import '../widgets/phrase_section_header.dart';
+import '../widgets/highlighting_text_controller.dart';
 import '../widgets/tts_speed_selector.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -27,7 +28,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final TextEditingController _textController = _HighlightingTextController();
+  final TextEditingController _textController = HighlightingTextController();
   final _categoryScroll = ScrollController();
   final _undoStack = <String>[];
   final stt.SpeechToText _speech = stt.SpeechToText();
@@ -157,6 +158,10 @@ class _HomeScreenState extends State<HomeScreen> {
     await AddCategoryDialog.show(context);
   }
 
+  Future<void> _refresh() async {
+    await context.read<AppState>().refreshLearnerCollections();
+  }
+
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
@@ -165,7 +170,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final userName = app.user?.fullName ?? AppStrings.defaultLearnerName(lang);
     final denseGrid = AppSpacing.phraseGridIsDense(context);
     final highlightController = _textController;
-    if (highlightController is _HighlightingTextController) {
+    if (highlightController is HighlightingTextController) {
       highlightController.updateHighlight(
         start: app.spokenWordStart,
         end: app.spokenWordEnd,
@@ -178,7 +183,12 @@ class _HomeScreenState extends State<HomeScreen> {
       currentRoute: AppRoute.home,
       onMicTap: _toggleMic,
       micActive: _listening,
-      body: ListView(
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        color: theme.bgAccent,
+        child: ListView(
+        key: ValueKey('home_${lang.name}_${app.languageRevision}'),
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
         children: [
           PanelCard(
@@ -193,6 +203,8 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 Text(
                   AppStrings.welcomeUser(userName, lang),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.poppins(
                     fontSize: 22,
                     color: theme.textMain,
@@ -212,8 +224,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.xs,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              alignment: WrapAlignment.spaceBetween,
               children: [
                 Text(
                   AppStrings.categories(lang),
@@ -227,8 +242,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: _showAddCategoryDialog,
                   icon: const Icon(Icons.add, size: 16),
                   label: Text(
-                    AppStrings.addCategory(lang),
-                    style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600),
+                    AppStrings.addCategoryShort(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
@@ -246,6 +264,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 final cat = app.categories[i];
                 final active = cat.key == app.selectedCategoryKey;
                 return FilterChip(
+                  key: ValueKey('cat_${cat.key}_${lang.name}_${app.languageRevision}'),
                   selected: active,
                   showCheckmark: false,
                   label: Text(app.localizedCategoryName(cat)),
@@ -268,19 +287,25 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Text(
-                      AppStrings.enterText(lang),
-                      style: GoogleFonts.poppins(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                        color: theme.textMain,
+                    Expanded(
+                      child: Text(
+                        AppStrings.enterText(lang),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          color: theme.textMain,
+                        ),
                       ),
                     ),
                     Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         IconButton(
+                          visualDensity: VisualDensity.compact,
                           icon: const Icon(Icons.undo_rounded, size: 22),
                           onPressed: _undoStack.length <= 1
                               ? null
@@ -290,6 +315,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 },
                         ),
                         IconButton(
+                          visualDensity: VisualDensity.compact,
                           icon: const Icon(Icons.copy_rounded, size: 22),
                           onPressed: () {
                             Clipboard.setData(
@@ -298,6 +324,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           },
                         ),
                         IconButton(
+                          visualDensity: VisualDensity.compact,
                           icon: const Icon(Icons.close_rounded, size: 22),
                           onPressed: () {
                             app.stopSpeech();
@@ -364,8 +391,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       const SizedBox(height: AppSpacing.sm),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
+                      Wrap(
+                        spacing: AppSpacing.sm,
+                        runSpacing: AppSpacing.sm,
+                        alignment: WrapAlignment.end,
                         children: [
                           OutlinedButton.icon(
                             onPressed: _pickImage,
@@ -387,6 +416,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             label: Text(
                               AppStrings.attachImage(lang),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: GoogleFonts.poppins(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
@@ -394,7 +425,6 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ),
                           ),
-                          const SizedBox(width: AppSpacing.sm),
                           FilledButton.icon(
                             onPressed: () async {
                               await app.addPhrase(
@@ -466,6 +496,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
             child: GridView.builder(
+              key: ValueKey('phrases_${lang.name}_${app.languageRevision}_${app.selectedCategoryKey}'),
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               gridDelegate: AppSpacing.phraseGridDelegate(context),
@@ -473,6 +504,7 @@ class _HomeScreenState extends State<HomeScreen> {
               itemBuilder: (context, i) {
                 final phrase = app.phrasesForCategory[i];
                 return PhraseCard(
+                  key: ValueKey('phrase_${phrase.id}_${lang.name}_${app.languageRevision}'),
                   phrase: phrase,
                   dense: denseGrid,
                   isFavorite: app.isFavorite(phrase),
@@ -520,55 +552,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _HighlightingTextController extends TextEditingController {
-  int _highlightStart = -1;
-  int _highlightEnd = -1;
-  Color _accent = const Color(0xFF5BB88A);
-
-  void updateHighlight({
-    required int start,
-    required int end,
-    required Color accent,
-  }) {
-    if (_highlightStart == start && _highlightEnd == end && _accent == accent) return;
-    _highlightStart = start;
-    _highlightEnd = end;
-    _accent = accent;
-    notifyListeners();
-  }
-
-  @override
-  TextSpan buildTextSpan({
-    required BuildContext context,
-    TextStyle? style,
-    required bool withComposing,
-  }) {
-    final textValue = text;
-    final start = _highlightStart.clamp(0, textValue.length);
-    final end = _highlightEnd.clamp(0, textValue.length);
-    if (start >= end || textValue.isEmpty) {
-      return TextSpan(style: style, text: textValue);
-    }
-
-    return TextSpan(
-      style: style,
-      children: [
-        TextSpan(text: textValue.substring(0, start)),
-        TextSpan(
-          text: textValue.substring(start, end),
-          style: TextStyle(
-            color: Colors.white,
-            backgroundColor: _accent.withValues(alpha: 0.95),
-            fontWeight: FontWeight.w700,
-          ),
         ),
-        TextSpan(text: textValue.substring(end)),
-      ],
+      ),
     );
   }
 }

@@ -58,84 +58,96 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
   @override
   void didUpdateWidget(covariant LessonProgressSection oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.reloadNonce != widget.reloadNonce ||
-        oldWidget.period != widget.period ||
-        oldWidget.month != widget.month) {
-      _reloadProgress();
+    if (oldWidget.period != widget.period ||
+        oldWidget.month != widget.month ||
+        oldWidget.reloadNonce != widget.reloadNonce) {
+      if (_selectedClass != null && _selectedLesson != null) {
+        _loadProgress(_selectedClass!, _selectedLesson!, silent: true);
+      }
     }
   }
 
   Future<void> _loadClasses() async {
-    setState(() => _loadingClasses = true);
-    final app = context.read<AppState>();
-    final classes =
-        await app.getEnrolledClassesForMonitoring(widget.learnerUserId);
-    if (!mounted) return;
-    setState(() {
-      _classes = classes;
-      _loadingClasses = false;
-      _selectedClass = classes.isNotEmpty ? classes.first : null;
-      _selectedLesson = null;
-      _lessons = [];
-      _progress = null;
-      _openPicker = _OpenPicker.none;
-    });
-    if (_selectedClass != null) {
-      await _loadLessons(_selectedClass!);
+    if (mounted) setState(() => _loadingClasses = true);
+    try {
+      final app = context.read<AppState>();
+      final classes = await app.getEnrolledClassesForMonitoring(
+        widget.learnerUserId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _classes = classes;
+        _selectedClass = classes.isNotEmpty ? classes.first : null;
+        _selectedLesson = null;
+        _lessons = [];
+        _progress = null;
+        _openPicker = _OpenPicker.none;
+      });
+      if (_selectedClass != null) {
+        await _loadLessons(_selectedClass!, silent: true);
+      }
+    } catch (e, st) {
+      debugPrint('Lesson progress classes load failed: $e\n$st');
+    } finally {
+      if (mounted) setState(() => _loadingClasses = false);
     }
   }
 
-  Future<void> _loadLessons(EnrolledClassModel enrolled) async {
-    setState(() {
-      _loadingLessons = true;
-      _lessons = [];
-      _selectedLesson = null;
-      _progress = null;
-      _openPicker = _OpenPicker.none;
-    });
-    final app = context.read<AppState>();
-    final lessons = await app.getClassLessonsForMonitoring(
-      classId: enrolled.classId,
-      classCode: enrolled.classCode,
-    );
-    if (!mounted) return;
-    setState(() {
-      _lessons = lessons;
-      _loadingLessons = false;
-      _selectedLesson = lessons.isNotEmpty ? lessons.first : null;
-    });
-    if (_selectedLesson != null && _selectedClass != null) {
-      await _loadProgress(_selectedClass!, _selectedLesson!);
+  Future<void> _loadLessons(
+    EnrolledClassModel enrolled, {
+    bool silent = false,
+  }) async {
+    if (!silent && mounted) {
+      setState(() {
+        _loadingLessons = true;
+        _lessons = [];
+        _selectedLesson = null;
+        _progress = null;
+        _openPicker = _OpenPicker.none;
+      });
+    }
+    try {
+      final app = context.read<AppState>();
+      final lessons = await app.getClassLessonsForMonitoring(
+        classId: enrolled.classId,
+        classCode: enrolled.classCode,
+      );
+      if (!mounted) return;
+      setState(() {
+        _lessons = lessons;
+        _selectedLesson = lessons.isNotEmpty ? lessons.first : null;
+      });
+      if (_selectedLesson != null && _selectedClass != null) {
+        await _loadProgress(_selectedClass!, _selectedLesson!, silent: silent);
+      }
+    } catch (e, st) {
+      debugPrint('Lesson progress lessons load failed: $e\n$st');
+    } finally {
+      if (mounted) setState(() => _loadingLessons = false);
     }
   }
 
   Future<void> _loadProgress(
     EnrolledClassModel enrolled,
-    ClassLesson lesson,
-  ) async {
-    setState(() => _loadingProgress = true);
-    final app = context.read<AppState>();
-    final progress = await app.getLessonProgressForMonitoring(
-      learnerUserId: widget.learnerUserId,
-      className: enrolled.className,
-      lessonTitle: lesson.title,
-      period: widget.period,
-      month: widget.month,
-    );
-    if (!mounted) return;
-    setState(() {
-      _progress = progress;
-      _loadingProgress = false;
-    });
-  }
-
-  Future<void> _reloadProgress() async {
-    if (_selectedClass != null && _selectedLesson != null) {
-      await _loadProgress(_selectedClass!, _selectedLesson!);
-    } else if (_selectedClass != null) {
-      await _loadLessons(_selectedClass!);
-    } else {
-      await _loadClasses();
+    ClassLesson lesson, {
+    bool silent = false,
+  }) async {
+    if (!silent && mounted) setState(() => _loadingProgress = true);
+    try {
+      final app = context.read<AppState>();
+      final progress = await app.getLessonProgressForMonitoring(
+        learnerUserId: widget.learnerUserId,
+        className: enrolled.className,
+        lessonTitle: lesson.title,
+        period: widget.period,
+        month: widget.month,
+      );
+      if (!mounted) return;
+      setState(() => _progress = progress);
+    } catch (e, st) {
+      debugPrint('Lesson progress load failed: $e\n$st');
+    } finally {
+      if (mounted) setState(() => _loadingProgress = false);
     }
   }
 

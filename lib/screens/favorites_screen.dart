@@ -20,6 +20,10 @@ class FavoritesScreen extends StatefulWidget {
 class _FavoritesScreenState extends State<FavoritesScreen> {
   String? _filterCategoryKey;
 
+  Future<void> _refresh() async {
+    await context.read<AppState>().refreshLearnerCollections();
+  }
+
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
@@ -44,7 +48,11 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
       title: AppStrings.appName(lang),
       currentRoute: AppRoute.favorites,
       onMicTap: () => app.setRoute(AppRoute.home),
-      body: SingleChildScrollView(
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        color: theme.bgAccent,
+        child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.only(bottom: AppSpacing.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -178,6 +186,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                   itemBuilder: (context, i) {
                     final phrase = phrases[i];
                     return PhraseCard(
+                        key: ValueKey('fav_${phrase.id}_${lang.name}_${app.languageRevision}'),
                         phrase: phrase,
                         dense: denseGrid,
                         isFavorite: true,
@@ -198,6 +207,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                 ),
               ),
           ],
+        ),
         ),
       ),
     );

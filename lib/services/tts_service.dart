@@ -23,7 +23,9 @@ class TtsService {
     _tts.setCancelHandler(() => onComplete?.call());
     _tts.setErrorHandler((message) => onError?.call(message));
     await _tts.awaitSpeakCompletion(true);
-    await _tts.setSharedInstance(true);
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      await _tts.setSharedInstance(true);
+    }
     await _tts.setVolume(1.0);
     await _tts.setPitch(1.0);
     if (defaultTargetPlatform == TargetPlatform.android) {
@@ -55,12 +57,13 @@ class TtsService {
     }
   }
 
-  /// Maps user multiplier (1.0 = normal) to platform [setSpeechRate] values.
+  /// Maps user multiplier (1.0 = normal) to [setSpeechRate] values.
+  ///
+  /// flutter_tts uses 0.5 as normal on mobile/desktop (Android, iOS, macOS,
+  /// Windows). Web Speech API uses 1.0 as normal, so web keeps the user rate.
   static double nativeSpeechRate(double userRate) {
     final rate = TtsSpeedOptions.snap(userRate);
-    if (defaultTargetPlatform == TargetPlatform.android) {
-      return rate;
-    }
+    if (kIsWeb) return rate;
     return rate * 0.5;
   }
 

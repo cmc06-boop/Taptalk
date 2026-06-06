@@ -4,10 +4,10 @@ import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
-import '../core/utils/speak_feedback.dart';
 import '../data/models/lesson_phrase.dart';
 import '../data/models/phrase_model.dart';
 import '../providers/app_state.dart';
+import '../widgets/localized_content_text.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/panel_card.dart';
 import '../widgets/phrase_card.dart';
@@ -33,6 +33,7 @@ class LessonEditorScreen extends StatefulWidget {
 class _LessonEditorScreenState extends State<LessonEditorScreen> {
   List<LessonPhrase> _phrases = [];
   bool _loading = true;
+  final _composerController = PhraseComposerPanelController();
 
   @override
   void initState() {
@@ -132,7 +133,6 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
     final lang = app.language;
     final denseGrid = AppSpacing.phraseGridIsDense(context);
     final displayLessonTitle = app.localizedContent(widget.lessonTitle);
-    final displayClassName = app.localizedContent(widget.className);
 
     return LearnerScaffold(
       title: displayLessonTitle,
@@ -152,8 +152,8 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  displayLessonTitle,
+                LocalizedContentText(
+                  widget.lessonTitle,
                   style: GoogleFonts.poppins(
                     fontSize: 20,
                     fontWeight: FontWeight.w800,
@@ -161,8 +161,8 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  displayClassName,
+                LocalizedContentText(
+                  widget.className,
                   style: GoogleFonts.poppins(
                     fontSize: 12,
                     color: theme.textMain.withValues(alpha: 0.65),
@@ -182,7 +182,12 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
           ),
           PanelCard(
             margin: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-            child: PhraseComposerPanel(onAdd: _addPhrase),
+            child: PhraseComposerPanel(
+              composerController: _composerController,
+              speakCategoryKey: 'lesson',
+              recordOnPlay: false,
+              onAdd: _addPhrase,
+            ),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(
@@ -230,23 +235,19 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
                   final phrase = _asPhraseModel(lessonPhrase);
                   final displayText = app.localizedPhraseText(phrase);
                   return PhraseCard(
-                    key: ValueKey('lesson_${phrase.id}_${lang.name}'),
+                    key: ValueKey('lesson_${phrase.id}_${lang.name}_${app.languageRevision}'),
                     phrase: phrase,
                     displayText: displayText,
                     dense: denseGrid,
                     isFavorite: false,
                     showFavorite: false,
-                    onTap: () => speakWithFeedback(
-                      context,
-                      phrase.text,
-                      record: false,
-                      categoryKey: phrase.categoryKey,
+                    onTap: () => _composerController.appendPhrase(
+                      displayText,
+                      speak: true,
                     ),
-                    onSpeak: () => speakWithFeedback(
-                      context,
-                      phrase.text,
-                      record: false,
-                      categoryKey: phrase.categoryKey,
+                    onSpeak: () => _composerController.appendPhrase(
+                      displayText,
+                      speak: true,
                     ),
                     onFavorite: () {},
                     onEdit: () => _editPhrase(lessonPhrase),

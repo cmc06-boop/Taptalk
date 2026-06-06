@@ -33,6 +33,7 @@ class TapTalkApp extends StatelessWidget {
         builder: (context, app, _) {
           final theme = app.theme;
           return MaterialApp(
+            key: ValueKey('lang_${app.language.name}_${app.languageRevision}'),
             title: 'TapTalk',
             debugShowCheckedModeBanner: false,
             themeMode: ThemeMode.light,
@@ -93,7 +94,7 @@ class TapTalkApp extends StatelessWidget {
       case AppRoute.history:
         return const HistoryScreen();
       case AppRoute.settings:
-        return const SettingsScreen();
+        return const SettingsScreen(key: ValueKey('settings_screen'));
       case AppRoute.profile:
         return const ProfileScreen();
       case AppRoute.myChild:

@@ -10,8 +10,22 @@ import '../widgets/learner_scaffold.dart';
 import '../widgets/panel_card.dart';
 import '../widgets/tts_speed_selector.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  int? _openAccordionIndex;
+
+  void _onAccordionTap(int index) {
+    setState(() {
+      // Close the previous section when a different one is opened.
+      _openAccordionIndex = _openAccordionIndex == index ? null : index;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,6 +51,7 @@ class SettingsScreen extends StatelessWidget {
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     AppStrings.settings(lang),
@@ -63,6 +78,7 @@ class SettingsScreen extends StatelessWidget {
           PanelCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   AppStrings.preferences(lang),
@@ -95,7 +111,10 @@ class SettingsScreen extends StatelessWidget {
             ),
           ),
           _SettingsAccordion(
+            key: const ValueKey('settings_accordion_help'),
             title: AppStrings.helpSupport(lang),
+            expanded: _openAccordionIndex == 0,
+            onToggle: () => _onAccordionTap(0),
             child: Text(
               AppStrings.contactSupport(lang),
               style: GoogleFonts.poppins(
@@ -106,7 +125,10 @@ class SettingsScreen extends StatelessWidget {
             ),
           ),
           _SettingsAccordion(
+            key: const ValueKey('settings_accordion_about'),
             title: AppStrings.aboutUs(lang),
+            expanded: _openAccordionIndex == 1,
+            onToggle: () => _onAccordionTap(1),
             child: Text(
               AppStrings.aboutBody(lang),
               style: GoogleFonts.poppins(
@@ -117,7 +139,10 @@ class SettingsScreen extends StatelessWidget {
             ),
           ),
           _SettingsAccordion(
+            key: const ValueKey('settings_accordion_theme'),
             title: AppStrings.theme(lang),
+            expanded: _openAccordionIndex == 2,
+            onToggle: () => _onAccordionTap(2),
             child: _ThemePickerGrid(
               selectedKey: theme.key,
               onSelect: app.setTheme,
@@ -291,21 +316,19 @@ class _ThemePickerGrid extends StatelessWidget {
   }
 }
 
-class _SettingsAccordion extends StatefulWidget {
+class _SettingsAccordion extends StatelessWidget {
   const _SettingsAccordion({
+    super.key,
     required this.title,
+    required this.expanded,
+    required this.onToggle,
     required this.child,
   });
 
   final String title;
+  final bool expanded;
+  final VoidCallback onToggle;
   final Widget child;
-
-  @override
-  State<_SettingsAccordion> createState() => _SettingsAccordionState();
-}
-
-class _SettingsAccordionState extends State<_SettingsAccordion> {
-  bool _expanded = false;
 
   Color _expandedBodyColor(TapTalkThemeToken theme) {
     return Color.alphaBlend(
@@ -338,11 +361,12 @@ class _SettingsAccordionState extends State<_SettingsAccordion> {
           borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Material(
                 color: theme.bgAccent,
                 child: InkWell(
-                  onTap: () => setState(() => _expanded = !_expanded),
+                  onTap: onToggle,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: AppSpacing.lg,
@@ -352,7 +376,9 @@ class _SettingsAccordionState extends State<_SettingsAccordion> {
                       children: [
                         Expanded(
                           child: Text(
-                            widget.title,
+                            title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.poppins(
                               fontSize: 15,
                               fontWeight: FontWeight.w800,
@@ -361,7 +387,7 @@ class _SettingsAccordionState extends State<_SettingsAccordion> {
                           ),
                         ),
                         AnimatedRotation(
-                          turns: _expanded ? 0.5 : 0,
+                          turns: expanded ? 0.5 : 0,
                           duration: const Duration(milliseconds: 200),
                           child: const Icon(
                             Icons.keyboard_arrow_down_rounded,
@@ -374,19 +400,13 @@ class _SettingsAccordionState extends State<_SettingsAccordion> {
                   ),
                 ),
               ),
-              AnimatedCrossFade(
-                firstChild: const SizedBox.shrink(),
-                secondChild: Container(
+              if (expanded)
+                Container(
                   width: double.infinity,
                   color: _expandedBodyColor(theme),
                   padding: const EdgeInsets.all(AppSpacing.md),
-                  child: widget.child,
+                  child: child,
                 ),
-                crossFadeState: _expanded
-                    ? CrossFadeState.showSecond
-                    : CrossFadeState.showFirst,
-                duration: const Duration(milliseconds: 200),
-              ),
             ],
           ),
         ),

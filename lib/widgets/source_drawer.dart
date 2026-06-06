@@ -142,6 +142,14 @@ class SourceDrawer extends StatelessWidget {
                           ] else if (app.user?.isTeacher ?? false) ...[
                             _DrawerItem(
                               theme: theme,
+                              icon: Icons.dashboard_outlined,
+                              label: AppStrings.dashboard(lang),
+                              active: app.route == AppRoute.teacherDashboard,
+                              onTap: () =>
+                                  app.setRoute(AppRoute.teacherDashboard),
+                            ),
+                            _DrawerItem(
+                              theme: theme,
                               icon: Icons.person_outline,
                               label: AppStrings.forMe(lang),
                               active: _isForMeRoute(app.route),
@@ -154,14 +162,6 @@ class SourceDrawer extends StatelessWidget {
                               active: app.route == AppRoute.teacherMyClasses,
                               onTap: () =>
                                   app.setRoute(AppRoute.teacherMyClasses),
-                            ),
-                            _DrawerItem(
-                              theme: theme,
-                              icon: Icons.dashboard_outlined,
-                              label: AppStrings.dashboard(lang),
-                              active: app.route == AppRoute.teacherDashboard,
-                              onTap: () =>
-                                  app.setRoute(AppRoute.teacherDashboard),
                             ),
                             _DrawerItem(
                               theme: theme,

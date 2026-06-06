@@ -8,6 +8,7 @@ import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../data/models/class_lesson.dart';
 import '../providers/app_state.dart';
+import '../widgets/localized_content_text.dart';
 import '../widgets/class_color_card.dart';
 import '../widgets/create_lesson_dialog.dart';
 import '../widgets/edit_class_dialog.dart';
@@ -186,7 +187,11 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
       showBottomNav: false,
       body: Stack(
         children: [
-          ListView(
+          RefreshIndicator(
+            onRefresh: _load,
+            color: theme.bgAccent,
+            child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(
               AppSpacing.lg,
               AppSpacing.sm,
@@ -196,7 +201,7 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
             children: [
               _ClassHeaderBanner(
                 classId: widget.classId,
-                className: displayClassName,
+                className: _className,
                 classCode: widget.classCode,
                 onCopyCode: _copyCode,
                 onEditClassName: _editClassName,
@@ -235,8 +240,10 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
                   Padding(
                     padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                     child: _LessonCard(
+                      key: ValueKey(
+                        'lesson_${lesson.id}_${lang.name}_${app.languageRevision}',
+                      ),
                       lesson: lesson,
-                      displayTitle: app.localizedContent(lesson.title),
                       theme: theme,
                       lang: lang,
                       onTap: () => _openLesson(lesson),
@@ -245,6 +252,7 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
                     ),
                   ),
             ],
+            ),
           ),
           Positioned(
             right: AppSpacing.lg,
@@ -333,7 +341,7 @@ class _ClassHeaderBanner extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Expanded(
-                            child: Text(
+                            child: LocalizedContentText(
                               className,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
@@ -440,8 +448,8 @@ class _ClassCodeChip extends StatelessWidget {
 
 class _LessonCard extends StatelessWidget {
   const _LessonCard({
+    super.key,
     required this.lesson,
-    required this.displayTitle,
     required this.theme,
     required this.lang,
     required this.onTap,
@@ -450,7 +458,6 @@ class _LessonCard extends StatelessWidget {
   });
 
   final ClassLesson lesson;
-  final String displayTitle;
   final TapTalkThemeToken theme;
   final AppLanguage lang;
   final VoidCallback onTap;
@@ -497,8 +504,8 @@ class _LessonCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      displayTitle,
+                    LocalizedContentText(
+                      lesson.title,
                       style: GoogleFonts.poppins(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,

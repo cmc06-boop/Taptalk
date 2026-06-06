@@ -2,7 +2,7 @@
 abstract final class TtsSpeedOptions {
   static const double min = 0.25;
   static const double max = 2.0;
-  static const double defaultSpeed = 0.25;
+  static const double defaultSpeed = 1.0;
 
   /// Discrete speeds shown on the slider and scale labels (matches Settings UI).
   static const List<double> scaleMarks = [0.25, 0.5, 1.0, 1.5, 2.0];

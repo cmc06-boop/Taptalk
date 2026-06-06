@@ -87,17 +87,23 @@ class _TtsSpeedSelectorState extends State<TtsSpeedSelector> {
         Row(
           children: [
             if (widget.sectionLabel != null)
-              Text(
-                widget.sectionLabel!,
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: theme.textMain.withValues(alpha: 0.85),
+              Expanded(
+                child: Text(
+                  widget.sectionLabel!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: theme.textMain.withValues(alpha: 0.85),
+                  ),
                 ),
               ),
-            const Spacer(),
+            if (widget.sectionLabel != null)
+              const SizedBox(width: AppSpacing.sm),
             Text(
               displayLabel,
+              maxLines: 1,
               style: GoogleFonts.poppins(
                 fontSize: 13,
                 fontWeight: FontWeight.w800,
@@ -122,16 +128,20 @@ class _TtsSpeedSelectorState extends State<TtsSpeedSelector> {
                         : i == TtsSpeedOptions.scaleMarks.length - 1
                             ? Alignment.centerRight
                             : Alignment.center,
-                    child: Text(
-                      TtsSpeedOptions.shortLabel(TtsSpeedOptions.scaleMarks[i]),
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        fontWeight: displaySpeed == TtsSpeedOptions.scaleMarks[i]
-                            ? FontWeight.w700
-                            : FontWeight.w400,
-                        color: displaySpeed == TtsSpeedOptions.scaleMarks[i]
-                            ? theme.textMain
-                            : theme.textMain.withValues(alpha: 0.5),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        TtsSpeedOptions.shortLabel(TtsSpeedOptions.scaleMarks[i]),
+                        maxLines: 1,
+                        style: GoogleFonts.poppins(
+                          fontSize: 11,
+                          fontWeight: displaySpeed == TtsSpeedOptions.scaleMarks[i]
+                              ? FontWeight.w700
+                              : FontWeight.w400,
+                          color: displaySpeed == TtsSpeedOptions.scaleMarks[i]
+                              ? theme.textMain
+                              : theme.textMain.withValues(alpha: 0.5),
+                        ),
                       ),
                     ),
                   ),

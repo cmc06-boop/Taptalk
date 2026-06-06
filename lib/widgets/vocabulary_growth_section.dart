@@ -14,11 +14,15 @@ class VocabularyGrowthSection extends StatefulWidget {
     required this.summary,
     required this.theme,
     required this.lang,
+    required this.phrasesUsed,
+    required this.phraseTaps,
   });
 
   final VocabularyGrowthSummary summary;
   final TapTalkThemeToken theme;
   final AppLanguage lang;
+  final int phrasesUsed;
+  final int phraseTaps;
 
   @override
   State<VocabularyGrowthSection> createState() => _VocabularyGrowthSectionState();
@@ -52,9 +56,9 @@ class _VocabularyGrowthSectionState extends State<VocabularyGrowthSection> {
         _StatRow(
           theme: theme,
           lang: lang,
-          total: summary.totalVocabulary,
-          weekNew: summary.newWordsThisWeek,
-          monthNew: summary.newWordsThisMonth,
+          phrasesUsed: widget.phrasesUsed,
+          phraseTaps: widget.phraseTaps,
+          newWords: summary.totalVocabulary,
         ),
         const SizedBox(height: AppSpacing.md),
         Text(
@@ -111,16 +115,16 @@ class _StatRow extends StatelessWidget {
   const _StatRow({
     required this.theme,
     required this.lang,
-    required this.total,
-    required this.weekNew,
-    required this.monthNew,
+    required this.phrasesUsed,
+    required this.phraseTaps,
+    required this.newWords,
   });
 
   final TapTalkThemeToken theme;
   final AppLanguage lang;
-  final int total;
-  final int weekNew;
-  final int monthNew;
+  final int phrasesUsed;
+  final int phraseTaps;
+  final int newWords;
 
   @override
   Widget build(BuildContext context) {
@@ -129,8 +133,8 @@ class _StatRow extends StatelessWidget {
         Expanded(
           child: _StatCard(
             theme: theme,
-            label: AppStrings.totalVocabulary(lang),
-            value: '$total',
+            label: AppStrings.phrasesUsedInPeriod(lang),
+            value: '$phrasesUsed',
             highlight: true,
           ),
         ),
@@ -138,16 +142,16 @@ class _StatRow extends StatelessWidget {
         Expanded(
           child: _StatCard(
             theme: theme,
-            label: AppStrings.newWordsThisWeek(lang),
-            value: '+$weekNew',
+            label: AppStrings.phraseTapsInPeriod(lang),
+            value: '$phraseTaps',
           ),
         ),
         const SizedBox(width: AppSpacing.sm),
         Expanded(
           child: _StatCard(
             theme: theme,
-            label: AppStrings.newWordsThisMonth(lang),
-            value: '+$monthNew',
+            label: AppStrings.newWordsInPeriod(lang),
+            value: '+$newWords',
           ),
         ),
       ],

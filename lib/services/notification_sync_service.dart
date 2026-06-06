@@ -41,6 +41,11 @@ class NotificationSyncService {
     required String title,
     required String body,
   }) async {
+    var parentIds = await _repository.getLinkedParentIds(learnerUserId);
+    if (parentIds.isEmpty) {
+      parentIds = await _resolveLinkedParentIdsFromCloud(learnerUserId);
+    }
+
     final result = await _repository.sendTeacherAlertToParents(
       teacherUserId: teacherUserId,
       teacherName: teacherName,
@@ -51,55 +56,20 @@ class NotificationSyncService {
       alertType: alertType,
       title: title,
       body: body,
+      parentUserIds: parentIds,
     );
 
-    if (!result.isSuccess || !_cloud.isAvailable) {
-      if (result.status != TeacherAlertStatus.noLinkedParents) {
-        return result;
-      }
-      final learnerFirebaseUid =
-          await _repository.getFirebaseUidForUser(learnerUserId);
-      if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) {
-        return result;
-      }
-      final parentUids =
-          await _cloud.getLinkedParentFirebaseUids(learnerFirebaseUid);
-      if (parentUids.isEmpty) return result;
-      final createdAt = DateTime.now();
-      for (final parentUid in parentUids) {
-        try {
-          await _cloud.publishTeacherAlert(
-            TeacherAlertCloudEvent(
-              localNotificationId: -1,
-              parentUserId: -1,
-              parentFirebaseUid: parentUid,
-              learnerUserId: learnerUserId,
-              childName: learnerName,
-              teacherUserId: teacherUserId,
-              teacherName: teacherName,
-              classId: classId,
-              className: className,
-              alertType: alertType.name,
-              title: title,
-              body: body,
-              createdAt: createdAt,
-            ),
-          );
-        } catch (e, st) {
-          debugPrint('Cloud-only alert publish failed: $e\n$st');
-        }
-      }
-      return TeacherAlertResult(
-        status: TeacherAlertStatus.sent,
-        notificationsSent: parentUids.length,
-      );
+    if (!_cloud.isAvailable) {
+      return result;
     }
 
     final createdAt = DateTime.now();
+    var cloudPublished = 0;
+
     for (final notificationId in result.notificationIds) {
       final parentId =
           await _repository.parentUserIdForNotification(notificationId);
-      if (parentId == null) continue;
+      if (parentId == null || parentId <= 0) continue;
       final parentFirebaseUid =
           await _repository.getFirebaseUidForUser(parentId);
       if (parentFirebaseUid == null || parentFirebaseUid.isEmpty) continue;
@@ -121,12 +91,85 @@ class NotificationSyncService {
             createdAt: createdAt,
           ),
         );
+        cloudPublished++;
       } catch (e, st) {
         debugPrint('Cloud alert publish failed: $e\n$st');
       }
     }
 
+    if (cloudPublished == 0) {
+      final learnerFirebaseUid =
+          await _repository.getFirebaseUidForUser(learnerUserId);
+      if (learnerFirebaseUid != null && learnerFirebaseUid.isNotEmpty) {
+        final parentUids =
+            await _cloud.getLinkedParentFirebaseUids(learnerFirebaseUid);
+        final localNotificationId =
+            result.notificationIds.isNotEmpty ? result.notificationIds.first : -1;
+        for (final parentUid in parentUids) {
+          try {
+            await _cloud.publishTeacherAlert(
+              TeacherAlertCloudEvent(
+                localNotificationId: localNotificationId,
+                parentUserId: -1,
+                parentFirebaseUid: parentUid,
+                learnerUserId: learnerUserId,
+                childName: learnerName,
+                teacherUserId: teacherUserId,
+                teacherName: teacherName,
+                classId: classId,
+                className: className,
+                alertType: alertType.name,
+                title: title,
+                body: body,
+                createdAt: createdAt,
+              ),
+            );
+            cloudPublished++;
+          } catch (e, st) {
+            debugPrint('Cloud-only alert publish failed: $e\n$st');
+          }
+        }
+      }
+    }
+
+    if (result.status == TeacherAlertStatus.noLinkedParents &&
+        cloudPublished > 0) {
+      return TeacherAlertResult(
+        status: TeacherAlertStatus.sent,
+        notificationsSent: cloudPublished,
+        notificationIds: result.notificationIds,
+      );
+    }
+
     return result;
+  }
+
+  Future<List<int>> _resolveLinkedParentIdsFromCloud(int learnerUserId) async {
+    if (!_cloud.isAvailable) return const [];
+    final learnerFirebaseUid =
+        await _repository.getFirebaseUidForUser(learnerUserId);
+    if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) {
+      return const [];
+    }
+    final parentUids =
+        await _cloud.getLinkedParentFirebaseUids(learnerFirebaseUid);
+    if (parentUids.isEmpty) return const [];
+
+    final parentIds = <int>[];
+    for (final parentUid in parentUids) {
+      final existing = await _repository.findUserByFirebaseUid(parentUid);
+      if (existing != null) {
+        parentIds.add(existing.id);
+        continue;
+      }
+      final id = await _repository.ensureUserStubFromFirebase(
+        firebaseUid: parentUid,
+        role: 'parent',
+        displayName: 'Parent',
+      );
+      parentIds.add(id);
+    }
+    return parentIds;
   }
 
   Future<void> syncParentChildLink({
@@ -245,6 +288,11 @@ class NotificationSyncService {
     await _cloud.removeTeacherClass(classCode: classCode);
   }
 
+  Future<void> removeClassEnrollmentsForClass({required String classCode}) async {
+    if (!_cloud.isAvailable || classCode.trim().isEmpty) return;
+    await _cloud.removeClassEnrollmentsForClass(classCode: classCode);
+  }
+
   Future<List<RemoteTeacherClass>> getTeacherClassesFromCloud(
     String teacherFirebaseUid,
   ) async {
@@ -355,7 +403,7 @@ class NotificationSyncService {
       learnerUserId: learnerUserId,
       learnerName: learnerName,
       learnerFirebaseUid: learnerFirebaseUid,
-      contacts: contacts,
+      contacts: AppRepository.normalizeEmergencyContacts(contacts),
       profileCode: profileCode,
     );
   }
@@ -387,27 +435,37 @@ class NotificationSyncService {
     }
   }
 
-  /// Local SQLite first; falls back to Firestore when the teacher device has no
-  /// copy of the learner's emergency contacts (typical cross-device setup).
+  /// Learner's cloud profile is the source of truth when available; otherwise
+  /// uses the teacher device's local copy.
   Future<List<String>> resolveEmergencyContacts({
     required int learnerUserId,
     required List<String> localContacts,
     String? learnerFirebaseUid,
   }) async {
-    if (localContacts.isNotEmpty) return localContacts;
+    final normalizedLocal =
+        AppRepository.normalizeEmergencyContacts(localContacts);
     final uid = learnerFirebaseUid?.trim();
     if (!_cloud.isAvailable || uid == null || uid.isEmpty) {
-      return localContacts;
+      return normalizedLocal;
     }
     try {
-      final cloudContacts = await _cloud.getLearnerEmergencyContacts(uid);
-      if (cloudContacts.isEmpty) return localContacts;
-      await _repository.updateEmergencyContacts(learnerUserId, cloudContacts);
-      return cloudContacts;
+      final cloudContacts = AppRepository.normalizeEmergencyContacts(
+        await _cloud.getLearnerEmergencyContacts(uid),
+      );
+      final merged = AppRepository.normalizeEmergencyContacts([
+        ...cloudContacts,
+        ...normalizedLocal,
+      ]);
+      if (merged.isNotEmpty) {
+        if (merged.join('|') != normalizedLocal.join('|')) {
+          await _repository.updateEmergencyContacts(learnerUserId, merged);
+        }
+        return merged;
+      }
     } catch (e, st) {
       debugPrint('Cloud emergency contact fetch failed: $e\n$st');
-      return localContacts;
     }
+    return normalizedLocal;
   }
 
   Future<void> startParentSync({
@@ -418,7 +476,14 @@ class NotificationSyncService {
     await stopParentSync();
     _onParentNotificationsChanged = onChanged;
 
-    if (!_cloud.isAvailable || parentFirebaseUid.trim().isEmpty) return;
+    await _cloud.initialize();
+    if (!_cloud.isAvailable || parentFirebaseUid.trim().isEmpty) {
+      debugPrint(
+        'Parent notification sync unavailable '
+        '(cloud=${_cloud.isAvailable}, uid=${parentFirebaseUid.isNotEmpty}).',
+      );
+      return;
+    }
 
     _parentSubscription = _cloud
         .watchParentNotifications(

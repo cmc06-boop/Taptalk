@@ -33,6 +33,8 @@ class PhraseSectionHeader extends StatelessWidget {
       ),
       child: Text(
         AppStrings.phrasesLabel(categoryLabel, lang),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
         style: GoogleFonts.poppins(
           fontSize: 18,
           fontWeight: FontWeight.w800,

@@ -6,6 +6,7 @@ import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../data/models/phrase_model.dart';
 import '../providers/app_state.dart';
+import 'highlighting_text_controller.dart';
 import 'phrase_image.dart';
 
 class PhraseCard extends StatelessWidget {
@@ -49,8 +50,17 @@ class PhraseCard extends StatelessWidget {
     final actionIcon = dense ? 14.0 : 15.0;
     final labelSize = dense ? 9.0 : 10.0;
     final titleSize = dense ? 9.5 : 11.0;
-    final phraseText = displayText ?? app.localizedPhraseText(phrase);
+    final phraseText = displayText ??
+        app.localizedPhraseText(phrase);
     final canEdit = showEdit && !phrase.isBuiltin && onEdit != null;
+    final isSpeakingThisPhrase = app.isSpeaking &&
+        app.speakingText.trim() == phraseText.trim();
+    final phraseStyle = GoogleFonts.poppins(
+      fontSize: titleSize,
+      fontWeight: FontWeight.w800,
+      color: theme.textMain,
+      height: 1.12,
+    );
 
     return Material(
       color: theme.bgMid,
@@ -122,18 +132,26 @@ class PhraseCard extends StatelessWidget {
                 SizedBox(
                   height: dense ? 28 : 32,
                   child: Center(
-                    child: Text(
-                      phraseText,
-                      textAlign: TextAlign.center,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        fontSize: titleSize,
-                        fontWeight: FontWeight.w800,
-                        color: theme.textMain,
-                        height: 1.12,
-                      ),
-                    ),
+                    child: isSpeakingThisPhrase
+                        ? RichText(
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            text: buildHighlightedTextSpan(
+                              text: phraseText,
+                              start: app.spokenWordStart,
+                              end: app.spokenWordEnd,
+                              accent: theme.bgAccent,
+                              style: phraseStyle,
+                            ),
+                          )
+                        : Text(
+                            phraseText,
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: phraseStyle,
+                          ),
                   ),
                 ),
                 SizedBox(height: dense ? 3 : AppSpacing.xs),

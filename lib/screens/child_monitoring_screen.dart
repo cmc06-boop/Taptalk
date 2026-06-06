@@ -46,18 +46,22 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
   ChildSessionSummary _sessionSummary = ChildSessionSummary.empty;
   VocabularyGrowthSummary _vocabularyGrowth = VocabularyGrowthSummary.empty;
   bool _loadingStats = false;
+  bool _hasLoadedOnce = false;
   int _reloadNonce = 0;
   bool _monthPickerExpanded = false;
   Timer? _liveSessionTimer;
+  DateTime? _trackingSince;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _reloadStats());
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _reloadStats(refreshLinks: true),
+    );
     _liveSessionTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) {
-        if (_period == ChildUsagePeriod.today) {
+        if (_period == ChildUsagePeriod.today && _hasLoadedOnce) {
           _reloadStats();
         }
       },
@@ -70,53 +74,65 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
     super.dispose();
   }
 
-  Future<void> _reloadStats() async {
+  Future<void> _reloadStats({bool refreshLinks = false}) async {
     final app = context.read<AppState>();
-    setState(() => _loadingStats = true);
-    await app.refreshChildMonitoringData(widget.learner.learnerId);
-    final month = _period == ChildUsagePeriod.month
-        ? _resolvedSelectedMonth(_monthOptions())
-        : null;
-    final statsFuture = app.getChildPhraseStats(
-      learnerUserId: widget.learner.learnerId,
-      period: _period,
-      month: month,
-    );
-    final sessionFuture = app.getChildSessionSummary(
-      learnerUserId: widget.learner.learnerId,
-      period: _period,
-      month: month,
-    );
-    final vocabularyFuture = app.getChildVocabularyGrowth(
-      learnerUserId: widget.learner.learnerId,
-      period: _period,
-      month: month,
-      linkedAt: widget.learner.trackingSince,
-    );
-    final categoriesFuture =
-        app.getCategoriesForMonitoring(widget.learner.learnerId);
-    final results = await Future.wait([
-      statsFuture,
-      sessionFuture,
-      vocabularyFuture,
-      categoriesFuture,
-    ]);
     if (mounted) {
+      setState(() => _loadingStats = true);
+    }
+    try {
+      if (refreshLinks || !_hasLoadedOnce) {
+        await app.refreshChildMonitoringData(widget.learner.learnerId);
+      }
+      final trackingSince = await app.getLearnerMonitoringSince(
+        widget.learner.learnerId,
+      );
+      final month = _period == ChildUsagePeriod.month
+          ? _resolvedSelectedMonth(_monthOptions(trackingSince))
+          : null;
+      final results = await Future.wait([
+        app.getChildPhraseStats(
+          learnerUserId: widget.learner.learnerId,
+          period: _period,
+          month: month,
+        ),
+        app.getChildSessionSummary(
+          learnerUserId: widget.learner.learnerId,
+          period: _period,
+          month: month,
+        ),
+        app.getChildVocabularyGrowth(
+          learnerUserId: widget.learner.learnerId,
+          period: _period,
+          month: month,
+          linkedAt: trackingSince,
+        ),
+        app.getCategoriesForMonitoring(widget.learner.learnerId),
+      ]);
+      if (!mounted) return;
       setState(() {
+        _trackingSince = trackingSince;
         _stats = results[0] as List<PhraseUsageStat>;
         _sessionSummary = results[1] as ChildSessionSummary;
         _vocabularyGrowth = results[2] as VocabularyGrowthSummary;
         _childCategories = results[3] as List<CategoryModel>;
-        _loadingStats = false;
         _reloadNonce++;
       });
+    } catch (e, st) {
+      debugPrint('Monitoring stats load failed: $e\n$st');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingStats = false;
+          _hasLoadedOnce = true;
+        });
+      }
     }
   }
 
   /// Months from link date or up to the last 3 years, through the current month.
-  List<DateTime> _monthOptions() {
+  List<DateTime> _monthOptions([DateTime? trackingSince]) {
     final now = DateTime.now();
-    final linked = widget.learner.trackingSince;
+    final linked = trackingSince ?? _trackingSince ?? widget.learner.trackingSince;
     final linkedStart = DateTime(linked.year, linked.month);
     final threeYearsBack = DateTime(now.year - 3, now.month);
     final start =
@@ -147,9 +163,48 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
     ).format(month);
   }
 
+  String _periodLabel(AppLanguage lang, DateTime selectedMonth) {
+    switch (_period) {
+      case ChildUsagePeriod.today:
+        return AppStrings.today(lang);
+      case ChildUsagePeriod.thisWeek:
+        return AppStrings.thisWeek(lang);
+      case ChildUsagePeriod.month:
+        return _formatMonth(selectedMonth, lang);
+    }
+  }
+
+  int get _periodPhraseTaps =>
+      _stats.fold<int>(0, (sum, stat) => sum + stat.count);
+
+  int get _periodPhrasesUsed {
+    final seen = <String>{};
+    for (final stat in _stats) {
+      seen.add('${stat.categoryKey}|${stat.text}');
+    }
+    return seen.length;
+  }
+
+  void _selectPeriod(ChildUsagePeriod period) {
+    if (_period == period && period != ChildUsagePeriod.month) return;
+    setState(() {
+      _period = period;
+      _monthPickerExpanded = false;
+    });
+    _reloadStats();
+  }
+
+  void _selectMonth(DateTime month) {
+    setState(() {
+      _selectedMonth = month;
+      _monthPickerExpanded = false;
+    });
+    _reloadStats();
+  }
+
   String _categoryLabel(AppState app, String categoryKey) {
     final normalizedKey = AppRepository.normalizeCategoryKey(categoryKey);
-    for (final cat in [..._childCategories, ...app.categories]) {
+    for (final cat in _childCategories) {
       if (AppRepository.normalizeCategoryKey(cat.key) == normalizedKey ||
           AppRepository.normalizeCategoryKey(cat.name) == normalizedKey) {
         return app.localizedCategoryName(cat);
@@ -273,13 +328,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                               ? theme.bgAccent.withValues(alpha: 0.10)
                               : Colors.transparent,
                           child: InkWell(
-                            onTap: () {
-                              setState(() {
-                                _selectedMonth = month;
-                                _monthPickerExpanded = false;
-                              });
-                              _reloadStats();
-                            },
+                            onTap: () => _selectMonth(month),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: AppSpacing.md,
@@ -328,23 +377,46 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
     required TapTalkThemeToken theme,
     required VoidCallback onTap,
   }) {
-    return Material(
-      color: selected ? theme.bgAccent : theme.bgMid.withValues(alpha: 0.65),
-      borderRadius: BorderRadius.circular(999),
-      child: InkWell(
-        onTap: onTap,
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md,
-            vertical: AppSpacing.sm,
-          ),
-          child: Text(
-            label,
-            style: GoogleFonts.poppins(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: selected ? Colors.white : theme.textMain,
+        border: Border.all(
+          color: selected
+              ? theme.bgAccent
+              : theme.textMain.withValues(alpha: 0.12),
+          width: selected ? 1.5 : 1,
+        ),
+        boxShadow: selected
+            ? [
+                BoxShadow(
+                  color: theme.bgAccent.withValues(alpha: 0.28),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
+      ),
+      child: Material(
+        color: selected ? theme.bgAccent : theme.bgMid.withValues(alpha: 0.65),
+        borderRadius: BorderRadius.circular(999),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(999),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.sm,
+              vertical: AppSpacing.xs + 2,
+            ),
+            child: Text(
+              label,
+              style: GoogleFonts.poppins(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: selected ? Colors.white : theme.textMain,
+                height: 1.1,
+              ),
             ),
           ),
         ),
@@ -362,43 +434,41 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Wrap(
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.sm,
+          spacing: AppSpacing.xs,
+          runSpacing: AppSpacing.xs,
           children: [
             _periodChip(
               label: AppStrings.today(lang),
               selected: _period == ChildUsagePeriod.today,
               theme: theme,
-              onTap: () {
-                setState(() {
-                  _period = ChildUsagePeriod.today;
-                  _monthPickerExpanded = false;
-                });
-                _reloadStats();
-              },
+              onTap: () => _selectPeriod(ChildUsagePeriod.today),
             ),
             _periodChip(
               label: AppStrings.thisWeek(lang),
               selected: _period == ChildUsagePeriod.thisWeek,
               theme: theme,
-              onTap: () {
-                setState(() {
-                  _period = ChildUsagePeriod.thisWeek;
-                  _monthPickerExpanded = false;
-                });
-                _reloadStats();
-              },
+              onTap: () => _selectPeriod(ChildUsagePeriod.thisWeek),
             ),
             _periodChip(
               label: AppStrings.month(lang),
               selected: _period == ChildUsagePeriod.month,
               theme: theme,
-              onTap: () {
-                setState(() => _period = ChildUsagePeriod.month);
-                _reloadStats();
-              },
+              onTap: () => _selectPeriod(ChildUsagePeriod.month),
             ),
           ],
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          AppStrings.monitoringShowingPeriod(
+            lang,
+            _periodLabel(lang, selectedMonth),
+          ),
+          style: GoogleFonts.poppins(
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+            color: theme.textMain.withValues(alpha: 0.58),
+            height: 1.3,
+          ),
         ),
         if (_period == ChildUsagePeriod.month) ...[
           const SizedBox(height: AppSpacing.sm),
@@ -418,7 +488,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
     final app = context.watch<AppState>();
     final theme = app.theme;
     final lang = app.language;
-    final monthOptions = _monthOptions();
+    final monthOptions = _monthOptions(_trackingSince);
     final selectedMonth = _resolvedSelectedMonth(monthOptions);
 
     final contextSubtitle = widget.learner.contextSubtitle;
@@ -429,8 +499,9 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
       showBackButton: true,
       showBottomNav: false,
       body: RefreshIndicator(
-        onRefresh: _reloadStats,
+        onRefresh: () => _reloadStats(refreshLinks: true),
         child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
         children: [
           if (contextSubtitle != null)
@@ -492,9 +563,14 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                       child: Center(child: CircularProgressIndicator()),
                     )
                   : VocabularyGrowthSection(
+                      key: ValueKey(
+                        'vocab_${_period.name}_$_reloadNonce',
+                      ),
                       summary: _vocabularyGrowth,
                       theme: theme,
                       lang: lang,
+                      phrasesUsed: _periodPhrasesUsed,
+                      phraseTaps: _periodPhraseTaps,
                     ),
             ),
           ),
@@ -527,6 +603,9 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                       child: Center(child: CircularProgressIndicator()),
                     )
                   : CategoriesUsedSection(
+                      key: ValueKey(
+                        'categories_${_period.name}_$_reloadNonce',
+                      ),
                       slices: _vocabularyGrowth.categorySlices,
                       allCategories: _childCategories,
                       theme: theme,
@@ -562,7 +641,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                 learnerUserId: widget.learner.learnerId,
                 period: _period,
                 month: _period == ChildUsagePeriod.month
-                    ? _resolvedSelectedMonth(_monthOptions())
+                    ? _resolvedSelectedMonth(_monthOptions(_trackingSince))
                     : null,
                 reloadNonce: _reloadNonce,
                 theme: theme,
@@ -600,10 +679,16 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                       child: Center(child: CircularProgressIndicator()),
                     )
                   : FrequentlyUsedSection(
+                      key: ValueKey(
+                        'frequent_${_period.name}_$_reloadNonce',
+                      ),
                       stats: _stats,
                       theme: theme,
                       lang: lang,
                       reloadNonce: _reloadNonce,
+                      allowedCategoryKeys: _childCategories
+                          .map((c) => AppRepository.normalizeCategoryKey(c.key))
+                          .toSet(),
                       labelForCategory: (key) => _categoryLabel(app, key),
                       labelForPhrase: (stat) => app.localizedPhrase(
                         stat.text,
@@ -657,6 +742,9 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                       child: Center(child: CircularProgressIndicator()),
                     )
                   : SessionUsageChart(
+                      key: ValueKey(
+                        'sessions_${_period.name}_$_reloadNonce',
+                      ),
                       summary: _sessionSummary,
                       theme: theme,
                       lang: lang,

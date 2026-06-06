@@ -38,9 +38,10 @@ abstract final class AppSpacing {
     return phoneMaxWidth;
   }
 
-  /// Phrase grids: 2 columns on phone, 3 on wider screens.
+  /// Phrase grids: 2 columns on phone, 3 on tablet, 5 on desktop/Windows.
   static int phraseGridColumns(BuildContext context) {
     final w = MediaQuery.sizeOf(context).width;
+    if (w >= 1100) return 5;
     if (w >= 600) return 3;
     return 2;
   }

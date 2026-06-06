@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../core/l10n/app_strings.dart';
 import '../data/models/sms_alert_result.dart';
+import '../data/repositories/app_repository.dart';
 
 /// Sends SMS through the device's cellular plan (works without mobile data / Wi‑Fi).
 class DeviceSmsService {
@@ -42,6 +43,10 @@ class DeviceSmsService {
     return normalizedE164;
   }
 
+  String _multiRecipientAddress(List<String> localNumbers) {
+    return localNumbers.join(';');
+  }
+
   Future<bool> _ensureAndroidSmsPermissions() async {
     if (!Platform.isAndroid) return true;
     var status = await Permission.sms.status;
@@ -56,16 +61,22 @@ class DeviceSmsService {
     required List<String> rawContacts,
     required String message,
   }) async {
+    final uniqueContacts = AppRepository.normalizeEmergencyContacts(rawContacts);
     final normalized = <String>[];
     final invalid = <String>[];
-    for (final raw in rawContacts.take(2)) {
+    for (final raw in uniqueContacts) {
       final phone = normalizePhoneNumber(raw);
       if (phone == null) {
-        if (raw.trim().isNotEmpty) invalid.add(raw.trim());
+        invalid.add(raw);
       } else if (!normalized.contains(phone)) {
         normalized.add(phone);
       }
     }
+
+    debugPrint(
+      'Device SMS: sending to ${normalized.length} recipient(s): '
+      '${normalized.map(toLocalSmsDialString).join(", ")}',
+    );
 
     if (normalized.isEmpty) {
       return SmsAlertResult(
@@ -78,7 +89,7 @@ class DeviceSmsService {
     }
 
     if (Platform.isAndroid) {
-      return _sendAndroidDirect(
+      return _sendAndroidBatch(
         language: language,
         numbers: normalized,
         invalid: invalid,
@@ -94,7 +105,7 @@ class DeviceSmsService {
     );
   }
 
-  Future<SmsAlertResult> _sendAndroidDirect({
+  Future<SmsAlertResult> _sendAndroidBatch({
     required AppLanguage language,
     required List<String> numbers,
     required List<String> invalid,
@@ -111,60 +122,83 @@ class DeviceSmsService {
       );
     }
 
-    var sent = 0;
-    var failed = 0;
-    String? lastError;
-    final failedNumbers = <String>[];
+    final addresses = numbers.map(toLocalSmsDialString).toList();
 
-    for (final to in numbers) {
-      final address = toLocalSmsDialString(to);
-      try {
-        final ok = await _channel.invokeMethod<bool>('sendSms', {
-          'to': address,
+    try {
+      final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+        'sendSmsBatch',
+        {
+          'recipients': addresses,
           'message': message,
-        });
-        if (ok == true) {
-          sent++;
-          debugPrint('Device SMS: sent to $address');
-        } else {
-          failed++;
-          failedNumbers.add(address);
-          lastError = AppStrings.smsSendFailed(language);
-          debugPrint('Device SMS: failed to $address');
-        }
-      } on PlatformException catch (e, st) {
-        failed++;
-        failedNumbers.add(address);
-        lastError = _mapPlatformError(language, e);
-        debugPrint('Device SMS failed to $address: ${e.code} ${e.message}\n$st');
-      } catch (e, st) {
-        failed++;
-        failedNumbers.add(address);
-        lastError = AppStrings.smsSendFailed(language);
-        debugPrint('Device SMS failed to $address: $e\n$st');
-      }
-    }
+        },
+      );
 
-    if (sent > 0) {
-      return SmsAlertResult(
-        attempted: numbers.length,
-        sent: sent,
-        failed: failed,
-        invalidContacts: invalid,
+      final sent = (result?['sent'] as int?) ?? 0;
+      final failed = (result?['failed'] as int?) ?? 0;
+      final attempted = (result?['attempted'] as int?) ?? numbers.length;
+      final failedNumbers = (result?['failedNumbers'] as List<Object?>?)
+              ?.whereType<String>()
+              .toList() ??
+          <String>[];
+
+      debugPrint(
+        'Device SMS batch: sent=$sent failed=$failed attempted=$attempted',
+      );
+
+      if (sent == attempted && sent == numbers.length) {
+        return SmsAlertResult(
+          attempted: numbers.length,
+          sent: sent,
+          failed: 0,
+          invalidContacts: invalid,
+        );
+      }
+
+      final unsent =
+          failedNumbers.isNotEmpty ? failedNumbers : addresses;
+
+      final composer = await _openDefaultSmsApp(
+        language: language,
+        numbers: unsent,
+        invalid: invalid,
+        message: message,
+        lastError: AppStrings.smsSendFailed(language),
+        markComposerAsSent: sent == 0,
+      );
+
+      if (sent > 0) {
+        return SmsAlertResult(
+          attempted: numbers.length,
+          sent: sent,
+          failed: failed > 0 ? failed : numbers.length - sent,
+          invalidContacts: invalid,
+          openedComposer: composer.openedComposer,
+          errorMessage: sent < numbers.length
+              ? AppStrings.smsSendFailed(language)
+              : null,
+        );
+      }
+
+      return composer;
+    } on PlatformException catch (e, st) {
+      debugPrint('Device SMS batch failed: ${e.code} ${e.message}\n$st');
+      if (e.code == 'PERMISSION_DENIED') {
+        return SmsAlertResult(
+          attempted: numbers.length,
+          sent: 0,
+          failed: numbers.length,
+          invalidContacts: invalid,
+          errorMessage: AppStrings.smsPermissionDenied(language),
+        );
+      }
+      return _openDefaultSmsApp(
+        language: language,
+        numbers: addresses,
+        invalid: invalid,
+        message: message,
+        lastError: AppStrings.smsSendFailed(language),
       );
     }
-
-    // Some OEM phones (e.g. Transsion/Tecno) block silent SMS from third-party apps.
-    // Fall back to the default Messages app with the alert pre-filled.
-    return _openDefaultSmsApp(
-      language: language,
-      numbers: failedNumbers.isEmpty
-          ? numbers.map(toLocalSmsDialString).toList()
-          : failedNumbers,
-      invalid: invalid,
-      message: message,
-      lastError: lastError,
-    );
   }
 
   Future<SmsAlertResult> _openDefaultSmsApp({
@@ -173,8 +207,9 @@ class DeviceSmsService {
     required List<String> invalid,
     required String message,
     String? lastError,
+    bool markComposerAsSent = true,
   }) async {
-    final address = numbers.first;
+    final address = _multiRecipientAddress(numbers);
     try {
       await _channel.invokeMethod<bool>('openSmsApp', {
         'to': address,
@@ -183,8 +218,8 @@ class DeviceSmsService {
       debugPrint('Device SMS: opened Messages app for $address');
       return SmsAlertResult(
         attempted: numbers.length,
-        sent: 1,
-        failed: numbers.length > 1 ? numbers.length - 1 : 0,
+        sent: markComposerAsSent ? numbers.length : 0,
+        failed: markComposerAsSent ? 0 : numbers.length,
         invalidContacts: invalid,
         openedComposer: true,
       );
@@ -200,14 +235,6 @@ class DeviceSmsService {
     }
   }
 
-  String _mapPlatformError(AppLanguage language, PlatformException error) {
-    return switch (error.code) {
-      'PERMISSION_DENIED' => AppStrings.smsPermissionDenied(language),
-      'NO_SERVICE' || 'RADIO_OFF' => AppStrings.smsNoSignal(language),
-      _ => AppStrings.smsSendFailed(language),
-    };
-  }
-
   Future<SmsAlertResult> _openSmsComposer({
     required AppLanguage language,
     required List<String> numbers,
@@ -215,7 +242,8 @@ class DeviceSmsService {
     required String message,
     String? lastError,
   }) async {
-    final address = numbers.first;
+    final localNumbers = numbers.map(toLocalSmsDialString).toList();
+    final address = _multiRecipientAddress(localNumbers);
     final uri = Uri(
       scheme: 'smsto',
       path: address,
@@ -227,11 +255,12 @@ class DeviceSmsService {
     );
     return SmsAlertResult(
       attempted: numbers.length,
-      sent: launched ? 1 : 0,
-      failed: launched ? numbers.length - 1 : numbers.length,
+      sent: launched ? numbers.length : 0,
+      failed: launched ? 0 : numbers.length,
       invalidContacts: invalid,
       openedComposer: launched,
-      errorMessage: launched ? null : (lastError ?? AppStrings.smsSendFailed(language)),
+      errorMessage:
+          launched ? null : (lastError ?? AppStrings.smsSendFailed(language)),
     );
   }
 }

@@ -7,6 +7,7 @@ import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../core/utils/auth_validation.dart';
+import '../data/repositories/app_repository.dart';
 import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/password_strength_hint.dart';
@@ -69,12 +70,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   List<String> get _draftEmergencyContacts {
-    final out = <String>[];
     final first = _emergency1Controller.text.trim();
     final second = _emergency2Controller.text.trim();
-    if (first.isNotEmpty) out.add(first);
-    if (_showSecondEmergency && second.isNotEmpty) out.add(second);
-    return out.take(2).toList();
+    final raw = <String>[];
+    if (first.isNotEmpty) raw.add(first);
+    if (_showSecondEmergency && second.isNotEmpty) raw.add(second);
+    return AppRepository.normalizeEmergencyContacts(raw);
   }
 
   bool _hasChanges(AppState app) {

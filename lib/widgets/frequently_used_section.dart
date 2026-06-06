@@ -18,6 +18,7 @@ class FrequentlyUsedSection extends StatefulWidget {
     required this.labelForCategory,
     required this.labelForPhrase,
     required this.reloadNonce,
+    this.allowedCategoryKeys,
   });
 
   final List<PhraseUsageStat> stats;
@@ -26,6 +27,7 @@ class FrequentlyUsedSection extends StatefulWidget {
   final String Function(String categoryKey) labelForCategory;
   final String Function(PhraseUsageStat stat) labelForPhrase;
   final int reloadNonce;
+  final Set<String>? allowedCategoryKeys;
 
   static const previewPhraseCount = 5;
 
@@ -37,8 +39,15 @@ class _FrequentlyUsedSectionState extends State<FrequentlyUsedSection> {
   String? _selectedCategoryKey;
   bool _dropdownOpen = false;
 
+  bool _isAllowedCategory(String categoryKey) {
+    if (!AppRepository.isPersonalCategoryKey(categoryKey)) return false;
+    final allowed = widget.allowedCategoryKeys;
+    if (allowed == null || allowed.isEmpty) return true;
+    return allowed.contains(AppRepository.normalizeCategoryKey(categoryKey));
+  }
+
   List<PhraseUsageStat> get _personalStats => widget.stats
-      .where((s) => AppRepository.isPersonalCategoryKey(s.categoryKey))
+      .where((s) => _isAllowedCategory(s.categoryKey))
       .toList();
 
   Map<String, List<PhraseUsageStat>> _groupByCategory(

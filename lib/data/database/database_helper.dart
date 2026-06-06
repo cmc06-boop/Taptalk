@@ -5,8 +5,6 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-import '../../core/l10n/content_localization.dart';
-
 class DatabaseHelper {
   DatabaseHelper._();
   static final DatabaseHelper instance = DatabaseHelper._();
@@ -30,7 +28,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 13,
+      version: 15,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE users (
@@ -147,6 +145,56 @@ class DatabaseHelper {
             'WHERE cloud_lesson_key IS NOT NULL',
           );
         }
+        if (oldVersion < 14) {
+          await db.execute(
+            'ALTER TABLE history ADD COLUMN remote_sync_key TEXT',
+          );
+          await db.execute(
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_history_remote_sync_key '
+            'ON history(user_id, remote_sync_key) '
+            'WHERE remote_sync_key IS NOT NULL',
+          );
+        }
+        if (oldVersion < 15) {
+          await db.execute(
+            'ALTER TABLE parent_notifications ADD COLUMN teacher_user_id INTEGER',
+          );
+          await db.execute(
+            'ALTER TABLE parent_notifications ADD COLUMN class_id INTEGER',
+          );
+          await db.execute(
+            'ALTER TABLE parent_notifications ADD COLUMN class_name TEXT',
+          );
+          await db.execute('''
+            UPDATE parent_notifications
+            SET
+              teacher_user_id = (
+                SELECT tc.teacher_user_id
+                FROM class_enrollments ce
+                INNER JOIN teacher_classes tc ON tc.id = ce.class_id
+                WHERE ce.learner_user_id = parent_notifications.learner_user_id
+                ORDER BY ce.enrolled_at DESC
+                LIMIT 1
+              ),
+              class_id = (
+                SELECT ce.class_id
+                FROM class_enrollments ce
+                INNER JOIN teacher_classes tc ON tc.id = ce.class_id
+                WHERE ce.learner_user_id = parent_notifications.learner_user_id
+                ORDER BY ce.enrolled_at DESC
+                LIMIT 1
+              ),
+              class_name = (
+                SELECT tc.class_name
+                FROM class_enrollments ce
+                INNER JOIN teacher_classes tc ON tc.id = ce.class_id
+                WHERE ce.learner_user_id = parent_notifications.learner_user_id
+                ORDER BY ce.enrolled_at DESC
+                LIMIT 1
+              )
+            WHERE teacher_user_id IS NULL
+          ''');
+        }
       },
     );
   }
@@ -208,6 +256,9 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         parent_user_id INTEGER NOT NULL,
         learner_user_id INTEGER,
+        teacher_user_id INTEGER,
+        class_id INTEGER,
+        class_name TEXT,
         child_name TEXT NOT NULL,
         alert_type TEXT NOT NULL,
         title TEXT NOT NULL,
@@ -275,35 +326,7 @@ class DatabaseHelper {
   }
 
   Future<void> _canonicalizeLessonContent(Database db) async {
-    final phraseRows = await db.query('lesson_phrases');
-    for (final row in phraseRows) {
-      final id = row['id'] as int;
-      final text = row['phrase_text'] as String;
-      final canonical = ContentLocalization.canonicalPhrase(text);
-      if (canonical != text) {
-        await db.update(
-          'lesson_phrases',
-          {'phrase_text': canonical},
-          where: 'id = ?',
-          whereArgs: [id],
-        );
-      }
-    }
-
-    final lessonRows = await db.query('class_lessons');
-    for (final row in lessonRows) {
-      final id = row['id'] as int;
-      final title = row['title'] as String;
-      final canonical = ContentLocalization.canonicalPhrase(title);
-      if (canonical != title) {
-        await db.update(
-          'class_lessons',
-          {'title': canonical},
-          where: 'id = ?',
-          whereArgs: [id],
-        );
-      }
-    }
+    // Legacy migration hook: user-entered lesson text is stored as typed.
   }
 
   Future<void> _upgradeBuiltinPhraseImages(Database db) async {

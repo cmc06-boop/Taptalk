@@ -366,6 +366,20 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
         .collection(teacherClassCollectionName)
         .doc(docId)
         .delete();
+    await removeClassEnrollmentsForClass(classCode: classCode);
+  }
+
+  @override
+  Future<void> removeClassEnrollmentsForClass({required String classCode}) async {
+    if (!isAvailable || classCode.trim().isEmpty) return;
+    final normalized = AppRepository.normalizeClassCode(classCode);
+    final snapshot = await FirebaseFirestore.instance
+        .collection(enrollmentCollectionName)
+        .where('classCode', isEqualTo: normalized)
+        .get();
+    for (final doc in snapshot.docs) {
+      await doc.reference.delete();
+    }
   }
 
   @override
@@ -565,12 +579,9 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       if (!doc.exists) return const [];
       final contacts = doc.data()?['emergencyContacts'];
       if (contacts is! List) return const [];
-      return contacts
-          .whereType<String>()
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .take(2)
-          .toList();
+      return AppRepository.normalizeEmergencyContacts(
+        contacts.whereType<String>().toList(),
+      );
     } catch (e, st) {
       debugPrint('getLearnerEmergencyContacts failed: $e\n$st');
       return const [];

@@ -6,6 +6,7 @@ import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/utils/auth_validation.dart';
 import '../providers/app_state.dart';
+import '../widgets/offline_notice_banner.dart';
 import '../widgets/taptalk_logo.dart';
 import '../widgets/taptalk_shell.dart';
 
@@ -147,6 +148,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                 fontWeight: FontWeight.w700,
                                 color: const Color(0xFF5BB88A),
                               ),
+                            ),
+                            OfflineNoticeText(
+                              lang: lang,
+                              noticeContext: OfflineNoticeContext.login,
                             ),
                             if (_error != null) ...[
                               const SizedBox(height: AppSpacing.md),

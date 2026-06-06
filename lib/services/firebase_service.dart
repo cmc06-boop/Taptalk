@@ -6,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
 import '../data/models/firebase_password_reset_result.dart';
+import '../firebase_options.dart';
 
 /// Initializes Firebase Auth used for cross-device notification delivery.
 class FirebaseService {
@@ -74,7 +75,9 @@ class FirebaseService {
       return;
     }
     try {
-      await Firebase.initializeApp().timeout(_initTimeout);
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      ).timeout(_initTimeout);
       _initialized = Firebase.apps.isNotEmpty;
       if (_initialized) {
         debugPrint('Firebase initialized.');
@@ -82,7 +85,7 @@ class FirebaseService {
     } on TimeoutException {
       debugPrint('Firebase init timed out; app continues offline.');
     } catch (e, st) {
-      debugPrint('Firebase init failed (add google-services.json): $e\n$st');
+      debugPrint('Firebase init failed: $e\n$st');
     }
   }
 

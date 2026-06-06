@@ -6,6 +6,7 @@ import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/utils/auth_validation.dart';
 import '../providers/app_state.dart';
+import '../widgets/offline_notice_banner.dart';
 import '../widgets/taptalk_shell.dart';
 
 enum _ForgotStep { enterEmail, checkEmail }
@@ -174,6 +175,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                             ),
                           ],
                           SizedBox(height: sectionGap),
+                          OfflineNoticeText(
+                            lang: lang,
+                            noticeContext: OfflineNoticeContext.passwordReset,
+                          ),
                           Text(
                             AppStrings.forgotPasswordTitle(lang),
                             textAlign: TextAlign.center,

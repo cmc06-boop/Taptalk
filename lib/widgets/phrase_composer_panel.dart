@@ -10,7 +10,21 @@ import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/utils/speak_feedback.dart';
 import '../providers/app_state.dart';
+import 'highlighting_text_controller.dart';
 import 'tts_speed_selector.dart';
+
+/// External handle for appending phrases into [PhraseComposerPanel].
+class PhraseComposerPanelController {
+  _PhraseComposerPanelState? _state;
+
+  void _attach(_PhraseComposerPanelState state) => _state = state;
+
+  void _detach() => _state = null;
+
+  void appendPhrase(String text, {bool speak = false}) {
+    _state?.appendPhrase(text, speak: speak);
+  }
+}
 
 /// Home-style phrase text box with image attach and add button.
 class PhraseComposerPanel extends StatefulWidget {
@@ -18,23 +32,30 @@ class PhraseComposerPanel extends StatefulWidget {
     super.key,
     required this.onAdd,
     this.addLabel,
+    this.composerController,
+    this.speakCategoryKey,
+    this.recordOnPlay = true,
   });
 
   final Future<void> Function(String text, String? imagePath) onAdd;
   final String? addLabel;
+  final PhraseComposerPanelController? composerController;
+  final String? speakCategoryKey;
+  final bool recordOnPlay;
 
   @override
   State<PhraseComposerPanel> createState() => _PhraseComposerPanelState();
 }
 
 class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
-  final _controller = TextEditingController();
+  final _controller = HighlightingTextController();
   final _undoStack = <String>[];
   String? _imagePath;
 
   @override
   void initState() {
     super.initState();
+    widget.composerController?._attach(this);
     _undoStack.add('');
     _controller.addListener(() {
       if (_undoStack.isEmpty || _undoStack.last != _controller.text) {
@@ -45,8 +66,24 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
 
   @override
   void dispose() {
+    widget.composerController?._detach();
     _controller.dispose();
     super.dispose();
+  }
+
+  void appendPhrase(String text, {bool speak = false}) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+    final current = _controller.text.trim();
+    _controller.text = current.isEmpty ? trimmed : '$current $trimmed';
+    if (speak) {
+      speakWithFeedback(
+        context,
+        _controller.text,
+        record: widget.recordOnPlay,
+        categoryKey: widget.speakCategoryKey,
+      );
+    }
   }
 
   Future<void> _pickImage() async {
@@ -72,6 +109,11 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
     final theme = app.theme;
     final lang = app.language;
     final addLabel = widget.addLabel ?? AppStrings.add(lang);
+    _controller.updateHighlight(
+      start: app.spokenWordStart,
+      end: app.spokenWordEnd,
+      accent: theme.bgAccent,
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -242,7 +284,8 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
               onPressed: () => speakWithFeedback(
                 context,
                 _controller.text,
-                record: true,
+                record: widget.recordOnPlay,
+                categoryKey: widget.speakCategoryKey,
               ),
               style: FilledButton.styleFrom(backgroundColor: theme.bgAccent),
               icon: const Icon(Icons.play_arrow_rounded),

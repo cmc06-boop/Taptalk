@@ -73,6 +73,8 @@ class TeacherAlertCard extends StatelessWidget {
                   children: [
                     Text(
                       '$studentName · $timeLabel',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.poppins(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
@@ -82,6 +84,8 @@ class TeacherAlertCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.poppins(
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
@@ -92,6 +96,8 @@ class TeacherAlertCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       className,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.poppins(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,

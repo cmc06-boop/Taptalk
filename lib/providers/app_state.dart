@@ -37,6 +37,7 @@ import '../data/models/teacher_class_student.dart';
 import '../data/models/user_model.dart';
 import '../data/repositories/app_repository.dart';
 import '../services/cloud_notification_backend.dart';
+import '../services/cloud_scope.dart';
 import '../services/firebase_service.dart';
 import '../services/firestore_notification_backend.dart';
 import '../services/notification_sync_service.dart';
@@ -85,6 +86,7 @@ class AppState extends ChangeNotifier {
   AppRoute _route = AppRoute.welcome;
   TapTalkThemeToken _theme = TapTalkThemes.appDefault;
   AppLanguage _language = AppLanguage.english;
+  int _languageRevision = 0;
   double _ttsSpeed = TtsSpeedOptions.defaultSpeed;
   String _selectedCategoryKey = 'feelings';
   bool _drawerOpen = false;
@@ -106,12 +108,17 @@ class AppState extends ChangeNotifier {
   int? _selectedChildId;
   List<EnrolledClassModel> _enrolledClasses = [];
   List<({int id, String name, String code})> _teacherClasses = [];
+  int _teacherStudentCount = 0;
+  final Map<int, int> _teacherClassStudentCounts = {};
+  final Set<String> _deletedClassCodes = {};
+  int _teacherAlertsRevision = 0;
 
   bool get loading => _loading;
   UserModel? get user => _user;
   AppRoute get route => _route;
   TapTalkThemeToken get theme => _theme;
   AppLanguage get language => _language;
+  int get languageRevision => _languageRevision;
   double get ttsSpeed => _ttsSpeed;
   String get selectedCategoryKey => _selectedCategoryKey;
   bool get drawerOpen => _drawerOpen;
@@ -120,10 +127,32 @@ class AppState extends ChangeNotifier {
   int get spokenWordStart => _spokenWordStart;
   int get spokenWordEnd => _spokenWordEnd;
   List<String> get emergencyContacts => List.unmodifiable(_emergencyContacts);
-  List<CategoryModel> get categories => _categories;
-  List<PhraseModel> get phrases => _phrases;
-  List<FavoriteModel> get favorites => _favorites;
-  List<HistoryModel> get history => _history;
+  int? get _personalBoardUserId => _user?.id;
+
+  /// For Me board: defaults + only this signed-in user's custom entries.
+  List<CategoryModel> get categories {
+    final ownerId = _personalBoardUserId;
+    if (ownerId == null) return const [];
+    return _categories.where((c) => c.userId == ownerId).toList();
+  }
+
+  List<PhraseModel> get phrases {
+    final ownerId = _personalBoardUserId;
+    if (ownerId == null) return const [];
+    return _phrases.where((p) => p.userId == ownerId).toList();
+  }
+
+  List<FavoriteModel> get favorites {
+    final ownerId = _personalBoardUserId;
+    if (ownerId == null) return const [];
+    return _favorites.where((f) => f.userId == ownerId).toList();
+  }
+
+  List<HistoryModel> get history {
+    final ownerId = _personalBoardUserId;
+    if (ownerId == null) return const [];
+    return _history.where((h) => h.userId == ownerId).toList();
+  }
   List<LinkedChildModel> get linkedChildren => _linkedChildren;
   List<ParentNotification> get notifications =>
       List.unmodifiable(_notifications);
@@ -133,6 +162,10 @@ class AppState extends ChangeNotifier {
   List<EnrolledClassModel> get enrolledClasses => _enrolledClasses;
   List<({int id, String name, String code})> get teacherClasses =>
       _teacherClasses;
+  int get teacherStudentCount => _teacherStudentCount;
+  int get teacherAlertsRevision => _teacherAlertsRevision;
+  int teacherClassStudentCount(int classId) =>
+      _teacherClassStudentCounts[classId] ?? 0;
   int? get selectedChildId => _selectedChildId;
 
   LinkedChildModel? get selectedChild {
@@ -143,15 +176,31 @@ class AppState extends ChangeNotifier {
     return _linkedChildren.isNotEmpty ? _linkedChildren.first : null;
   }
 
-  List<PhraseModel> get phrasesForCategory => _phrases
-      .where((p) => p.categoryKey == _selectedCategoryKey && p.isActive)
-      .toList();
+  List<PhraseModel> get phrasesForCategory {
+    final ownerId = _personalBoardUserId;
+    if (ownerId == null) return const [];
+    return _phrases
+        .where(
+          (p) =>
+              p.userId == ownerId &&
+              p.categoryKey == _selectedCategoryKey &&
+              p.isActive,
+        )
+        .toList();
+  }
 
   CategoryModel? get selectedCategory {
-    for (final c in _categories) {
+    for (final c in categories) {
       if (c.key == _selectedCategoryKey) return c;
     }
     return null;
+  }
+
+  bool _isPersonalBoardRoute(AppRoute route) {
+    return route == AppRoute.home ||
+        route == AppRoute.favorites ||
+        route == AppRoute.history ||
+        route == AppRoute.chooseCategory;
   }
 
   void _bindTtsCallbacks() {
@@ -232,45 +281,39 @@ class AppState extends ChangeNotifier {
 
   Future<void> _init() async {
     try {
-      await FirebaseService.instance.initialize();
-      await _notificationSync.initialize();
       final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getInt('user_id');
-      await tts.init();
 
       if (userId != null) {
         _user = await _repo.findUserById(userId);
       }
 
       if (_user != null) {
-        await _syncFirebaseSessionAfterRestore();
-      }
-
-      if (_user != null) {
-          if (_user!.needsTheme) {
-            _theme = TapTalkThemes.appDefault;
-          } else {
-            _theme = TapTalkThemes.byKey(_user!.themeKey);
-          }
-          await _loadLearnerData();
-          if (_user!.needsTheme) {
-            _route = AppRoute.chooseTheme;
-          } else if (_user!.isLearner) {
-            final categoryDone = await _isCategoryOnboardingDone(_user!.id);
-            _route = categoryDone ? AppRoute.home : AppRoute.chooseCategory;
-          } else if (_user!.isParent) {
-            await _ensureStarterData();
-            await _loadLinkedChildren();
-            _route = AppRoute.home;
-          } else if (_user!.isTeacher) {
-            await _loadLearnerData();
-            await _ensureStarterData();
-            await refreshTeacherClasses();
-            _route = AppRoute.teacherDashboard;
-          } else {
-            _route = AppRoute.login;
-          }
+        if (_user!.needsTheme) {
+          _theme = TapTalkThemes.appDefault;
+        } else {
+          _theme = TapTalkThemes.byKey(_user!.themeKey);
         }
+        await _loadLearnerData(cloudSyncInBackground: true);
+        if (_user!.needsTheme) {
+          _route = AppRoute.chooseTheme;
+        } else if (_user!.isLearner) {
+          await _ensureStarterData();
+          final categoryDone = await _isCategoryOnboardingDone(_user!.id);
+          _route = categoryDone ? AppRoute.home : AppRoute.chooseCategory;
+        } else if (_user!.isParent) {
+          await _ensureStarterData();
+          await _loadLinkedChildren(syncCloudInBackground: true);
+          _route = AppRoute.home;
+        } else if (_user!.isTeacher) {
+          await _loadLearnerData(cloudSyncInBackground: true);
+          await _ensureStarterData();
+          await refreshTeacherClasses(cloudSyncInBackground: true);
+          _route = AppRoute.teacherDashboard;
+        } else {
+          _route = AppRoute.login;
+        }
+      }
     } catch (e, st) {
       debugPrint('TapTalk init failed: $e\n$st');
       if (_user == null) _route = AppRoute.welcome;
@@ -280,6 +323,58 @@ class AppState extends ChangeNotifier {
       }
       _loading = false;
       notifyListeners();
+      unawaited(_initCloudServicesInBackground());
+    }
+  }
+
+  /// Firebase (auth + notifications) and TTS — runs after the first screen is shown.
+  Future<void> _initCloudServicesInBackground() async {
+    try {
+      unawaited(tts.init());
+      // Auth (sign up / log in) needs Firebase even when no user is logged in yet.
+      await FirebaseService.instance.initialize();
+
+      if (_user == null) return;
+
+      final needsFullCloud = _user!.isParent ||
+          _user!.isTeacher ||
+          _user!.isOnlineAccount;
+      final needsMonitoringSync =
+          _user!.isLearner && CloudScope.syncMonitoring;
+
+      if (needsFullCloud || needsMonitoringSync) {
+        await _notificationSync.initialize();
+      }
+      if (!needsFullCloud) return;
+
+      await _syncFirebaseSessionAfterRestore();
+      if (_user!.isParent && CloudScope.notifications) {
+        await _syncCloudDataAfterFirebaseReady();
+      }
+    } catch (e, st) {
+      debugPrint('TapTalk cloud init failed: $e\n$st');
+    }
+  }
+
+  Future<void> _syncCloudDataAfterFirebaseReady() async {
+    if (_user == null || !CloudScope.notifications) return;
+    try {
+      if (_user!.isParent) {
+        await _syncLinkedChildrenFromCloud();
+        _linkedChildren = await _repo.getLinkedChildren(_user!.id);
+        if (_linkedChildren.isEmpty) {
+          _selectedChildId = null;
+        } else if (_selectedChildId == null ||
+            !_linkedChildren.any((c) => c.learnerId == _selectedChildId)) {
+          _selectedChildId = _linkedChildren.first.learnerId;
+        }
+        await _loadNotifications();
+        await _syncLinkedChildrenToCloud();
+        await _startParentNotificationSync();
+      }
+      notifyListeners();
+    } catch (e, st) {
+      debugPrint('Post-firebase notification sync failed: $e\n$st');
     }
   }
 
@@ -305,23 +400,45 @@ class AppState extends ChangeNotifier {
     await prefs.setBool(_categoryOnboardingKey(userId), done);
   }
 
+  /// Clears in-memory words/phrases/categories so a new login never briefly
+  /// shows another account's customized content.
+  void _resetLearnerSessionData() {
+    _categories = [];
+    _phrases = [];
+    _favorites = [];
+    _history = [];
+    _selectedCategoryKey = 'feelings';
+    _profileCode = '';
+    _enrolledClasses = [];
+    _emergencyContacts = [];
+  }
+
+  void _resetAccountSession() {
+    _resetLearnerSessionData();
+    _linkedChildren = [];
+    _notifications = [];
+    _selectedChildId = null;
+    _teacherClasses = [];
+    _teacherStudentCount = 0;
+    _teacherClassStudentCounts.clear();
+    _deletedClassCodes.clear();
+  }
+
   Future<void> _loadLearnerData({bool cloudSyncInBackground = false}) async {
     if (_user == null) return;
+    final userId = _user!.id;
     final settings = await _repo.getUserSettings(_user!.id);
     _ttsSpeed = TtsSpeedOptions.snap(
       (settings['tts_speed'] as num?)?.toDouble() ?? TtsSpeedOptions.defaultSpeed,
     );
     _applyLanguageFromSettings(settings);
+    await _restoreLanguagePref();
     await _syncLanguagePref();
     await _syncTtsSpeedPref();
     final contacts = settings['emergency_contacts'];
     if (contacts is List) {
-      _emergencyContacts = contacts
-          .whereType<String>()
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .take(2)
-          .toList();
+      _emergencyContacts =
+          AppRepository.normalizeEmergencyContacts(contacts.whereType<String>().toList());
     } else {
       _emergencyContacts = [];
     }
@@ -339,10 +456,18 @@ class AppState extends ChangeNotifier {
       _enrolledClasses = [];
     }
 
-    _categories = await _repo.getCategories(_user!.id);
-    _phrases = await _repo.getPhrases(_user!.id);
-    _favorites = await _repo.getFavorites(_user!.id);
-    _history = await _repo.getHistory(_user!.id);
+    _categories = (await _repo.getCategories(userId))
+        .where((c) => c.userId == userId)
+        .toList();
+    _phrases = (await _repo.getPhrases(userId))
+        .where((p) => p.userId == userId)
+        .toList();
+    _favorites = (await _repo.getFavorites(userId))
+        .where((f) => f.userId == userId)
+        .toList();
+    _history = (await _repo.getHistory(userId))
+        .where((h) => h.userId == userId)
+        .toList();
 
     if (_categories.isNotEmpty &&
         !_categories.any((c) => c.key == _selectedCategoryKey)) {
@@ -353,27 +478,32 @@ class AppState extends ChangeNotifier {
   Future<void> _syncLearnerCloudData() async {
     if (_user == null || !_user!.isLearner) return;
     try {
-      final learnerFirebaseUid =
-          _user!.firebaseUid ?? FirebaseService.instance.currentUid;
-      if (learnerFirebaseUid != null && learnerFirebaseUid.isNotEmpty) {
-        await _notificationSync.syncLearnerEmergencyContacts(
-          learnerUserId: _user!.id,
-          learnerName: _user!.fullName,
-          learnerFirebaseUid: learnerFirebaseUid,
-          contacts: _emergencyContacts,
-          profileCode: _profileCode,
-        );
+      if (CloudScope.syncMonitoring) {
+        await _syncLearnerCategoriesToCloud();
+        unawaited(_backfillLearnerActivityToCloud());
+        await _resyncLearnerEnrollmentsToCloud();
+        final learnerFirebaseUid =
+            _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+        if (learnerFirebaseUid != null && learnerFirebaseUid.isNotEmpty) {
+          await _notificationSync.syncLearnerEmergencyContacts(
+            learnerUserId: _user!.id,
+            learnerName: _user!.fullName,
+            learnerFirebaseUid: learnerFirebaseUid,
+            contacts: _emergencyContacts,
+            profileCode: _profileCode,
+          );
+        }
       }
-      await _resyncLearnerEnrollmentsToCloud();
+      if (!CloudScope.appData) return;
+
       await _syncUserProfileToCloud();
-      await _syncLearnerCategoriesToCloud();
-      unawaited(_backfillLearnerActivityToCloud());
     } catch (e, st) {
       debugPrint('Learner cloud sync failed: $e\n$st');
     }
   }
 
   Future<void> _syncUserProfileToCloud() async {
+    if (!CloudScope.appData) return;
     if (_user == null || !_notificationSync.isCloudAvailable) return;
     final firebaseUid =
         _user!.firebaseUid ?? FirebaseService.instance.currentUid;
@@ -398,17 +528,28 @@ class AppState extends ChangeNotifier {
     );
   }
 
-  Future<void> _refreshLearnerCollections() async {
+  Future<void> _refreshPersonalBoard() async {
     if (_user == null) return;
-    _categories = await _repo.getCategories(_user!.id);
-    _phrases = await _repo.getPhrases(_user!.id);
-    _favorites = await _repo.getFavorites(_user!.id);
-    _history = await _repo.getHistory(_user!.id);
+    final ownerId = _user!.id;
+    _categories = (await _repo.getCategories(ownerId))
+        .where((c) => c.userId == ownerId)
+        .toList();
+    _phrases = (await _repo.getPhrases(ownerId))
+        .where((p) => p.userId == ownerId)
+        .toList();
+    _favorites = (await _repo.getFavorites(ownerId))
+        .where((f) => f.userId == ownerId)
+        .toList();
+    _history = (await _repo.getHistory(ownerId))
+        .where((h) => h.userId == ownerId)
+        .toList();
     if (_categories.isNotEmpty &&
         !_categories.any((c) => c.key == _selectedCategoryKey)) {
       _selectedCategoryKey = _categories.first.key;
     }
   }
+
+  Future<void> _refreshLearnerCollections() => _refreshPersonalBoard();
 
   Future<void> _ensureStarterData() async {
     if (_user == null ||
@@ -428,6 +569,9 @@ class AppState extends ChangeNotifier {
     }
     if (_route == route) return;
     _route = route;
+    if (_isPersonalBoardRoute(route) && _user != null) {
+      await _refreshPersonalBoard();
+    }
     notifyListeners();
   }
 
@@ -444,12 +588,24 @@ class AppState extends ChangeNotifier {
   void _applyLanguageFromSettings(Map<String, dynamic> settings) {
     final raw = settings['language'];
     if (raw is! String || raw.trim().isEmpty) return;
+    _applyLanguageCode(raw);
+  }
+
+  void _applyLanguageCode(String raw) {
     final norm = raw.trim().toLowerCase();
     if (norm.startsWith('fil') || norm == 'tagalog') {
       _language = AppLanguage.filipino;
     } else if (norm.startsWith('en')) {
       _language = AppLanguage.english;
     }
+  }
+
+  Future<void> _restoreLanguagePref() async {
+    if (_user == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final code = prefs.getString(_languagePrefKey(_user!.id));
+    if (code == null || code.trim().isEmpty) return;
+    _applyLanguageCode(code);
   }
 
   Future<void> _syncLanguagePref() async {
@@ -468,15 +624,21 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> setLanguage(AppLanguage lang) async {
+    if (_language == lang) return;
     _language = lang;
-    await _syncLanguagePref();
-    if (_user != null) {
-      await _repo.updateUserSettings(
-        _user!.id,
-        language: lang == AppLanguage.filipino ? 'Filipino' : 'English',
-      );
-    }
+    _languageRevision++;
     notifyListeners();
+    try {
+      await _syncLanguagePref();
+      if (_user != null) {
+        await _repo.updateUserSettings(
+          _user!.id,
+          language: lang == AppLanguage.filipino ? 'Filipino' : 'English',
+        );
+      }
+    } catch (e, st) {
+      debugPrint('setLanguage persist failed: $e\n$st');
+    }
   }
 
   Future<void> setTtsSpeed(double speed) async {
@@ -548,8 +710,14 @@ class AppState extends ChangeNotifier {
       return AppStrings.fillAllFields(_language);
     }
 
+    await FirebaseService.instance.initialize();
+    final offline = await NetworkStatus.isOffline();
+
     var user = await _repo.findUserByEmail(normalizedEmail);
     if (user == null) {
+      if (offline || !FirebaseService.instance.isAvailable) {
+        return AppStrings.loginNeedsInternet(_language);
+      }
       // Account may exist only in Firebase (registered on another device).
       if (FirebaseService.instance.isAvailable) {
         final uid = await FirebaseService.instance.signIn(
@@ -618,6 +786,8 @@ class AppState extends ChangeNotifier {
     _user = user;
     if (_user == null) return AppStrings.loginFailed(_language);
 
+    _resetAccountSession();
+
     unawaited(_syncUserProfileToCloud());
 
     final prefs = await SharedPreferences.getInstance();
@@ -648,15 +818,19 @@ class AppState extends ChangeNotifier {
 
     try {
       if (_user!.isLearner) {
-        await _loadLearnerData(cloudSyncInBackground: true);
+        await _loadLearnerData(cloudSyncInBackground: false);
+        await _ensureStarterData();
       } else if (_user!.isParent) {
         await _loadLearnerData(cloudSyncInBackground: true);
         await _ensureStarterData();
         await _loadLinkedChildren(syncCloudInBackground: true);
+        await _notificationSync.initialize();
+        await _syncFirebaseSessionAfterRestore();
+        await _syncCloudDataAfterFirebaseReady();
       } else if (_user!.isTeacher) {
         await _loadLearnerData(cloudSyncInBackground: true);
         await _ensureStarterData();
-        await refreshTeacherClasses();
+        await refreshTeacherClasses(cloudSyncInBackground: true);
       }
       notifyListeners();
     } catch (e, st) {
@@ -712,6 +886,11 @@ class AppState extends ChangeNotifier {
       return AppStrings.passwordTooShort(_language);
     }
 
+    await FirebaseService.instance.initialize();
+    if (await NetworkStatus.isOffline()) {
+      return AppStrings.signUpRequiresInternet(_language);
+    }
+
     final existing = await _repo.findUserByEmail(normalizedEmail);
     if (existing != null) return AppStrings.emailInUse(_language);
 
@@ -754,6 +933,7 @@ class AppState extends ChangeNotifier {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('user_id', _user!.id);
+    _resetAccountSession();
     await _repo.updateUserSettings(
       _user!.id,
       language: _language == AppLanguage.filipino ? 'Filipino' : 'English',
@@ -778,7 +958,8 @@ class AppState extends ChangeNotifier {
     try {
       await _syncUserProfileToCloud();
       if (role == 'learner') {
-        await _loadLearnerData(cloudSyncInBackground: true);
+        await _loadLearnerData(cloudSyncInBackground: false);
+        await _ensureStarterData();
       } else if (role == 'parent') {
         await _loadLearnerData(cloudSyncInBackground: true);
         await _ensureStarterData();
@@ -786,7 +967,7 @@ class AppState extends ChangeNotifier {
       } else if (role == 'teacher') {
         await _loadLearnerData(cloudSyncInBackground: true);
         await _ensureStarterData();
-        await refreshTeacherClasses();
+        await refreshTeacherClasses(cloudSyncInBackground: true);
       }
       notifyListeners();
     } catch (e, st) {
@@ -807,6 +988,12 @@ class AppState extends ChangeNotifier {
     if (user == null) {
       return PasswordResetStartOutcome.error(
         AppStrings.emailNotRegistered(_language),
+      );
+    }
+
+    if (await NetworkStatus.isOffline()) {
+      return PasswordResetStartOutcome.error(
+        AppStrings.noInternetConnection(_language),
       );
     }
 
@@ -871,20 +1058,11 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('user_id');
     _language = AppLanguage.english;
+    _languageRevision = 0;
     _ttsSpeed = TtsSpeedOptions.defaultSpeed;
     _user = null;
-    _categories = [];
-    _phrases = [];
-    _favorites = [];
-    _history = [];
-    _linkedChildren = [];
-    _notifications = [];
-    _selectedChildId = null;
-    _enrolledClasses = [];
-    _teacherClasses = [];
+    _resetAccountSession();
     _theme = TapTalkThemes.appDefault;
-    _emergencyContacts = [];
-    _profileCode = '';
     _resetSpeechTracking();
     _route = AppRoute.welcome;
     _drawerOpen = false;
@@ -901,6 +1079,7 @@ class AppState extends ChangeNotifier {
     selectCategory(categoryKey);
     if (_user != null) {
       await _setCategoryOnboardingDone(_user!.id, true);
+      await _refreshPersonalBoard();
     }
     _route = AppRoute.home;
     notifyListeners();
@@ -910,9 +1089,11 @@ class AppState extends ChangeNotifier {
     if (_user == null) return AppStrings.notSignedIn(_language);
     try {
       final cat = await _repo.addCategory(_user!.id, name);
-      unawaited(_syncLearnerCategoriesToCloud());
+      if (_user!.isLearner) {
+        unawaited(_syncLearnerCategoriesToCloud());
+      }
       _selectedCategoryKey = cat.key;
-      await _refreshLearnerCollections();
+      await _refreshPersonalBoard();
       notifyListeners();
       return null;
     } catch (e) {
@@ -923,24 +1104,24 @@ class AppState extends ChangeNotifier {
   Future<String?> addPhrase(String text, {String? imagePath}) async {
     if (_user == null || text.trim().isEmpty) return null;
     final savedImagePath = await persistPhraseImageIfNeeded(imagePath);
-    final canonical = ContentLocalization.canonicalPhrase(text);
+    final stored = text.trim();
     await _repo.addPhrase(
       userId: _user!.id,
-      text: canonical,
+      text: stored,
       categoryKey: _selectedCategoryKey,
       imagePath: savedImagePath,
     );
-    await _refreshLearnerCollections();
+    await _refreshPersonalBoard();
     notifyListeners();
     return null;
   }
 
   Future<void> deletePhrase(PhraseModel phrase) async {
-    if (_user == null) return;
+    if (_user == null || phrase.userId != _user!.id) return;
     if (!phrase.isBuiltin) {
       await _repo.deletePhrase(_user!.id, phrase.id);
     }
-    _phrases = await _repo.getPhrases(_user!.id);
+    await _refreshPersonalBoard();
     notifyListeners();
   }
 
@@ -950,7 +1131,7 @@ class AppState extends ChangeNotifier {
     String? imagePath,
     required bool clearImage,
   }) async {
-    if (_user == null) return false;
+    if (_user == null || phrase.userId != _user!.id) return false;
     if (phrase.isBuiltin) return false;
 
     final savedImage = clearImage
@@ -963,8 +1144,7 @@ class AppState extends ChangeNotifier {
       text: text,
       imagePath: savedImage,
     );
-    _phrases = await _repo.getPhrases(_user!.id);
-    _favorites = await _repo.getFavorites(_user!.id);
+    await _refreshPersonalBoard();
     notifyListeners();
     return ok;
   }
@@ -983,7 +1163,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> toggleFavorite(PhraseModel phrase) async {
-    if (_user == null) return;
+    if (_user == null || phrase.userId != _user!.id) return;
     final favId = favoriteIdFor(phrase);
     if (favId != null) {
       await _repo.removeFavorite(favId);
@@ -1007,7 +1187,7 @@ class AppState extends ChangeNotifier {
     String? lessonTitle,
   }) async {
     if (_user == null || text.trim().isEmpty) return;
-    final canonical = ContentLocalization.canonicalPhrase(text);
+    final stored = text.trim();
     final baseCategoryKey = categoryKey ?? _selectedCategoryKey;
     final storedCategoryKey = AppRepository.resolveHistoryCategoryKey(
       categoryKey: baseCategoryKey,
@@ -1017,7 +1197,7 @@ class AppState extends ChangeNotifier {
     final now = DateTime.now();
     await _repo.addHistory(
       userId: _user!.id,
-      text: canonical,
+      text: stored,
       categoryKey: baseCategoryKey,
       className: className,
       lessonTitle: lessonTitle,
@@ -1025,7 +1205,7 @@ class AppState extends ChangeNotifier {
     _history = await _repo.getHistory(_user!.id);
     notifyListeners();
     await _pushLearnerActivityToCloud(
-      phraseText: canonical,
+      phraseText: stored,
       categoryKey: storedCategoryKey,
       createdAt: now,
       className: className,
@@ -1040,6 +1220,7 @@ class AppState extends ChangeNotifier {
     String? className,
     String? lessonTitle,
   }) async {
+    if (!CloudScope.syncMonitoring) return;
     if (_user == null || !_notificationSync.isCloudAvailable) return;
     final uid = _user!.firebaseUid ?? FirebaseService.instance.currentUid;
     if (uid == null || uid.isEmpty) return;
@@ -1060,6 +1241,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _backfillLearnerActivityToCloud() async {
+    if (!CloudScope.syncMonitoring) return;
     if (_user == null || !_user!.isLearner || !_notificationSync.isCloudAvailable) {
       return;
     }
@@ -1071,7 +1253,7 @@ class AppState extends ChangeNotifier {
         await _notificationSync.pushLearnerActivity(
           LearnerActivityCloudEvent(
             learnerFirebaseUid: uid,
-            phraseText: ContentLocalization.canonicalPhrase(item.text),
+            phraseText: item.text.trim(),
             categoryKey: AppRepository.normalizeCategoryKey(item.categoryKey),
             createdAt: item.createdAt,
             className: item.className,
@@ -1117,30 +1299,35 @@ class AppState extends ChangeNotifier {
       _selectedChildId = _linkedChildren.first.learnerId;
     }
     await _loadNotifications();
-    if (syncCloudInBackground) {
-      unawaited(_syncParentCloudAfterLogin());
-    } else {
+    if (!syncCloudInBackground) {
       await _syncLinkedChildrenToCloud();
       await _startParentNotificationSync();
     }
   }
 
-  Future<void> _syncParentCloudAfterLogin() async {
-    try {
-      await _syncLinkedChildrenToCloud();
-      await _startParentNotificationSync();
-    } catch (e, st) {
-      debugPrint('Parent cloud sync after login failed: $e\n$st');
+  /// Firebase UID for the signed-in parent, waiting for auth restore when needed.
+  Future<String?> _resolveParentFirebaseUid() async {
+    if (_user == null || !_user!.isParent) return null;
+    await FirebaseService.instance.initialize();
+    await _notificationSync.initialize();
+
+    var uid = _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    uid ??= await FirebaseService.instance.waitForAuthUid(
+      timeout: const Duration(seconds: 8),
+    );
+    if (uid == null || uid.isEmpty) return null;
+
+    if (_user!.firebaseUid == null || _user!.firebaseUid!.isEmpty) {
+      await _repo.linkFirebaseUid(_user!.id, uid);
+      _user = _user!.copyWith(firebaseUid: uid);
     }
+    return uid;
   }
 
   Future<void> _syncLinkedChildrenFromCloud() async {
     if (_user == null || !_user!.isParent) return;
-    if (!_notificationSync.isCloudAvailable) return;
-
-    final parentFirebaseUid =
-        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
-    if (parentFirebaseUid == null || parentFirebaseUid.isEmpty) return;
+    final parentFirebaseUid = await _resolveParentFirebaseUid();
+    if (parentFirebaseUid == null) return;
 
     try {
       final links = await _notificationSync
@@ -1157,9 +1344,8 @@ class AppState extends ChangeNotifier {
 
   Future<void> _syncLinkedChildrenToCloud() async {
     if (_user == null || !_user!.isParent || _linkedChildren.isEmpty) return;
-    final parentFirebaseUid =
-        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
-    if (parentFirebaseUid == null || parentFirebaseUid.isEmpty) return;
+    final parentFirebaseUid = await _resolveParentFirebaseUid();
+    if (parentFirebaseUid == null) return;
     for (final child in _linkedChildren) {
       final learner = await _repo.findUserById(child.learnerId);
       final learnerFirebaseUid = learner?.firebaseUid;
@@ -1184,10 +1370,12 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _startParentNotificationSync() async {
-    if (_user == null || !_user!.isParent) return;
-    final firebaseUid =
-        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
-    if (firebaseUid == null || firebaseUid.isEmpty) return;
+    if (_user == null || !_user!.isParent || !CloudScope.notifications) return;
+    final firebaseUid = await _resolveParentFirebaseUid();
+    if (firebaseUid == null) {
+      debugPrint('Parent notification sync skipped: no Firebase UID.');
+      return;
+    }
     await _notificationSync.startParentSync(
       parentUserId: _user!.id,
       parentFirebaseUid: firebaseUid,
@@ -1269,52 +1457,89 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> refreshNotifications() async {
+    if (_user?.isParent == true && CloudScope.notifications) {
+      await _startParentNotificationSync();
+    }
     await _loadNotifications();
     notifyListeners();
   }
 
-  Future<void> refreshTeacherClasses() async {
+  Future<void> refreshLearnerCollections() async {
+    await _refreshLearnerCollections();
+    notifyListeners();
+  }
+
+  Future<void> refreshLinkedChildren({bool cloudSyncInBackground = false}) async {
+    await _loadLinkedChildren(syncCloudInBackground: cloudSyncInBackground);
+    notifyListeners();
+  }
+
+  Future<void> refreshTeacherClasses({bool cloudSyncInBackground = false}) async {
     if (_user == null || !_user!.isTeacher) {
       _teacherClasses = [];
+      _teacherStudentCount = 0;
+      _teacherClassStudentCounts.clear();
       notifyListeners();
       return;
     }
+    await _loadTeacherClasses();
+    await _refreshTeacherClassCounts();
+    notifyListeners();
+
+    if (cloudSyncInBackground) {
+      unawaited(_syncTeacherClassesFromCloudAndReload());
+      return;
+    }
+
     await _syncTeacherClassesFromCloud();
     await _loadTeacherClasses();
+    await _refreshTeacherClassCounts();
     notifyListeners();
+  }
+
+  Future<void> _refreshTeacherClassCounts() async {
+    if (_user == null || !_user!.isTeacher) return;
+    _teacherClassStudentCounts
+      ..clear()
+      ..addEntries(
+        await Future.wait(
+          _teacherClasses.map((c) async {
+            final count = await _repo.countStudentsInClass(c.id);
+            return MapEntry(c.id, count);
+          }),
+        ),
+      );
+    _teacherStudentCount =
+        await _repo.countEnrolledStudentsForTeacher(_user!.id);
+  }
+
+  Future<void> _syncTeacherClassesFromCloudAndReload() async {
+    try {
+      await _syncTeacherClassesFromCloud();
+      await _loadTeacherClasses();
+      await _refreshTeacherClassCounts();
+      notifyListeners();
+    } catch (e, st) {
+      debugPrint('Teacher class background sync failed: $e\n$st');
+    }
   }
 
   Future<int> getTeacherStudentCount() async {
     if (_user == null || !_user!.isTeacher) return 0;
-    final local = await _repo.getTeacherClassStudents(_user!.id);
-    final localCount = local.length;
-    if (!_notificationSync.isCloudAvailable) return localCount;
+    return _repo.countEnrolledStudentsForTeacher(_user!.id);
+  }
 
-    final teacherFirebaseUid =
-        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
-    if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) {
-      return localCount;
-    }
-
-    try {
-      final enrollments = await _notificationSync
-          .getClassEnrollmentsFromCloud(teacherFirebaseUid)
-          .timeout(const Duration(seconds: 12));
-      final cloudUnique = enrollments
-          .map((e) => e.learnerFirebaseUid.trim())
-          .where((uid) => uid.isNotEmpty)
-          .toSet()
-          .length;
-      return localCount > cloudUnique ? localCount : cloudUnique;
-    } catch (e, st) {
-      debugPrint('Cloud teacher student count failed: $e\n$st');
-      return localCount;
-    }
+  Future<int> countStudentsInClasses(List<int> classIds) async {
+    if (_user == null || !_user!.isTeacher || classIds.isEmpty) return 0;
+    return _repo.countStudentsInClasses(classIds);
   }
 
   Future<void> _syncTeacherClassesFromCloud() async {
+    if (!CloudScope.syncMonitoring) return;
     if (_user == null || !_user!.isTeacher) return;
     if (!_notificationSync.isCloudAvailable) return;
+    if (await NetworkStatus.isOffline()) return;
+    if (NetworkStatus.isCloudBlocked) return;
 
     final teacherFirebaseUid =
         _user!.firebaseUid ?? FirebaseService.instance.currentUid;
@@ -1338,6 +1563,7 @@ class AppState extends ChangeNotifier {
       await _repo.mergeRemoteTeacherClasses(
         teacherUserId: _user!.id,
         remoteClasses: remoteClasses,
+        skipClassCodes: _deletedClassCodes,
       );
 
       final enrollments = await _notificationSync
@@ -1358,6 +1584,7 @@ class AppState extends ChangeNotifier {
       }
     } catch (e, st) {
       debugPrint('Teacher class cloud sync failed: $e\n$st');
+      NetworkStatus.markCloudUnreachable();
     }
   }
 
@@ -1365,6 +1592,7 @@ class AppState extends ChangeNotifier {
     required String classCode,
     required String className,
   }) async {
+    if (!CloudScope.syncMonitoring) return;
     if (_user == null || !_user!.isTeacher) return;
     final teacherFirebaseUid =
         _user!.firebaseUid ?? FirebaseService.instance.currentUid;
@@ -1418,8 +1646,17 @@ class AppState extends ChangeNotifier {
     if (!AppRepository.isValidProfileCodeFormat(normalized)) {
       return AppStrings.invalidProfileCode(_language);
     }
+
+    await FirebaseService.instance.initialize();
+    await _notificationSync.initialize();
+
     var learner = await _repo.findLearnerByProfileCode(normalized);
-    if (learner == null && _notificationSync.isCloudAvailable) {
+    if (learner == null &&
+        CloudScope.syncMonitoring &&
+        _notificationSync.isCloudAvailable) {
+      if (FirebaseService.instance.currentUid == null) {
+        return AppStrings.loginNeedsInternet(_language);
+      }
       try {
         final remote = await _notificationSync
             .findLearnerProfileByCodeFromCloud(normalized)
@@ -1526,6 +1763,7 @@ class AppState extends ChangeNotifier {
     );
     if (!ok) return AppStrings.classNotFound(_language);
     if (classCode != null && classCode.isNotEmpty) {
+      _deletedClassCodes.add(AppRepository.normalizeClassCode(classCode));
       await _notificationSync.removeTeacherClass(classCode: classCode);
     }
     await refreshTeacherClasses();
@@ -1544,41 +1782,75 @@ class AppState extends ChangeNotifier {
   }
 
   Future<int> studentCountForClass(int classId) async {
+    if (_teacherClassStudentCounts.containsKey(classId)) {
+      return _teacherClassStudentCounts[classId]!;
+    }
     return _repo.countStudentsInClass(classId);
   }
 
-  Future<List<ClassLesson>> getClassLessons(int classId) async {
+  Future<List<ClassLesson>> getClassLessons(
+    int classId, {
+    bool cloudSyncInBackground = true,
+  }) async {
     if (_user == null || !_user!.isTeacher) return [];
-    await _pushClassContentToCloud(classId);
-    return _repo.getClassLessons(
+    final lessons = await _repo.getClassLessons(
       teacherUserId: _user!.id,
       classId: classId,
     );
+    if (cloudSyncInBackground) {
+      unawaited(_pushClassContentToCloud(classId));
+    } else {
+      await _pushClassContentToCloud(classId);
+    }
+    return lessons;
   }
 
-  Future<List<ClassLesson>> getEnrolledClassLessons(int classId) async {
+  Future<List<ClassLesson>> getEnrolledClassLessons(
+    int classId, {
+    bool cloudSyncInBackground = true,
+  }) async {
     if (_user == null || !_user!.isLearner) return [];
     final classRow = await _repo.findClassById(classId);
     final classCode = (classRow?['class_code'] as String?) ?? '';
-    if (classCode.isNotEmpty) {
-      await _syncClassLessonsFromCloud(
-        classId: classId,
-        classCode: classCode,
-      );
-    }
-    return _repo.getEnrolledClassLessons(
+    final lessons = await _repo.getEnrolledClassLessons(
       learnerUserId: _user!.id,
       classId: classId,
     );
+    if (classCode.isNotEmpty) {
+      if (cloudSyncInBackground) {
+        unawaited(_syncClassLessonsFromCloud(
+          classId: classId,
+          classCode: classCode,
+        ));
+      } else {
+        await _syncClassLessonsFromCloud(
+          classId: classId,
+          classCode: classCode,
+        );
+        return _repo.getEnrolledClassLessons(
+          learnerUserId: _user!.id,
+          classId: classId,
+        );
+      }
+    }
+    return lessons;
   }
 
-  Future<List<LessonPhrase>> getEnrolledLessonPhrases(int lessonId) async {
+  Future<List<LessonPhrase>> getEnrolledLessonPhrases(
+    int lessonId, {
+    bool cloudSyncInBackground = true,
+  }) async {
     if (_user == null || !_user!.isLearner) return [];
     final classId = await _repo.classIdForLesson(lessonId);
     if (classId != null) {
       final classRow = await _repo.findClassById(classId);
       final classCode = (classRow?['class_code'] as String?) ?? '';
-      if (classCode.isNotEmpty) {
+      if (classCode.isNotEmpty && cloudSyncInBackground) {
+        unawaited(_syncClassLessonsFromCloud(
+          classId: classId,
+          classCode: classCode,
+        ));
+      } else if (classCode.isNotEmpty) {
         await _syncClassLessonsFromCloud(
           classId: classId,
           classCode: classCode,
@@ -1596,7 +1868,7 @@ class AppState extends ChangeNotifier {
     final lesson = await _repo.createClassLesson(
       teacherUserId: _user!.id,
       classId: classId,
-      title: ContentLocalization.canonicalPhrase(title.trim()),
+      title: title.trim(),
     );
     if (lesson != null) {
       await _pushClassContentToCloud(classId);
@@ -1610,7 +1882,7 @@ class AppState extends ChangeNotifier {
     final updated = await _repo.updateClassLesson(
       teacherUserId: _user!.id,
       lessonId: lessonId,
-      title: ContentLocalization.canonicalPhrase(title.trim()),
+      title: title.trim(),
     );
     if (updated && classId != null) {
       await _pushClassContentToCloud(classId);
@@ -1650,7 +1922,7 @@ class AppState extends ChangeNotifier {
     final phrase = await _repo.addLessonPhrase(
       teacherUserId: _user!.id,
       lessonId: lessonId,
-      text: ContentLocalization.canonicalPhrase(text),
+      text: text.trim(),
       imagePath: saved,
     );
     if (phrase != null && classId != null) {
@@ -1694,6 +1966,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _pushClassContentToCloud(int classId) async {
+    if (!CloudScope.syncMonitoring) return;
     if (_user == null || !_user!.isTeacher || !_notificationSync.isCloudAvailable) {
       return;
     }
@@ -1737,6 +2010,7 @@ class AppState extends ChangeNotifier {
     required int classId,
     required String classCode,
   }) async {
+    if (!CloudScope.syncMonitoring) return;
     if (!_notificationSync.isCloudAvailable) return;
     final normalized = AppRepository.normalizeClassCode(classCode);
     if (!AppRepository.isValidClassCodeFormat(normalized)) return;
@@ -1770,10 +2044,18 @@ class AppState extends ChangeNotifier {
   /// Returns the roster for a class, merging cloud enrollments into local SQLite
   /// so students enrolled from another device appear on the teacher's phone too.
   Future<List<TeacherClassStudent>> getTeacherClassStudentsForClass(
-    int classId,
-  ) async {
+    int classId, {
+    bool cloudSyncInBackground = true,
+  }) async {
     if (_user == null || !_user!.isTeacher) return [];
-    // Sync cloud enrollments into local DB before reading.
+    final local = await _repo.getTeacherClassStudentsForClass(
+      teacherUserId: _user!.id,
+      classId: classId,
+    );
+    if (cloudSyncInBackground) {
+      unawaited(_syncTeacherClassesFromCloud());
+      return local;
+    }
     await _syncTeacherClassesFromCloud();
     return _repo.getTeacherClassStudentsForClass(
       teacherUserId: _user!.id,
@@ -1785,7 +2067,7 @@ class AppState extends ChangeNotifier {
     if (_user == null || !_user!.isTeacher) return [];
     final local = await _repo.getTeacherClassStudents(_user!.id);
     _scheduleTeacherEnrollmentCloudSync(local);
-    if (local.isNotEmpty) return local;
+    if (local.isNotEmpty || !CloudScope.appData) return local;
 
     final teacherFirebaseUid =
         _user!.firebaseUid ?? FirebaseService.instance.currentUid;
@@ -1831,6 +2113,7 @@ class AppState extends ChangeNotifier {
     List<TeacherClassStudent> students, {
     required String teacherFirebaseUid,
   }) async {
+    if (!CloudScope.syncMonitoring) return;
     if (!_notificationSync.isCloudAvailable) return;
     try {
       for (final student in students) {
@@ -1880,6 +2163,9 @@ class AppState extends ChangeNotifier {
       alertType,
     );
 
+    await FirebaseService.instance.initialize();
+    await _notificationSync.initialize();
+
     final result = await _notificationSync.sendTeacherAlert(
       teacherUserId: _user!.id,
       teacherName: _user!.fullName,
@@ -1900,14 +2186,26 @@ class AppState extends ChangeNotifier {
         AppStrings.alertNotAuthorized(_language),
     };
 
+    if (result.notificationIds.isNotEmpty) {
+      _teacherAlertsRevision++;
+      notifyListeners();
+    }
+
+    final learnerFirebaseUid =
+        await _resolveLearnerFirebaseUid(learnerUserId);
     final localContacts =
         await _repo.getEmergencyContactsForLearner(learnerUserId);
-    final learnerFirebaseUid =
-        await _repo.getFirebaseUidForUser(learnerUserId);
-    final contacts = await _notificationSync.resolveEmergencyContacts(
-      learnerUserId: learnerUserId,
-      localContacts: localContacts,
-      learnerFirebaseUid: learnerFirebaseUid,
+    var contacts = CloudScope.syncMonitoring
+        ? await _notificationSync.resolveEmergencyContacts(
+            learnerUserId: learnerUserId,
+            localContacts: localContacts,
+            learnerFirebaseUid: learnerFirebaseUid,
+          )
+        : localContacts;
+    contacts = AppRepository.normalizeEmergencyContacts(contacts);
+    debugPrint(
+      'Teacher alert SMS: ${contacts.length} emergency contact(s) for '
+      'learner $learnerUserId (uid=${learnerFirebaseUid ?? "none"})',
     );
     // Keep SMS short (single-part) for reliable delivery on budget Android phones.
     final smsText = '[TapTalk] $title ($className)';
@@ -1960,6 +2258,7 @@ class AppState extends ChangeNotifier {
   /// Pulls cloud enrollment records for this learner and imports any missing
   /// teacher-class records into local SQLite so the learner sees them.
   Future<void> _syncEnrolledClassesFromCloud() async {
+    if (!CloudScope.syncMonitoring) return;
     if (_user == null || !_user!.isLearner || !_notificationSync.isCloudAvailable) return;
     final uid = _user!.firebaseUid ?? FirebaseService.instance.currentUid;
     if (uid == null || uid.isEmpty) return;
@@ -1994,6 +2293,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _resyncLearnerEnrollmentsToCloud() async {
+    if (!CloudScope.syncMonitoring) return;
     if (_user == null || !_user!.isLearner || !_notificationSync.isCloudAvailable) {
       return;
     }
@@ -2117,6 +2417,7 @@ class AppState extends ChangeNotifier {
       _repo.getCategories(userId);
 
   Future<void> _syncLearnerCategoriesToCloud() async {
+    if (!CloudScope.syncMonitoring) return;
     if (_user == null || !_user!.isLearner || !_notificationSync.isCloudAvailable) {
       return;
     }
@@ -2139,22 +2440,29 @@ class AppState extends ChangeNotifier {
   }
 
   /// All learner categories (default + custom), synced from cloud when needed.
-  Future<List<CategoryModel>> getCategoriesForMonitoring(int learnerUserId) async {
+  Future<List<CategoryModel>> getCategoriesForMonitoring(
+    int learnerUserId,
+  ) async {
     var categories = await _repo.getCategories(learnerUserId);
     if (categories.isEmpty) {
       await _repo.seedLearnerData(learnerUserId);
       categories = await _repo.getCategories(learnerUserId);
     }
+    if (!CloudScope.syncMonitoring) return categories;
     final uid = await _resolveLearnerFirebaseUid(learnerUserId);
     if (uid != null && uid.isNotEmpty && _notificationSync.isCloudAvailable) {
-      final remote =
-          await _notificationSync.getLearnerCategoriesFromCloud(uid);
-      if (remote.isNotEmpty) {
-        await _repo.mergeRemoteLearnerCategories(
-          learnerUserId: learnerUserId,
-          remoteCategories: remote,
-        );
-        categories = await _repo.getCategories(learnerUserId);
+      try {
+        final remote =
+            await _notificationSync.getLearnerCategoriesFromCloud(uid);
+        if (remote.isNotEmpty) {
+          await _repo.mergeRemoteLearnerCategories(
+            learnerUserId: learnerUserId,
+            remoteCategories: remote,
+          );
+          categories = await _repo.getCategories(learnerUserId);
+        }
+      } catch (e, st) {
+        debugPrint('Pull monitoring categories failed: $e\n$st');
       }
     }
     return categories;
@@ -2177,6 +2485,7 @@ class AppState extends ChangeNotifier {
     final fromUser = await _repo.getFirebaseUidForUser(learnerUserId);
     if (fromUser != null && fromUser.isNotEmpty) return fromUser;
 
+    if (!CloudScope.syncMonitoring) return null;
     if (!_notificationSync.isCloudAvailable || _user == null) return null;
 
     try {
@@ -2250,7 +2559,30 @@ class AppState extends ChangeNotifier {
     } catch (e, st) {
       debugPrint('Resolve learner firebase uid failed: $e\n$st');
     }
+
+    if (CloudScope.syncMonitoring && _notificationSync.isCloudAvailable) {
+      try {
+        final profileCode = await _repo.ensureLearnerProfileCode(learnerUserId);
+        if (profileCode.trim().isNotEmpty) {
+          final remote = await _notificationSync
+              .findLearnerProfileByCodeFromCloud(profileCode)
+              .timeout(const Duration(seconds: 8));
+          final uid = remote?.learnerFirebaseUid.trim() ?? '';
+          if (uid.isNotEmpty) {
+            await _repo.linkFirebaseUid(learnerUserId, uid);
+            return uid;
+          }
+        }
+      } catch (e, st) {
+        debugPrint('Profile-code uid resolve failed: $e\n$st');
+      }
+    }
+
     return null;
+  }
+
+  Future<DateTime> getLearnerMonitoringSince(int learnerUserId) async {
+    return _repo.getEarliestLearnerTrackingDate(learnerUserId);
   }
 
   List<PhraseFirstUse> _mergePhraseFirstUses({
@@ -2259,21 +2591,26 @@ class AppState extends ChangeNotifier {
   }) {
     final merged = <String, PhraseFirstUse>{};
     for (final entry in local) {
+      if (!AppRepository.isPersonalCategoryKey(entry.categoryKey)) continue;
       final key =
           '${AppRepository.normalizeCategoryKey(entry.categoryKey)}|${entry.text}';
       merged[key] = entry;
     }
     for (final activity in cloud) {
-      final canonical = ContentLocalization.canonicalPhrase(activity.phraseText);
-      if (canonical.isEmpty) continue;
-      final categoryKey =
-          AppRepository.normalizeCategoryKey(activity.categoryKey);
-      final key = '$categoryKey|$canonical';
+      final stored = activity.phraseText.trim();
+      if (stored.isEmpty) continue;
+      final categoryKey = AppRepository.monitoringCategoryKey(
+        categoryKey: activity.categoryKey,
+        className: activity.className,
+        lessonTitle: activity.lessonTitle,
+      );
+      if (!AppRepository.isPersonalCategoryKey(categoryKey)) continue;
+      final key = '$categoryKey|$stored';
       final existing = merged[key];
       if (existing == null ||
           activity.createdAt.isBefore(existing.firstUsedAt)) {
         merged[key] = PhraseFirstUse(
-          text: canonical,
+          text: stored,
           categoryKey: categoryKey,
           firstUsedAt: activity.createdAt,
         );
@@ -2292,6 +2629,7 @@ class AppState extends ChangeNotifier {
       await _loadLinkedChildren(syncCloudInBackground: false);
     }
     await _resolveLearnerFirebaseUid(learnerUserId);
+    await _syncLearnerEnrollmentsFromCloudForUser(learnerUserId);
   }
 
   Future<List<RemoteLearnerActivity>> _fetchLearnerCloudActivities({
@@ -2299,6 +2637,7 @@ class AppState extends ChangeNotifier {
     required DateTime rangeStart,
     required DateTime rangeEnd,
   }) async {
+    if (!CloudScope.syncMonitoring) return const [];
     if (!_notificationSync.isCloudAvailable) return const [];
     final learnerFirebaseUid = await _resolveLearnerFirebaseUid(learnerUserId);
     if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) {
@@ -2335,17 +2674,28 @@ class AppState extends ChangeNotifier {
       rangeStart: range.$1,
       rangeEnd: range.$2,
     );
-    if (remoteActivities.isEmpty) return localStats;
+    if (remoteActivities.isEmpty) {
+      return localStats
+          .where((s) => AppRepository.isPersonalCategoryKey(s.categoryKey))
+          .toList();
+    }
 
     final merged = <String, int>{};
     for (final s in localStats) {
+      if (!AppRepository.isPersonalCategoryKey(s.categoryKey)) continue;
       final key = '${s.categoryKey}|${s.text}';
       merged[key] = (merged[key] ?? 0) + s.count;
     }
     for (final a in remoteActivities) {
-      final canonical = ContentLocalization.canonicalPhrase(a.phraseText);
-      final key =
-          '${AppRepository.normalizeCategoryKey(a.categoryKey)}|$canonical';
+      final stored = a.phraseText.trim();
+      if (stored.isEmpty) continue;
+      final categoryKey = AppRepository.monitoringCategoryKey(
+        categoryKey: a.categoryKey,
+        className: a.className,
+        lessonTitle: a.lessonTitle,
+      );
+      if (!AppRepository.isPersonalCategoryKey(categoryKey)) continue;
+      final key = '$categoryKey|$stored';
       merged[key] = (merged[key] ?? 0) + 1;
     }
     return merged.entries.map((e) {
@@ -2417,8 +2767,16 @@ class AppState extends ChangeNotifier {
             wordsByCategory: wordsByCategory,
           );
 
+    final periodFirstUses = firstUses
+        .where(
+          (entry) =>
+              !entry.firstUsedAt.isBefore(range.$1) &&
+              entry.firstUsedAt.isBefore(range.$2),
+        )
+        .toList();
+
     return VocabularyGrowthCalculator.summarize(
-      firstUses: firstUses,
+      firstUses: periodFirstUses,
       now: DateTime.now(),
       rangeStart: earliest,
       localeName: locale,
@@ -2446,6 +2804,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _syncLearnerEnrollmentsFromCloudForUser(int learnerUserId) async {
+    if (!CloudScope.syncMonitoring) return;
     if (!_notificationSync.isCloudAvailable) return;
     final uid = await _resolveLearnerFirebaseUid(learnerUserId);
     if (uid == null || uid.isEmpty) return;
@@ -2589,14 +2948,10 @@ class AppState extends ChangeNotifier {
 
   Future<String?> updateEmergencyContacts(List<String> contacts) async {
     if (_user == null) return AppStrings.notSignedIn(_language);
-    final cleaned = contacts
-        .map((c) => c.trim())
-        .where((c) => c.isNotEmpty)
-        .take(2)
-        .toList();
+    final cleaned = AppRepository.normalizeEmergencyContacts(contacts);
     await _repo.updateEmergencyContacts(_user!.id, cleaned);
     _emergencyContacts = cleaned;
-    if (_user!.isLearner) {
+    if (_user!.isLearner && CloudScope.syncMonitoring) {
       final learnerFirebaseUid =
           _user!.firebaseUid ?? FirebaseService.instance.currentUid;
       if (learnerFirebaseUid != null && learnerFirebaseUid.isNotEmpty) {
@@ -2635,9 +2990,8 @@ class AppState extends ChangeNotifier {
     String? lessonTitle,
   }) async {
     final catKey = categoryKey ?? _selectedCategoryKey;
-    final canonical = ContentLocalization.canonicalPhrase(text);
     final spoken = ContentLocalization.phrase(
-      canonical,
+      text,
       catKey,
       lang: _language,
     );
@@ -2654,25 +3008,13 @@ class AppState extends ChangeNotifier {
     }
     if (record) {
       await recordHistory(
-        canonical,
+        text,
         categoryKey: catKey,
         className: className,
         lessonTitle: lessonTitle,
       );
     }
     return ok;
-  }
-
-  Future<void> recordLessonOpen({
-    required String className,
-    required String lessonTitle,
-  }) async {
-    await recordHistory(
-      lessonTitle,
-      categoryKey: 'lesson',
-      className: className,
-      lessonTitle: lessonTitle,
-    );
   }
 
   Future<void> pauseSpeech() async {

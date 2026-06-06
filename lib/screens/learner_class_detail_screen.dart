@@ -8,6 +8,7 @@ import '../core/theme/theme_tokens.dart';
 import '../data/models/class_lesson.dart';
 import '../data/models/enrolled_class_model.dart';
 import '../providers/app_state.dart';
+import '../widgets/localized_content_text.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/panel_card.dart';
 import 'learner_lesson_screen.dart';
@@ -38,7 +39,6 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final app = context.read<AppState>();
-    await app.refreshEnrolledClassLessons(widget.enrolledClass.classId);
     final lessons =
         await app.getEnrolledClassLessons(widget.enrolledClass.classId);
     if (!mounted) return;
@@ -49,11 +49,6 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
   }
 
   Future<void> _openLesson(ClassLesson lesson) async {
-    await context.read<AppState>().recordLessonOpen(
-      className: widget.enrolledClass.className,
-      lessonTitle: lesson.title,
-    );
-    if (!mounted) return;
     await Navigator.of(context)
         .push(
           MaterialPageRoute<void>(
@@ -77,13 +72,14 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
     final displayClassName = app.localizedContent(enrolled.className);
 
     return LearnerScaffold(
-      title: AppStrings.appName(lang),
+      title: displayClassName,
       currentRoute: AppRoute.classes,
       showBackButton: true,
       showBottomNav: false,
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(
           AppSpacing.lg,
           AppSpacing.sm,
@@ -96,8 +92,8 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  displayClassName,
+                LocalizedContentText(
+                  enrolled.className,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.poppins(
@@ -143,8 +139,10 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
               Padding(
                 padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                 child: _LessonCard(
+                  key: ValueKey(
+                    'lesson_${lesson.id}_${lang.name}_${app.languageRevision}',
+                  ),
                   lesson: lesson,
-                  displayTitle: app.localizedContent(lesson.title),
                   theme: theme,
                   lang: lang,
                   onTap: () => _openLesson(lesson),
@@ -159,15 +157,14 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
 
 class _LessonCard extends StatelessWidget {
   const _LessonCard({
+    super.key,
     required this.lesson,
-    required this.displayTitle,
     required this.theme,
     required this.lang,
     required this.onTap,
   });
 
   final ClassLesson lesson;
-  final String displayTitle;
   final TapTalkThemeToken theme;
   final AppLanguage lang;
   final VoidCallback onTap;
@@ -212,8 +209,8 @@ class _LessonCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      displayTitle,
+                    LocalizedContentText(
+                      lesson.title,
                       style: GoogleFonts.poppins(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,

@@ -21,6 +21,15 @@ class MainActivity : FlutterActivity() {
                     }
                     DirectSmsSender.send(this, to.trim(), message, result)
                 }
+                "sendSmsBatch" -> {
+                    val recipients = call.argument<List<String>>("recipients")
+                    val message = call.argument<String>("message")
+                    if (recipients.isNullOrEmpty() || message.isNullOrBlank()) {
+                        result.error("INVALID_ARGS", "Missing recipients or message", null)
+                        return@setMethodCallHandler
+                    }
+                    DirectSmsSender.sendBatch(this, recipients, message, result)
+                }
                 "openSmsApp" -> {
                     val to = call.argument<String>("to")
                     val message = call.argument<String>("message")

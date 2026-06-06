@@ -7,6 +7,7 @@ import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../data/models/enrolled_class_model.dart';
 import '../providers/app_state.dart';
+import '../widgets/localized_content_text.dart';
 import '../widgets/enroll_class_dialog.dart';
 import '../widgets/taptalk_result_dialog.dart';
 import '../widgets/learner_scaffold.dart';
@@ -109,8 +110,9 @@ class _ClassesScreenState extends State<ClassesScreen> {
         children: [
           RefreshIndicator(
             onRefresh: _onRefresh,
-            child: ListView(
-            padding: const EdgeInsets.only(bottom: 80),
+        child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.only(bottom: 80),
             children: [
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
@@ -166,8 +168,10 @@ class _ClassesScreenState extends State<ClassesScreen> {
               else
                 for (final enrolled in classes)
                   _EnrolledClassCard(
+                    key: ValueKey(
+                      'class_${enrolled.classId}_${lang.name}_${app.languageRevision}',
+                    ),
                     enrolled: enrolled,
-                    displayClassName: app.localizedContent(enrolled.className),
                     theme: theme,
                     lang: lang,
                     onOpen: () => _openClass(context, enrolled),
@@ -199,8 +203,8 @@ class _ClassesScreenState extends State<ClassesScreen> {
 
 class _EnrolledClassCard extends StatelessWidget {
   const _EnrolledClassCard({
+    super.key,
     required this.enrolled,
-    required this.displayClassName,
     required this.theme,
     required this.lang,
     required this.onOpen,
@@ -208,7 +212,6 @@ class _EnrolledClassCard extends StatelessWidget {
   });
 
   final EnrolledClassModel enrolled;
-  final String displayClassName;
   final TapTalkThemeToken theme;
   final AppLanguage lang;
   final VoidCallback onOpen;
@@ -231,8 +234,8 @@ class _EnrolledClassCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        displayClassName,
+                      LocalizedContentText(
+                        enrolled.className,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.poppins(

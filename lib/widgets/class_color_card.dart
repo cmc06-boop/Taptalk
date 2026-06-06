@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
+import '../providers/app_state.dart';
 
 /// Stable, distinct color identity per class (by [classId]).
 class ClassColorScheme {
@@ -211,6 +213,7 @@ class ClassColorCard extends StatelessWidget {
   });
 
   final int classId;
+  /// Raw stored class name (English or Filipino); localized at display time.
   final String title;
   final String? badge;
   final String? subtitle;
@@ -222,12 +225,16 @@ class ClassColorCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = ClassColorPalette.forClass(classId);
+    final app = context.watch<AppState>();
+    final displayTitle = app.localizedContent(title);
+    final displayBadge =
+        badge == null || badge!.isEmpty ? null : app.localizedContent(badge!);
     return layout == ClassColorCardLayout.tile
         ? _TileCard(
             classId: classId,
             colors: colors,
-            title: title,
-            badge: badge,
+            title: displayTitle,
+            badge: displayBadge,
             subtitle: subtitle,
             icon: icon,
             onTap: onTap,
@@ -235,7 +242,7 @@ class ClassColorCard extends StatelessWidget {
         : _ListCard(
             classId: classId,
             colors: colors,
-            title: title,
+            title: displayTitle,
             subtitle: subtitle,
             onTap: onTap,
             trailing: trailing,

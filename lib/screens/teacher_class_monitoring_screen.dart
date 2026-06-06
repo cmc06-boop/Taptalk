@@ -10,6 +10,7 @@ import '../data/models/parent_notification.dart';
 import '../data/models/teacher_class_student.dart';
 import '../providers/app_state.dart';
 import '../core/utils/parent_alert_icons.dart';
+import '../widgets/localized_content_text.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/taptalk_result_dialog.dart';
 import 'child_monitoring_screen.dart';
@@ -32,19 +33,24 @@ class TeacherClassMonitoringScreen extends StatefulWidget {
 class _TeacherClassMonitoringScreenState
     extends State<TeacherClassMonitoringScreen> {
   List<TeacherClassStudent> _students = [];
-  bool _loading = true;
+  bool _loading = false;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _load(showLoading: true);
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool showLoading = false}) async {
+    if (showLoading && mounted) {
+      setState(() => _loading = true);
+    }
     final app = context.read<AppState>();
     try {
-      final students =
-          await app.getTeacherClassStudentsForClass(widget.classId);
+      final students = await app.getTeacherClassStudentsForClass(
+        widget.classId,
+        cloudSyncInBackground: !showLoading,
+      );
       if (!mounted) return;
       setState(() => _students = students);
     } catch (e, st) {
@@ -56,7 +62,19 @@ class _TeacherClassMonitoringScreenState
 
   Future<void> _onRefresh() async {
     setState(() => _loading = true);
-    await _load();
+    final app = context.read<AppState>();
+    try {
+      final students = await app.getTeacherClassStudentsForClass(
+        widget.classId,
+        cloudSyncInBackground: false,
+      );
+      if (!mounted) return;
+      setState(() => _students = students);
+    } catch (e, st) {
+      debugPrint('Teacher class roster refresh failed: $e\n$st');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   void _openMonitoring(TeacherClassStudent student) {
@@ -272,9 +290,10 @@ class _TeacherClassMonitoringScreenState
     final app = context.watch<AppState>();
     final theme = app.theme;
     final lang = app.language;
+    final displayClassName = app.localizedContent(widget.className);
 
     return LearnerScaffold(
-      title: AppStrings.appName(lang),
+      title: displayClassName,
       currentRoute: AppRoute.teacherMonitoring,
       showBackButton: true,
       showBottomNav: false,
@@ -299,7 +318,7 @@ class _TeacherClassMonitoringScreenState
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                LocalizedContentText(
                   widget.className,
                   style: GoogleFonts.poppins(
                     fontSize: 22,

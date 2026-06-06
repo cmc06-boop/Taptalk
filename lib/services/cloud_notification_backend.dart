@@ -388,6 +388,8 @@ abstract class CloudNotificationBackend {
 
   Future<void> removeTeacherClass({required String classCode});
 
+  Future<void> removeClassEnrollmentsForClass({required String classCode});
+
   Future<List<RemoteTeacherClass>> getTeacherClassesForTeacher(
     String teacherFirebaseUid,
   );
@@ -510,6 +512,9 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
 
   @override
   Future<void> removeTeacherClass({required String classCode}) async {}
+
+  @override
+  Future<void> removeClassEnrollmentsForClass({required String classCode}) async {}
 
   @override
   Future<List<RemoteTeacherClass>> getTeacherClassesForTeacher(

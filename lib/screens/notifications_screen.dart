@@ -27,6 +27,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     });
   }
 
+  Future<void> _refresh() async {
+    await context.read<AppState>().refreshNotifications();
+  }
+
   static String _sectionLabel(DateTime date, AppLanguage lang) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -59,6 +63,47 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   static IconData _iconFor(ParentAlertType type) =>
       ParentAlertIcons.forType(type);
+
+  static Future<void> _showNotificationDetail(
+    BuildContext context, {
+    required ParentNotification notification,
+    required TapTalkThemeToken theme,
+    required AppLanguage lang,
+  }) {
+    return showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      barrierColor: theme.textMain.withValues(alpha: 0.45),
+      transitionDuration: const Duration(milliseconds: 280),
+      pageBuilder: (dialogContext, animation, secondaryAnimation) {
+        return Center(
+          child: _NotificationDetailPopup(
+            notification: notification,
+            theme: theme,
+            lang: lang,
+            timeLabel: _formatTime(notification.createdAt, lang),
+            icon: _iconFor(notification.alertType),
+            onClose: () => Navigator.of(dialogContext).pop(),
+          ),
+        );
+      },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutBack,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return FadeTransition(
+          opacity: animation,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.88, end: 1).animate(curved),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -95,41 +140,55 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             ),
           ),
           Expanded(
-            child: items.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(AppSpacing.xxl),
-                      child: Text(
-                        AppStrings.noNotifications(lang),
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          color: theme.textMain.withValues(alpha: 0.7),
-                        ),
-                      ),
-                    ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
-                    itemCount: sectionKeys.length,
-                    itemBuilder: (context, sectionIndex) {
-                      final section = sectionKeys[sectionIndex];
-                      final sectionItems = grouped[section]!;
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(
-                              AppSpacing.lg,
-                              AppSpacing.md,
-                              AppSpacing.lg,
-                              AppSpacing.sm,
+            child: RefreshIndicator(
+              onRefresh: _refresh,
+              color: theme.bgAccent,
+              child: items.isEmpty
+                  ? ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      children: [
+                        SizedBox(
+                          height: MediaQuery.sizeOf(context).height * 0.45,
+                          child: Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(AppSpacing.xxl),
+                              child: Text(
+                                AppStrings.noNotifications(lang),
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 14,
+                                  color: theme.textMain.withValues(alpha: 0.7),
+                                ),
+                              ),
                             ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
+                          ),
+                        ),
+                      ],
+                    )
+                  : ListView.builder(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
+                      itemCount: sectionKeys.length,
+                      itemBuilder: (context, sectionIndex) {
+                        final section = sectionKeys[sectionIndex];
+                        final sectionItems = grouped[section]!;
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                AppSpacing.lg,
+                                AppSpacing.md,
+                                AppSpacing.lg,
+                                AppSpacing.sm,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Text(
                                     section,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                     style: GoogleFonts.poppins(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w700,
@@ -137,52 +196,72 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                       letterSpacing: 0.2,
                                     ),
                                   ),
-                                ),
-                                if (sectionIndex == 0 && app.unreadNotificationCount > 0)
-                                  TextButton(
-                                    onPressed: () => app.markAllNotificationsRead(),
-                                    style: TextButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                                      minimumSize: Size.zero,
-                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                    child: Text(
-                                      AppStrings.markAllRead(lang),
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: theme.bgAccent,
+                                  if (sectionIndex == 0 &&
+                                      app.unreadNotificationCount > 0)
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: TextButton(
+                                        onPressed: () =>
+                                            app.markAllNotificationsRead(),
+                                        style: TextButton.styleFrom(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                          ),
+                                          minimumSize: Size.zero,
+                                          tapTargetSize:
+                                              MaterialTapTargetSize.shrinkWrap,
+                                        ),
+                                        child: Text(
+                                          AppStrings.markAllRead(lang),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color: theme.bgAccent,
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                          for (final notification in sectionItems)
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(
-                                AppSpacing.lg,
-                                0,
-                                AppSpacing.lg,
-                                AppSpacing.sm,
+                                ],
                               ),
-                              child: _NotificationTile(
-                                notification: notification,
-                                theme: theme,
-                                lang: lang,
-                                timeLabel: _formatTime(
-                                  notification.createdAt,
-                                  lang,
+                            ),
+                            for (final notification in sectionItems)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  AppSpacing.lg,
+                                  0,
+                                  AppSpacing.lg,
+                                  AppSpacing.sm,
                                 ),
-                                icon: _iconFor(notification.alertType),
-                                onTap: () =>
-                                    app.markNotificationRead(notification.id),
+                                child: _NotificationTile(
+                                  notification: notification,
+                                  theme: theme,
+                                  lang: lang,
+                                  timeLabel: _formatTime(
+                                    notification.createdAt,
+                                    lang,
+                                  ),
+                                  icon: _iconFor(notification.alertType),
+                                  onTap: () async {
+                                    await app.markNotificationRead(
+                                      notification.id,
+                                    );
+                                    if (!context.mounted) return;
+                                    await _showNotificationDetail(
+                                      context,
+                                      notification: notification,
+                                      theme: theme,
+                                      lang: lang,
+                                    );
+                                  },
+                                ),
                               ),
-                            ),
-                        ],
-                      );
-                    },
-                  ),
+                          ],
+                        );
+                      },
+                    ),
+            ),
           ),
         ],
       ),
@@ -211,6 +290,8 @@ class _NotificationTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final unread = !notification.isRead;
     final accent = theme.bgAccent;
+    final alertColor = ParentAlertIcons.iconColor(notification.alertType);
+    final alertBg = ParentAlertIcons.iconBackground(notification.alertType);
 
     final cardFill = unread
         ? Color.alphaBlend(
@@ -259,15 +340,13 @@ class _NotificationTile extends StatelessWidget {
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: unread
-                          ? accent.withValues(alpha: 0.18)
-                          : theme.bgMid.withValues(alpha: 0.65),
+                      color: alertBg,
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
                       icon,
                       size: 22,
-                      color: unread ? accent : theme.textMain,
+                      color: alertColor,
                     ),
                   ),
                   if (unread)
@@ -278,7 +357,7 @@ class _NotificationTile extends StatelessWidget {
                         width: 12,
                         height: 12,
                         decoration: BoxDecoration(
-                          color: accent,
+                          color: alertColor,
                           shape: BoxShape.circle,
                           border: Border.all(color: theme.bgLight, width: 2),
                         ),
@@ -297,6 +376,8 @@ class _NotificationTile extends StatelessWidget {
                         Expanded(
                           child: Text(
                             notification.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.poppins(
                               fontSize: 14,
                               fontWeight:
@@ -307,22 +388,29 @@ class _NotificationTile extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: AppSpacing.sm),
-                        Text(
-                          timeLabel,
-                          style: GoogleFonts.poppins(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                            color: theme.textMain.withValues(
-                              alpha: unread ? 0.72 : 0.48,
+                        Flexible(
+                          child: Text(
+                            timeLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.end,
+                            style: GoogleFonts.poppins(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: theme.textMain.withValues(
+                                alpha: unread ? 0.72 : 0.48,
+                              ),
                             ),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        if (unread) ...[
+                    if (unread) ...[
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 6,
@@ -341,7 +429,6 @@ class _NotificationTile extends StatelessWidget {
                               ),
                             ),
                           ),
-                          const SizedBox(width: 6),
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 6,
@@ -360,22 +447,9 @@ class _NotificationTile extends StatelessWidget {
                               ),
                             ),
                           ),
-                          const SizedBox(width: 6),
                         ],
-                        Expanded(
-                          child: Text(
-                            notification.childName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.poppins(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                              color: theme.textMain.withValues(alpha: 0.5),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                     const SizedBox(height: 6),
                     Text(
                       notification.body,
@@ -395,6 +469,188 @@ class _NotificationTile extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NotificationDetailPopup extends StatelessWidget {
+  const _NotificationDetailPopup({
+    required this.notification,
+    required this.theme,
+    required this.lang,
+    required this.timeLabel,
+    required this.icon,
+    required this.onClose,
+  });
+
+  final ParentNotification notification;
+  final TapTalkThemeToken theme;
+  final AppLanguage lang;
+  final String timeLabel;
+  final IconData icon;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = theme.bgAccent;
+    final iconColor = ParentAlertIcons.iconColor(notification.alertType);
+    final iconBg = ParentAlertIcons.iconBackground(notification.alertType);
+    final maxHeight = MediaQuery.sizeOf(context).height * 0.72;
+
+    return Material(
+      color: Colors.transparent,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: 420, maxHeight: maxHeight),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE9EEF2)),
+              boxShadow: [
+                BoxShadow(
+                  color: theme.textMain.withValues(alpha: 0.14),
+                  blurRadius: 24,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg,
+                      AppSpacing.lg,
+                      AppSpacing.sm,
+                      AppSpacing.md,
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: iconBg,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(icon, size: 24, color: iconColor),
+                        ),
+                        const SizedBox(width: AppSpacing.md),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                notification.title,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  color: theme.textMain,
+                                  height: 1.25,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                timeLabel,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: theme.textMain.withValues(alpha: 0.55),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: onClose,
+                          icon: Icon(
+                            Icons.close_rounded,
+                            color: theme.textMain.withValues(alpha: 0.45),
+                          ),
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 32,
+                            minHeight: 32,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.lg,
+                    ),
+                    child: Text(
+                      AppStrings.alertTypeLabel(lang, notification.alertType),
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: iconColor,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.lg,
+                        0,
+                        AppSpacing.lg,
+                        AppSpacing.md,
+                      ),
+                      child: Text(
+                        notification.body,
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: theme.textMain.withValues(alpha: 0.82),
+                          height: 1.45,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg,
+                      AppSpacing.sm,
+                      AppSpacing.lg,
+                      AppSpacing.lg,
+                    ),
+                    child: FilledButton(
+                      onPressed: onClose,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: accent,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size.fromHeight(44),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        AppStrings.ok(lang),
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),

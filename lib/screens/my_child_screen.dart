@@ -16,6 +16,10 @@ import 'child_monitoring_screen.dart';
 class MyChildScreen extends StatelessWidget {
   const MyChildScreen({super.key});
 
+  Future<void> _refresh(BuildContext context) async {
+    await context.read<AppState>().refreshLinkedChildren();
+  }
+
   Future<void> _showLinkChildDialog(BuildContext context) async {
     await LinkChildDialog.show(context);
   }
@@ -74,7 +78,11 @@ class MyChildScreen extends StatelessWidget {
       currentRoute: AppRoute.myChild,
       body: Stack(
         children: [
-          ListView(
+          RefreshIndicator(
+            onRefresh: () => _refresh(context),
+            color: theme.bgAccent,
+            child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.only(
               left: AppSpacing.lg,
               right: AppSpacing.lg,
@@ -139,6 +147,7 @@ class MyChildScreen extends StatelessWidget {
                   ),
                 ),
             ],
+            ),
           ),
           Positioned(
             right: AppSpacing.lg,
@@ -250,22 +259,27 @@ class _LinkedChildTile extends StatelessWidget {
                 ),
               ),
             ),
-            TextButton(
-              onPressed: onUnlink,
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.sm,
-                  vertical: AppSpacing.sm,
+            Flexible(
+              child: TextButton(
+                onPressed: onUnlink,
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.sm,
+                    vertical: AppSpacing.sm,
+                  ),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: Text(
-                AppStrings.unlinkChild(lang),
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: theme.bgAccent,
+                child: Text(
+                  AppStrings.unlinkChild(lang),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: theme.bgAccent,
+                  ),
                 ),
               ),
             ),

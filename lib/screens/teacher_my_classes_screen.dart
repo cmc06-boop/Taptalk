@@ -20,23 +20,13 @@ class TeacherMyClassesScreen extends StatefulWidget {
 }
 
 class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
-  final Map<int, int> _studentCounts = {};
-
-  Future<void> _refreshCounts() async {
-    final app = context.read<AppState>();
-    final counts = <int, int>{};
-    for (final c in app.teacherClasses) {
-      counts[c.id] = await app.studentCountForClass(c.id);
-    }
-    if (!mounted) return;
-    setState(() => _studentCounts.addAll(counts));
-  }
+  Future<void> _refresh() =>
+      context.read<AppState>().refreshTeacherClasses();
 
   Future<void> _showCreateDialog() async {
     final lang = context.read<AppState>().language;
     final created = await CreateClassDialog.show(context);
     if (!mounted || created != true) return;
-    await _refreshCounts();
     if (!mounted) return;
     await TapTalkResultDialog.showSuccess(
       context,
@@ -87,7 +77,6 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
       );
       return;
     }
-    setState(() => _studentCounts.remove(teacherClass.id));
     await TapTalkResultDialog.showSuccess(
       context,
       title: AppStrings.classDeletedTitle(lang),
@@ -104,7 +93,6 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
       initialName: app.localizedContent(teacherClass.name),
     );
     if (!mounted || updated != true) return;
-    await _refreshCounts();
     if (!mounted) return;
     await TapTalkResultDialog.showSuccess(
       context,
@@ -114,21 +102,23 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
   }
 
   void _openClass(({int id, String name, String code}) teacherClass) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => TeacherClassDetailScreen(
-          classId: teacherClass.id,
-          className: teacherClass.name,
-          classCode: teacherClass.code,
-        ),
-      ),
-    ).then((_) => _refreshCounts());
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute<void>(
+            builder: (_) => TeacherClassDetailScreen(
+              classId: teacherClass.id,
+              className: teacherClass.name,
+              classCode: teacherClass.code,
+            ),
+          ),
+        )
+        .then((_) => _refresh());
   }
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshCounts());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
   }
 
   @override
@@ -145,11 +135,9 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
       body: Stack(
         children: [
           RefreshIndicator(
-            onRefresh: () async {
-              await context.read<AppState>().refreshTeacherClasses();
-              await _refreshCounts();
-            },
+            onRefresh: _refresh,
             child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(
               AppSpacing.lg,
               AppSpacing.sm,
@@ -206,13 +194,16 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
               else
                 for (final teacherClass in classes)
                   Padding(
+                    key: ValueKey(
+                      'tclass_${teacherClass.id}_${lang.name}_${app.languageRevision}',
+                    ),
                     padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                     child: ClassColorCard(
                       classId: teacherClass.id,
-                      title: app.localizedContent(teacherClass.name),
+                      title: teacherClass.name,
                       badge: teacherClass.code,
                       subtitle: AppStrings.studentsInClass(
-                        _studentCounts[teacherClass.id] ?? 0,
+                        app.teacherClassStudentCount(teacherClass.id),
                         lang,
                       ),
                       icon: Icons.menu_book_rounded,

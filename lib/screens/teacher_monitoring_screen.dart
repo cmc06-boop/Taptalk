@@ -17,28 +17,25 @@ class TeacherMonitoringScreen extends StatefulWidget {
 }
 
 class _TeacherMonitoringScreenState extends State<TeacherMonitoringScreen> {
-  final Map<int, int> _studentCounts = {};
-  bool _loading = true;
+  bool _loading = false;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    final hasClasses = context.read<AppState>().teacherClasses.isNotEmpty;
+    _loading = !hasClasses;
+    _load(showLoading: !hasClasses);
   }
 
-  Future<void> _load() async {
-    final app = context.read<AppState>();
-    final counts = <int, int>{};
-    for (final teacherClass in app.teacherClasses) {
-      counts[teacherClass.id] = await app.studentCountForClass(teacherClass.id);
+  Future<void> _load({bool showLoading = false}) async {
+    if (showLoading && mounted) {
+      setState(() => _loading = true);
     }
+    await context.read<AppState>().refreshTeacherClasses(
+          cloudSyncInBackground: !showLoading,
+        );
     if (!mounted) return;
-    setState(() {
-      _studentCounts
-        ..clear()
-        ..addAll(counts);
-      _loading = false;
-    });
+    setState(() => _loading = false);
   }
 
   void _openClass(({int id, String name, String code}) teacherClass) {
@@ -51,7 +48,7 @@ class _TeacherMonitoringScreenState extends State<TeacherMonitoringScreen> {
             ),
           ),
         )
-        .then((_) => _load());
+        .then((_) => _load(showLoading: false));
   }
 
   @override
@@ -65,80 +62,84 @@ class _TeacherMonitoringScreenState extends State<TeacherMonitoringScreen> {
       title: AppStrings.appName(lang),
       currentRoute: AppRoute.teacherMonitoring,
       showBottomNav: false,
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.lg,
-          AppSpacing.sm,
-          AppSpacing.lg,
-          AppSpacing.xxl,
-        ),
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(AppSpacing.md),
-            decoration: BoxDecoration(
-              color: theme.bgMid.withValues(alpha: 0.55),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  AppStrings.monitoring(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: theme.textMain,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  AppStrings.teacherMonitoringSubtitle(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    color: theme.textMain.withValues(alpha: 0.72),
-                    height: 1.35,
-                  ),
-                ),
-              ],
-            ),
+      body: RefreshIndicator(
+        onRefresh: () => _load(showLoading: true),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.sm,
+            AppSpacing.lg,
+            AppSpacing.xxl,
           ),
-          const SizedBox(height: AppSpacing.md),
-          if (_loading)
-            const Padding(
-              padding: EdgeInsets.all(AppSpacing.xxl),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (classes.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(AppSpacing.xxl),
-              child: Center(
-                child: Text(
-                  AppStrings.noTeacherClasses(lang),
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.poppins(
-                    color: theme.textMain.withValues(alpha: 0.7),
-                  ),
-                ),
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: theme.bgMid.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(14),
               ),
-            )
-          else
-            for (final teacherClass in classes)
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    AppStrings.monitoring(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: theme.textMain,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    AppStrings.teacherMonitoringSubtitle(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: theme.textMain.withValues(alpha: 0.72),
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.all(AppSpacing.xxl),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (classes.isEmpty)
               Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                child: ClassColorCard(
-                  classId: teacherClass.id,
-                  title: teacherClass.name,
-                  badge: teacherClass.code,
-                  subtitle: AppStrings.studentsInClass(
-                    _studentCounts[teacherClass.id] ?? 0,
-                    lang,
+                padding: const EdgeInsets.all(AppSpacing.xxl),
+                child: Center(
+                  child: Text(
+                    AppStrings.noTeacherClasses(lang),
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.poppins(
+                      color: theme.textMain.withValues(alpha: 0.7),
+                    ),
                   ),
-                  icon: Icons.monitor_heart_outlined,
-                  onTap: () => _openClass(teacherClass),
                 ),
-              ),
-        ],
+              )
+            else
+              for (final teacherClass in classes)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  child: ClassColorCard(
+                    classId: teacherClass.id,
+                    title: teacherClass.name,
+                    badge: teacherClass.code,
+                    subtitle: AppStrings.studentsInClass(
+                      app.teacherClassStudentCount(teacherClass.id),
+                      lang,
+                    ),
+                    icon: Icons.monitor_heart_outlined,
+                    onTap: () => _openClass(teacherClass),
+                  ),
+                ),
+          ],
+        ),
       ),
     );
   }

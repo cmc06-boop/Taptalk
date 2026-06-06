@@ -279,6 +279,12 @@ abstract final class AppStrings {
   static String totalClasses(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Klase' : 'Classes';
 
+  static String filterBySubject(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'I-filter ayon sa subject' : 'Filter by subject';
+
+  static String allSubjects(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Lahat ng subject' : 'All subjects';
+
   static String noTeacherStudents(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Walang naka-enroll na mag-aaral. Ibahagi ang class code sa mga bata.'
       : 'No enrolled students yet. Share your class code with learners.';
@@ -430,6 +436,26 @@ abstract final class AppStrings {
       lang == AppLanguage.filipino
           ? 'Hindi mo maaaring mag-alert sa mag-aaral na ito.'
           : 'You cannot alert this student.';
+
+  static String noInternetConnection(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Walang koneksyon sa internet'
+      : 'No Internet Connection';
+
+  static String authNeedsInternetNotice(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Kailangan ng internet connection para mag-sign up o mag-log in.'
+      : 'Internet connection is required to sign up or log in.';
+
+  static String loginOfflineNotice(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Walang koneksyon sa internet. Kailangan ng internet para mag-log in.'
+      : 'No Internet Connection. Internet is required to log in.';
+
+  static String signUpOfflineNotice(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Walang koneksyon sa internet. Kailangan ng internet para mag-sign up.'
+      : 'No Internet Connection. Internet is required to sign up.';
+
+  static String passwordResetOfflineNotice(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Walang koneksyon sa internet. Kailangan ng internet para mag-reset ng password.'
+      : 'No Internet Connection. Internet is required to reset your password.';
 
   static String loginNeedsInternet(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Kailangan ng internet para mag-log in sa online account na ito.'
@@ -654,7 +680,7 @@ abstract final class AppStrings {
       lang == AppLanguage.filipino ? 'Kahapon' : 'Yesterday';
 
   static String markAllRead(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Markahan lahat na nabasa'
+      ? 'Basahin lahat'
       : 'Mark all as read';
 
   static String newAlertBadge(AppLanguage lang) =>
@@ -1010,6 +1036,23 @@ abstract final class AppStrings {
       ? 'Pumili ng buwan'
       : 'Select month';
 
+  static String monitoringShowingPeriod(AppLanguage lang, String periodLabel) =>
+      lang == AppLanguage.filipino
+          ? 'Ipinapakita ang data para sa $periodLabel'
+          : 'Showing data for $periodLabel';
+
+  static String phrasesUsedInPeriod(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Pariralang ginamit'
+      : 'Phrases used';
+
+  static String phraseTapsInPeriod(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Kabuuang pagpindot'
+      : 'Total taps';
+
+  static String newWordsInPeriod(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Bagong salita'
+      : 'New words';
+
   static String vocabularyGrowth(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Paglago ng bokabularyo'
       : 'Vocabulary growth';
@@ -1214,8 +1257,8 @@ abstract final class AppStrings {
       : 'Invalid profile code.';
 
   static String childNotFound(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Walang learner na may ganitong code.'
-      : 'No learner found with this code.';
+      ? 'Walang learner na may ganitong code. Siguraduhing na-copy ang code mula sa Profile ng anak at naka-log in sila gamit ang internet.'
+      : 'No learner found with this code. Make sure you copied the code from your child\'s Profile and they signed in online.';
 
   static String childAlreadyLinked(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Naka-link na ang anak na ito.'

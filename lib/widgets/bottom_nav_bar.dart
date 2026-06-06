@@ -44,22 +44,25 @@ class TapTalkBottomNav extends StatelessWidget {
         ],
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          _NavItem(
-            icon: Icons.home_rounded,
-            label: AppStrings.home(lang),
-            active: current == AppRoute.home,
-            onTap: () => app.setRoute(AppRoute.home),
-            color: theme,
+          Expanded(
+            child: _NavItem(
+              icon: Icons.home_rounded,
+              label: AppStrings.home(lang),
+              active: current == AppRoute.home,
+              onTap: () => app.setRoute(AppRoute.home),
+              color: theme,
+            ),
           ),
-          _NavItem(
-            icon: Icons.favorite_border_rounded,
-            label: AppStrings.favorites(lang),
-            active: current == AppRoute.favorites,
-            onTap: () => app.setRoute(AppRoute.favorites),
-            color: theme,
+          Expanded(
+            child: _NavItem(
+              icon: Icons.favorite_border_rounded,
+              label: AppStrings.favorites(lang),
+              active: current == AppRoute.favorites,
+              onTap: () => app.setRoute(AppRoute.favorites),
+              color: theme,
+            ),
           ),
           Transform.translate(
             offset: const Offset(0, -18),
@@ -85,19 +88,23 @@ class TapTalkBottomNav extends StatelessWidget {
               ),
             ),
           ),
-          _NavItem(
-            icon: Icons.history_rounded,
-            label: AppStrings.history(lang),
-            active: current == AppRoute.history,
-            onTap: () => app.setRoute(AppRoute.history),
-            color: theme,
+          Expanded(
+            child: _NavItem(
+              icon: Icons.history_rounded,
+              label: AppStrings.history(lang),
+              active: current == AppRoute.history,
+              onTap: () => app.setRoute(AppRoute.history),
+              color: theme,
+            ),
           ),
-          _NavItem(
-            icon: Icons.settings_outlined,
-            label: AppStrings.settings(lang),
-            active: current == AppRoute.settings,
-            onTap: () => app.setRoute(AppRoute.settings),
-            color: theme,
+          Expanded(
+            child: _NavItem(
+              icon: Icons.settings_outlined,
+              label: AppStrings.settings(lang),
+              active: current == AppRoute.settings,
+              onTap: () => app.setRoute(AppRoute.settings),
+              color: theme,
+            ),
           ),
         ],
       ),
@@ -137,12 +144,17 @@ class _NavItem extends StatelessWidget {
               color: active ? theme.bgAccent : theme.textMain.withValues(alpha: 0.68),
             ),
             const SizedBox(height: 2),
-            Text(
-              label,
-              style: GoogleFonts.poppins(
-                fontSize: 11,
-                fontWeight: active ? FontWeight.w800 : FontWeight.w600,
-                color: active ? theme.bgAccent : theme.textMain.withValues(alpha: 0.68),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  fontSize: 10,
+                  fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                  color: active ? theme.bgAccent : theme.textMain.withValues(alpha: 0.68),
+                ),
               ),
             ),
           ],
