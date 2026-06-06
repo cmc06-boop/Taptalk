@@ -370,6 +370,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
                   ),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       TextField(
                         controller: _textController,
@@ -391,11 +392,14 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       const SizedBox(height: AppSpacing.sm),
-                      Wrap(
-                        spacing: AppSpacing.sm,
-                        runSpacing: AppSpacing.sm,
-                        alignment: WrapAlignment.end,
-                        children: [
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Wrap(
+                          spacing: AppSpacing.sm,
+                          runSpacing: AppSpacing.sm,
+                          alignment: WrapAlignment.end,
+                          runAlignment: WrapAlignment.end,
+                          children: [
                           OutlinedButton.icon(
                             onPressed: _pickImage,
                             style: OutlinedButton.styleFrom(
@@ -452,6 +456,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ),
                         ],
+                        ),
                       ),
                     ],
                   ),

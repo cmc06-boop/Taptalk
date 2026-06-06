@@ -192,6 +192,7 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
             borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           ),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               TextField(
                 controller: _controller,
@@ -213,64 +214,64 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
                 ),
               ),
               const SizedBox(height: AppSpacing.sm),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  Flexible(
-                    child: Align(
-                      alignment: Alignment.centerRight,
-                      child: OutlinedButton.icon(
-                        onPressed: _pickImage,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: theme.bgAccent,
-                          backgroundColor: Colors.white.withValues(alpha: 0.92),
-                          side: BorderSide(
-                            color: theme.bgAccent.withValues(alpha: 0.45),
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.sm,
-                            vertical: AppSpacing.xs,
-                          ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  alignment: WrapAlignment.end,
+                  runAlignment: WrapAlignment.end,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _pickImage,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: theme.bgAccent,
+                        backgroundColor: Colors.white.withValues(alpha: 0.92),
+                        side: BorderSide(
+                          color: theme.bgAccent.withValues(alpha: 0.45),
                         ),
-                        icon: Icon(
-                          Icons.image_outlined,
-                          size: 16,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.sm,
+                          vertical: AppSpacing.xs,
+                        ),
+                      ),
+                      icon: Icon(
+                        Icons.image_outlined,
+                        size: 16,
+                        color: theme.bgAccent,
+                      ),
+                      label: Text(
+                        AppStrings.attachImage(lang),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
                           color: theme.bgAccent,
                         ),
-                        label: Text(
-                          AppStrings.attachImage(lang),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.poppins(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: theme.bgAccent,
-                          ),
+                      ),
+                    ),
+                    FilledButton.icon(
+                      onPressed: _submit,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: theme.bgAccent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.md,
+                          vertical: AppSpacing.sm,
+                        ),
+                      ),
+                      icon: const Icon(Icons.add_rounded, size: 18),
+                      label: Text(
+                        addLabel,
+                        style: GoogleFonts.poppins(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  FilledButton.icon(
-                    onPressed: _submit,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: theme.bgAccent,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.md,
-                        vertical: AppSpacing.sm,
-                      ),
-                    ),
-                    icon: const Icon(Icons.add_rounded, size: 18),
-                    label: Text(
-                      addLabel,
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
