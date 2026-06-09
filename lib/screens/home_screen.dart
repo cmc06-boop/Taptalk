@@ -5,12 +5,11 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
-
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/utils/speak_feedback.dart';
 import '../providers/app_state.dart';
+import '../services/stt_service.dart';
 import '../widgets/add_category_dialog.dart';
 import '../widgets/edit_phrase_dialog.dart';
 import '../widgets/learner_scaffold.dart';
@@ -31,9 +30,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _textController = HighlightingTextController();
   final _categoryScroll = ScrollController();
   final _undoStack = <String>[];
-  final stt.SpeechToText _speech = stt.SpeechToText();
+  final SttService _stt = SttService();
   bool _listening = false;
-  bool _speechReady = false;
   String? _attachedImagePath;
 
   @override
@@ -49,7 +47,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _speech.cancel();
+    _stt.cancel();
     _textController.dispose();
     _categoryScroll.dispose();
     super.dispose();
@@ -58,82 +56,51 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _toggleMic() async {
     final app = context.read<AppState>();
     if (_listening) {
-      await _speech.stop();
+      await _stt.stop();
       setState(() => _listening = false);
       return;
     }
-    if (!_speechReady) {
-      final available = await _speech.initialize(
-        options: [
-          stt.SpeechToText.androidIntentLookup,
-          stt.SpeechToText.androidNoBluetooth,
-        ],
-        onStatus: (status) {
-          if (!mounted) return;
-          if (status == stt.SpeechToText.notListeningStatus ||
-              status == stt.SpeechToText.doneStatus) {
-            setState(() => _listening = false);
-          }
-        },
-        onError: (error) {
-          if (!mounted) return;
-          setState(() => _listening = false);
-          if (error.permanent) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(AppStrings.speechNotAvailable(app.language))),
-            );
-          }
-        },
-      );
-      _speechReady = available;
-    }
 
-    if (!_speechReady) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(AppStrings.speechNotAvailable(app.language))),
-        );
-      }
+    final ready = await _stt.initialize(
+      onStatus: (_) {
+        if (!mounted) return;
+        if (!_stt.isListening) {
+          setState(() => _listening = false);
+        }
+      },
+      onError: (error) {
+        if (!mounted) return;
+        setState(() => _listening = false);
+        if (error.permanent) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(AppStrings.speechNotAvailable(app.language))),
+          );
+        }
+      },
+    );
+
+    if (!ready) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.speechNotAvailable(app.language))),
+      );
       return;
     }
 
-    final locales = await _speech.locales();
-    final preferred = app.language == AppLanguage.filipino
-        ? ['fil_PH', 'tl_PH', 'en_US']
-        : ['en_US', 'en_GB'];
-    String locale = preferred.last;
-    for (final p in preferred) {
-      if (locales.any((l) => l.localeId == p)) {
-        locale = p;
-        break;
-      }
-    }
-
+    final locale = await _stt.resolveLocale(app.language);
     setState(() => _listening = true);
-    try {
-      await _speech.listen(
-        listenOptions: stt.SpeechListenOptions(
-          localeId: locale,
-          onDevice: true,
-          listenMode: stt.ListenMode.dictation,
-          partialResults: true,
-          cancelOnError: true,
-        ),
-        onResult: (result) {
-          if (result.finalResult) {
-            final current = _textController.text.trim();
-            final next = current.isEmpty
-                ? result.recognizedWords
-                : '$current ${result.recognizedWords}';
-            _textController.text = next;
-          }
-        },
-      );
-    } catch (_) {
-      if (!mounted) return;
+    final started = await _stt.startListening(
+      localeId: locale,
+      onResult: (words, isFinal) {
+        if (!isFinal || words.trim().isEmpty) return;
+        final current = _textController.text.trim();
+        _textController.text = current.isEmpty ? words.trim() : '$current ${words.trim()}';
+      },
+    );
+    if (!started && mounted) {
       setState(() => _listening = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppStrings.speechNeedsInternet(app.language))),
+        SnackBar(content: Text(AppStrings.speechNotAvailable(app.language))),
       );
     }
   }
@@ -147,10 +114,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _appendPhrase(String text, {bool speak = false}) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
     final current = _textController.text.trim();
-    _textController.text = current.isEmpty ? text : '$current $text';
+    _textController.text = current.isEmpty ? trimmed : '$current $trimmed';
     if (speak) {
-      speakWithFeedback(context, _textController.text, record: true);
+      speakWithFeedback(context, trimmed, record: true);
     }
   }
 
@@ -171,9 +140,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final denseGrid = AppSpacing.phraseGridIsDense(context);
     final highlightController = _textController;
     if (highlightController is HighlightingTextController) {
+      final (start, end) =
+          app.composerHighlightRange(_textController.text);
       highlightController.updateHighlight(
-        start: app.spokenWordStart,
-        end: app.spokenWordEnd,
+        start: start,
+        end: end,
         accent: theme.bgAccent,
       );
     }
@@ -326,8 +297,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         IconButton(
                           visualDensity: VisualDensity.compact,
                           icon: const Icon(Icons.close_rounded, size: 22),
-                          onPressed: () {
-                            app.stopSpeech();
+                          onPressed: () async {
+                            await app.stopSpeech();
                             _textController.clear();
                           },
                         ),

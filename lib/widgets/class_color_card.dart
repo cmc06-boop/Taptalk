@@ -471,6 +471,92 @@ class _TileCard extends StatelessWidget {
   }
 }
 
+/// Gradient header with bubble decor for class detail screens.
+class ClassColorHeaderBanner extends StatelessWidget {
+  const ClassColorHeaderBanner({
+    super.key,
+    required this.classId,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+  });
+
+  final int classId;
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = ClassColorPalette.forClass(classId);
+    final app = context.watch<AppState>();
+    final displayTitle = app.localizedContent(title);
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: colors.gradient,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: colors.border, width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: colors.shadow,
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Stack(
+        clipBehavior: Clip.antiAlias,
+        children: [
+          Positioned.fill(
+            child: ClassBubbleDecor(seed: classId),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        displayTitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    if (trailing != null) ...[
+                      const SizedBox(width: 6),
+                      trailing!,
+                    ],
+                  ],
+                ),
+                if (subtitle != null && subtitle!.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    subtitle!,
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.white.withValues(alpha: 0.82),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Small color dot for inline class labels.
 class ClassColorDot extends StatelessWidget {
   const ClassColorDot({super.key, required this.classId, this.size = 10});

@@ -7,8 +7,8 @@ import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
+import '../widgets/language_dropdown_field.dart';
 import '../widgets/panel_card.dart';
-import '../widgets/tts_speed_selector.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -89,23 +89,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 const SizedBox(height: AppSpacing.md),
-                Text(
-                  AppStrings.language(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: theme.textMain.withValues(alpha: 0.85),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                _LanguageDropdown(
+                LanguageDropdownField(
                   value: lang,
+                  label: AppStrings.language(lang),
                   onChanged: app.setLanguage,
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                TtsSpeedSelector(
-                  showScaleLabels: true,
-                  sectionLabel: AppStrings.speechSpeed(lang),
                 ),
               ],
             ),
@@ -175,59 +162,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _LanguageDropdown extends StatelessWidget {
-  const _LanguageDropdown({
-    required this.value,
-    required this.onChanged,
-  });
-
-  final AppLanguage value;
-  final ValueChanged<AppLanguage> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = context.watch<AppState>().theme;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-        border: Border.all(
-          color: theme.textMain.withValues(alpha: 0.08),
-        ),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<AppLanguage>(
-          value: value,
-          isExpanded: true,
-          icon: Icon(
-            Icons.keyboard_arrow_down_rounded,
-            color: theme.textMain.withValues(alpha: 0.6),
-          ),
-          borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-          style: GoogleFonts.poppins(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: theme.textMain,
-          ),
-          items: AppLanguage.values
-              .map(
-                (l) => DropdownMenuItem(
-                  value: l,
-                  child: Text(AppStrings.languageDisplay(l, value)),
-                ),
-              )
-              .toList(),
-          onChanged: (l) {
-            if (l != null) onChanged(l);
-          },
-        ),
       ),
     );
   }

@@ -9,6 +9,7 @@ class TtsService {
   bool _ready = false;
   String? _resolvedLanguageCode;
   bool _initializing = false;
+  int _speakEpoch = 0;
   VoidCallback? onStart;
   void Function(String text, int start, int end, String word)? onProgress;
   VoidCallback? onComplete;
@@ -104,7 +105,10 @@ class TtsService {
   }) async {
     if (text.trim().isEmpty) return false;
 
+    final epoch = ++_speakEpoch;
+
     for (var attempt = 0; attempt < 3; attempt++) {
+      if (epoch != _speakEpoch) return false;
       try {
         if (attempt == 0) {
           await init();
@@ -112,6 +116,7 @@ class TtsService {
           await _recreateEngine();
           await Future<void>.delayed(Duration(milliseconds: 220 * attempt));
         }
+        if (epoch != _speakEpoch) return false;
 
         final languageCode = await resolveLanguageCode(lang);
         _resolvedLanguageCode = languageCode;
@@ -123,6 +128,7 @@ class TtsService {
           await _tts.setLanguage('en-US');
         }
         final result = await _tts.speak(text.trim());
+        if (epoch != _speakEpoch) return false;
         final ok = result == null ||
             result == 1 ||
             result == '1' ||
@@ -131,9 +137,11 @@ class TtsService {
             result.toString().toLowerCase() == 'ok';
         if (ok) return true;
       } catch (_) {
+        if (epoch != _speakEpoch) return false;
         // Retry by recreating the engine in the next loop iteration.
       }
     }
+    if (epoch != _speakEpoch) return false;
     onError?.call('speak_failed');
     return false;
   }
@@ -147,6 +155,7 @@ class TtsService {
   }
 
   Future<void> stop() async {
+    _speakEpoch++;
     try {
       await _tts.stop();
     } catch (_) {}

@@ -314,12 +314,14 @@ class NotificationSyncService {
     return _cloud.getClassEnrollmentsForLearner(learnerFirebaseUid);
   }
 
-  Future<void> pushLearnerActivity(LearnerActivityCloudEvent event) async {
-    if (!_cloud.isAvailable) return;
+  Future<bool> pushLearnerActivity(LearnerActivityCloudEvent event) async {
+    if (!_cloud.isAvailable) return false;
     try {
       await _cloud.appendLearnerActivity(event);
+      return true;
     } catch (e, st) {
       debugPrint('Push learner activity failed: $e\n$st');
+      return false;
     }
   }
 
@@ -431,6 +433,33 @@ class NotificationSyncService {
       return await _cloud.getLearnerCategories(learnerFirebaseUid);
     } catch (e, st) {
       debugPrint('getLearnerCategoriesFromCloud failed: $e\n$st');
+      return const [];
+    }
+  }
+
+  Future<void> syncLearnerCustomPhrases({
+    required String learnerFirebaseUid,
+    required List<RemoteLearnerCustomPhrase> phrases,
+  }) async {
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return;
+    try {
+      await _cloud.upsertLearnerCustomPhrases(
+        learnerFirebaseUid: learnerFirebaseUid,
+        phrases: phrases,
+      );
+    } catch (e, st) {
+      debugPrint('syncLearnerCustomPhrases failed: $e\n$st');
+    }
+  }
+
+  Future<List<RemoteLearnerCustomPhrase>> getLearnerCustomPhrasesFromCloud(
+    String learnerFirebaseUid,
+  ) async {
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return const [];
+    try {
+      return await _cloud.getLearnerCustomPhrases(learnerFirebaseUid);
+    } catch (e, st) {
+      debugPrint('getLearnerCustomPhrasesFromCloud failed: $e\n$st');
       return const [];
     }
   }

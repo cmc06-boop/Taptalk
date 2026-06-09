@@ -567,6 +567,52 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   }
 
   @override
+  Future<void> upsertLearnerCustomPhrases({
+    required String learnerFirebaseUid,
+    required List<RemoteLearnerCustomPhrase> phrases,
+  }) async {
+    if (!isAvailable || learnerFirebaseUid.trim().isEmpty) return;
+    await FirebaseFirestore.instance
+        .collection(learnerProfileCollectionName)
+        .doc(learnerFirebaseUid.trim())
+        .set(
+          {
+            'customPhrases': phrases.map((p) => p.toFirestoreMap()).toList(),
+            'customPhrasesUpdatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+  }
+
+  @override
+  Future<List<RemoteLearnerCustomPhrase>> getLearnerCustomPhrases(
+    String learnerFirebaseUid,
+  ) async {
+    if (!isAvailable || learnerFirebaseUid.trim().isEmpty) return const [];
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection(learnerProfileCollectionName)
+          .doc(learnerFirebaseUid.trim())
+          .get();
+      if (!doc.exists) return const [];
+      final raw = doc.data()?['customPhrases'];
+      if (raw is! List) return const [];
+      return raw
+          .whereType<Map>()
+          .map(
+            (e) => RemoteLearnerCustomPhrase.fromMap(
+              Map<String, dynamic>.from(e),
+            ),
+          )
+          .where((p) => p.phraseText.trim().isNotEmpty)
+          .toList();
+    } catch (e, st) {
+      debugPrint('getLearnerCustomPhrases failed: $e\n$st');
+      return const [];
+    }
+  }
+
+  @override
   Future<List<String>> getLearnerEmergencyContacts(
     String learnerFirebaseUid,
   ) async {

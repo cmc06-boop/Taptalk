@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../core/constants/app_spacing.dart';
+import '../core/constants/monitoring_constants.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../data/models/phrase_usage_stat.dart';
@@ -30,6 +31,7 @@ class FrequentlyUsedSection extends StatefulWidget {
   final Set<String>? allowedCategoryKeys;
 
   static const previewPhraseCount = 5;
+  static const minUsageCount = MonitoringConstants.frequentlyUsedMinCount;
 
   @override
   State<FrequentlyUsedSection> createState() => _FrequentlyUsedSectionState();
@@ -48,6 +50,7 @@ class _FrequentlyUsedSectionState extends State<FrequentlyUsedSection> {
 
   List<PhraseUsageStat> get _personalStats => widget.stats
       .where((s) => _isAllowedCategory(s.categoryKey))
+      .where((s) => s.count >= FrequentlyUsedSection.minUsageCount)
       .toList();
 
   Map<String, List<PhraseUsageStat>> _groupByCategory(

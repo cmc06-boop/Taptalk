@@ -10,6 +10,18 @@ import '../data/models/category_model.dart';
 import '../data/models/vocabulary_growth_summary.dart';
 import '../data/repositories/app_repository.dart';
 
+int _totalCategoryUsage(List<CategoryVocabularySlice> slices) =>
+    slices.fold(0, (sum, slice) => sum + slice.usageCount);
+
+/// Visual slice weights — zero-usage categories keep a small slice so they stay visible.
+List<double> _categorySliceValues(List<CategoryVocabularySlice> slices) {
+  if (slices.isEmpty) return const [];
+  const minWeight = 1.0;
+  return slices
+      .map((slice) => math.max(slice.usageCount.toDouble(), minWeight))
+      .toList();
+}
+
 class CategoryUsagePieChart extends StatelessWidget {
   const CategoryUsagePieChart({
     super.key,
@@ -152,7 +164,7 @@ class _CategoryLegendLayout {
     required double width,
     required List<CategoryVocabularySlice> slices,
     required String Function(String categoryKey) labelForCategory,
-    required int equalPercent,
+    required int totalUsage,
     required AppLanguage lang,
     required Color textColor,
   }) {
@@ -163,7 +175,8 @@ class _CategoryLegendLayout {
       details.add(
         AppStrings.categoryLegendDetail(
           wordCount: slice.wordCount,
-          equalPercent: equalPercent,
+          usageCount: slice.usageCount,
+          totalUsage: totalUsage,
           lang: lang,
         ),
       );
@@ -269,10 +282,7 @@ class _InteractiveCategoryDonutState extends State<_InteractiveCategoryDonut> {
 
   int? _selectedIndex;
 
-  int _equalPercent() {
-    final count = widget.slices.length;
-    return count > 0 ? (100 / count).round() : 0;
-  }
+  int get _totalUsage => _totalCategoryUsage(widget.slices);
 
   void _selectIndex(int? index) {
     setState(() {
@@ -291,7 +301,7 @@ class _InteractiveCategoryDonutState extends State<_InteractiveCategoryDonut> {
         theme: widget.theme,
         lang: widget.lang,
         labelForCategory: widget.labelForCategory,
-        equalPercent: _equalPercent(),
+        totalUsage: _totalUsage,
         selectedIndex: _selectedIndex,
       ),
     );
@@ -304,6 +314,7 @@ class _InteractiveCategoryDonutState extends State<_InteractiveCategoryDonut> {
     final theme = widget.theme;
     final lang = widget.lang;
     final slices = widget.slices;
+    final totalUsage = _totalUsage;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -311,7 +322,7 @@ class _InteractiveCategoryDonutState extends State<_InteractiveCategoryDonut> {
           width: constraints.maxWidth,
           slices: slices,
           labelForCategory: widget.labelForCategory,
-          equalPercent: _equalPercent(),
+          totalUsage: totalUsage,
           lang: lang,
           textColor: theme.textMain,
         );
@@ -327,6 +338,7 @@ class _InteractiveCategoryDonutState extends State<_InteractiveCategoryDonut> {
                 size: _chartSize,
                 strokeWidth: _strokeWidth,
                 slices: slices,
+                sliceValues: _categorySliceValues(slices),
                 colors: widget.colors,
                 theme: theme,
                 lang: lang,
@@ -341,7 +353,7 @@ class _InteractiveCategoryDonutState extends State<_InteractiveCategoryDonut> {
               theme: theme,
               lang: lang,
               labelForCategory: widget.labelForCategory,
-              equalPercent: _equalPercent(),
+              totalUsage: totalUsage,
               indices: previewIndices,
               columns: layout.columns,
               selectedIndex: _selectedIndex,
@@ -386,7 +398,7 @@ class _AllCategoriesSheet extends StatefulWidget {
     required this.theme,
     required this.lang,
     required this.labelForCategory,
-    required this.equalPercent,
+    required this.totalUsage,
     required this.selectedIndex,
   });
 
@@ -395,7 +407,7 @@ class _AllCategoriesSheet extends StatefulWidget {
   final TapTalkThemeToken theme;
   final AppLanguage lang;
   final String Function(String categoryKey) labelForCategory;
-  final int equalPercent;
+  final int totalUsage;
   final int? selectedIndex;
 
   @override
@@ -500,7 +512,7 @@ class _AllCategoriesSheetState extends State<_AllCategoriesSheet> {
                         width: constraints.maxWidth - (AppSpacing.md * 2),
                         slices: slices,
                         labelForCategory: widget.labelForCategory,
-                        equalPercent: widget.equalPercent,
+                        totalUsage: widget.totalUsage,
                         lang: lang,
                         textColor: theme.textMain,
                       );
@@ -515,6 +527,7 @@ class _AllCategoriesSheetState extends State<_AllCategoriesSheet> {
                                 size: _chartSize,
                                 strokeWidth: _strokeWidth,
                                 slices: slices,
+                                sliceValues: _categorySliceValues(slices),
                                 colors: widget.colors,
                                 theme: theme,
                                 lang: lang,
@@ -529,7 +542,7 @@ class _AllCategoriesSheetState extends State<_AllCategoriesSheet> {
                               theme: theme,
                               lang: lang,
                               labelForCategory: widget.labelForCategory,
-                              equalPercent: widget.equalPercent,
+                              totalUsage: widget.totalUsage,
                               indices: allIndices,
                               columns: layout.columns,
                               selectedIndex: _selectedIndex,
@@ -555,6 +568,7 @@ class _CategoryDonutChart extends StatelessWidget {
     required this.size,
     required this.strokeWidth,
     required this.slices,
+    required this.sliceValues,
     required this.colors,
     required this.theme,
     required this.lang,
@@ -565,6 +579,7 @@ class _CategoryDonutChart extends StatelessWidget {
   final double size;
   final double strokeWidth;
   final List<CategoryVocabularySlice> slices;
+  final List<double> sliceValues;
   final List<Color> colors;
   final TapTalkThemeToken theme;
   final AppLanguage lang;
@@ -572,7 +587,7 @@ class _CategoryDonutChart extends StatelessWidget {
   final ValueChanged<int> onSliceTap;
 
   int? _sliceIndexAt(Offset local) {
-    final count = slices.length;
+    final count = sliceValues.length;
     if (count <= 0) return null;
 
     final center = Offset(size / 2, size / 2);
@@ -587,8 +602,19 @@ class _CategoryDonutChart extends StatelessWidget {
     var fromTop = math.atan2(dy, dx) + math.pi / 2;
     if (fromTop < 0) fromTop += 2 * math.pi;
 
-    final sweep = 2 * math.pi / count;
-    return (fromTop / sweep).floor().clamp(0, count - 1);
+    final total = sliceValues.fold(0.0, (sum, value) => sum + value);
+    if (total <= 0) {
+      final sweep = 2 * math.pi / count;
+      return (fromTop / sweep).floor().clamp(0, count - 1);
+    }
+
+    final angle = fromTop / (2 * math.pi);
+    var cumulative = 0.0;
+    for (var i = 0; i < sliceValues.length; i++) {
+      cumulative += sliceValues[i] / total;
+      if (angle <= cumulative || i == sliceValues.length - 1) return i;
+    }
+    return count - 1;
   }
 
   @override
@@ -604,7 +630,7 @@ class _CategoryDonutChart extends StatelessWidget {
         height: size,
         child: CustomPaint(
           painter: _DonutPainter(
-            values: List.filled(slices.length, 1.0),
+            values: sliceValues,
             colors: colors,
             strokeWidth: strokeWidth,
             centerLabel: '${slices.length}',
@@ -626,7 +652,7 @@ class _CategoriesLegendGrid extends StatelessWidget {
     required this.theme,
     required this.lang,
     required this.labelForCategory,
-    required this.equalPercent,
+    required this.totalUsage,
     required this.indices,
     required this.columns,
     required this.selectedIndex,
@@ -638,7 +664,7 @@ class _CategoriesLegendGrid extends StatelessWidget {
   final TapTalkThemeToken theme;
   final AppLanguage lang;
   final String Function(String categoryKey) labelForCategory;
-  final int equalPercent;
+  final int totalUsage;
   final List<int> indices;
   final int columns;
   final int? selectedIndex;
@@ -675,7 +701,8 @@ class _CategoriesLegendGrid extends StatelessWidget {
                             ),
                             detailLine: AppStrings.categoryLegendDetail(
                               wordCount: slices[rowIndices[col]].wordCount,
-                              equalPercent: equalPercent,
+                              usageCount: slices[rowIndices[col]].usageCount,
+                              totalUsage: totalUsage,
                               lang: lang,
                             ),
                             textColor: theme.textMain,

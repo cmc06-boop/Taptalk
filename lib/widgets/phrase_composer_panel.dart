@@ -79,7 +79,7 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
     if (speak) {
       speakWithFeedback(
         context,
-        _controller.text,
+        trimmed,
         record: widget.recordOnPlay,
         categoryKey: widget.speakCategoryKey,
       );
@@ -109,9 +109,10 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
     final theme = app.theme;
     final lang = app.language;
     final addLabel = widget.addLabel ?? AppStrings.add(lang);
+    final (start, end) = app.composerHighlightRange(_controller.text);
     _controller.updateHighlight(
-      start: app.spokenWordStart,
-      end: app.spokenWordEnd,
+      start: start,
+      end: end,
       accent: theme.bgAccent,
     );
 
@@ -148,8 +149,8 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.close_rounded, size: 22),
-                  onPressed: () {
-                    app.stopSpeech();
+                  onPressed: () async {
+                    await app.stopSpeech();
                     _controller.clear();
                   },
                 ),

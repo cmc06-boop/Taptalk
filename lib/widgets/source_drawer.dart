@@ -14,6 +14,20 @@ bool _isForMeRoute(AppRoute route) {
       route == AppRoute.settings;
 }
 
+Widget _settingsDrawerItem({
+  required TapTalkThemeToken theme,
+  required AppLanguage lang,
+  required AppState app,
+}) {
+  return _DrawerItem(
+    theme: theme,
+    icon: Icons.settings_outlined,
+    label: AppStrings.settings(lang),
+    active: app.route == AppRoute.settings,
+    onTap: () => app.setRoute(AppRoute.settings),
+  );
+}
+
 class SourceDrawer extends StatelessWidget {
   const SourceDrawer({super.key});
 
@@ -124,6 +138,11 @@ class SourceDrawer extends StatelessWidget {
                               active: app.route == AppRoute.profile,
                               onTap: () => app.setRoute(AppRoute.profile),
                             ),
+                            _settingsDrawerItem(
+                              theme: theme,
+                              lang: lang,
+                              app: app,
+                            ),
                           ] else if (app.user?.isLearner ?? false) ...[
                             _DrawerItem(
                               theme: theme,
@@ -138,6 +157,11 @@ class SourceDrawer extends StatelessWidget {
                               label: AppStrings.classes(lang),
                               active: app.route == AppRoute.classes,
                               onTap: () => app.setRoute(AppRoute.classes),
+                            ),
+                            _settingsDrawerItem(
+                              theme: theme,
+                              lang: lang,
+                              app: app,
                             ),
                           ] else if (app.user?.isTeacher ?? false) ...[
                             _DrawerItem(
@@ -178,6 +202,11 @@ class SourceDrawer extends StatelessWidget {
                               active: app.route == AppRoute.profile,
                               onTap: () => app.setRoute(AppRoute.profile),
                             ),
+                            _settingsDrawerItem(
+                              theme: theme,
+                              lang: lang,
+                              app: app,
+                            ),
                           ] else ...[
                             _DrawerItem(
                               theme: theme,
@@ -185,6 +214,11 @@ class SourceDrawer extends StatelessWidget {
                               label: AppStrings.profile(lang),
                               active: app.route == AppRoute.profile,
                               onTap: () => app.setRoute(AppRoute.profile),
+                            ),
+                            _settingsDrawerItem(
+                              theme: theme,
+                              lang: lang,
+                              app: app,
                             ),
                           ],
                           const Spacer(),

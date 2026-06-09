@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -10,6 +12,7 @@ import '../data/models/child_lesson_progress.dart';
 import '../data/models/class_lesson.dart';
 import '../data/models/enrolled_class_model.dart';
 import '../providers/app_state.dart';
+import 'inline_dropdown_field.dart';
 import 'lesson_progress_ring.dart';
 
 enum _OpenPicker { none, classPicker, lessonPicker }
@@ -21,6 +24,7 @@ class LessonProgressSection extends StatefulWidget {
     required this.period,
     required this.month,
     required this.reloadNonce,
+    this.syncCloudOnReload = false,
     required this.theme,
     required this.lang,
     required this.labelForContent,
@@ -30,6 +34,7 @@ class LessonProgressSection extends StatefulWidget {
   final ChildUsagePeriod period;
   final DateTime? month;
   final int reloadNonce;
+  final bool syncCloudOnReload;
   final TapTalkThemeToken theme;
   final AppLanguage lang;
   final String Function(String text) labelForContent;
@@ -44,20 +49,21 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
   EnrolledClassModel? _selectedClass;
   ClassLesson? _selectedLesson;
   ChildLessonProgressEntry? _progress;
-  bool _loadingClasses = true;
-  bool _loadingLessons = false;
-  bool _loadingProgress = false;
   _OpenPicker _openPicker = _OpenPicker.none;
 
   @override
   void initState() {
     super.initState();
-    _loadClasses();
+    _loadClasses(syncCloud: false);
   }
 
   @override
   void didUpdateWidget(covariant LessonProgressSection oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.reloadNonce != widget.reloadNonce &&
+        widget.syncCloudOnReload) {
+      unawaited(_loadClasses(syncCloud: true));
+    }
     if (oldWidget.period != widget.period ||
         oldWidget.month != widget.month ||
         oldWidget.reloadNonce != widget.reloadNonce) {
@@ -67,12 +73,12 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
     }
   }
 
-  Future<void> _loadClasses() async {
-    if (mounted) setState(() => _loadingClasses = true);
+  Future<void> _loadClasses({bool syncCloud = false}) async {
     try {
       final app = context.read<AppState>();
       final classes = await app.getEnrolledClassesForMonitoring(
         widget.learnerUserId,
+        syncCloud: syncCloud,
       );
       if (!mounted) return;
       setState(() {
@@ -84,22 +90,24 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
         _openPicker = _OpenPicker.none;
       });
       if (_selectedClass != null) {
-        await _loadLessons(_selectedClass!, silent: true);
+        await _loadLessons(
+          _selectedClass!,
+          silent: true,
+          syncCloud: syncCloud,
+        );
       }
     } catch (e, st) {
       debugPrint('Lesson progress classes load failed: $e\n$st');
-    } finally {
-      if (mounted) setState(() => _loadingClasses = false);
     }
   }
 
   Future<void> _loadLessons(
     EnrolledClassModel enrolled, {
     bool silent = false,
+    bool syncCloud = false,
   }) async {
     if (!silent && mounted) {
       setState(() {
-        _loadingLessons = true;
         _lessons = [];
         _selectedLesson = null;
         _progress = null;
@@ -111,6 +119,7 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
       final lessons = await app.getClassLessonsForMonitoring(
         classId: enrolled.classId,
         classCode: enrolled.classCode,
+        syncCloud: syncCloud,
       );
       if (!mounted) return;
       setState(() {
@@ -118,12 +127,10 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
         _selectedLesson = lessons.isNotEmpty ? lessons.first : null;
       });
       if (_selectedLesson != null && _selectedClass != null) {
-        await _loadProgress(_selectedClass!, _selectedLesson!, silent: silent);
+        await _loadProgress(_selectedClass!, _selectedLesson!, silent: true);
       }
     } catch (e, st) {
       debugPrint('Lesson progress lessons load failed: $e\n$st');
-    } finally {
-      if (mounted) setState(() => _loadingLessons = false);
     }
   }
 
@@ -132,7 +139,6 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
     ClassLesson lesson, {
     bool silent = false,
   }) async {
-    if (!silent && mounted) setState(() => _loadingProgress = true);
     try {
       final app = context.read<AppState>();
       final progress = await app.getLessonProgressForMonitoring(
@@ -146,8 +152,6 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
       setState(() => _progress = progress);
     } catch (e, st) {
       debugPrint('Lesson progress load failed: $e\n$st');
-    } finally {
-      if (mounted) setState(() => _loadingProgress = false);
     }
   }
 
@@ -186,13 +190,6 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
     final theme = widget.theme;
     final lang = widget.lang;
 
-    if (_loadingClasses) {
-      return const Padding(
-        padding: EdgeInsets.all(AppSpacing.xl),
-        child: Center(child: CircularProgressIndicator()),
-      );
-    }
-
     if (_classes.isEmpty) {
       return Text(
         AppStrings.noClassesEnrolled(lang),
@@ -215,7 +212,7 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
           ),
         ),
         const SizedBox(height: AppSpacing.md),
-        _InlineDropdownField<EnrolledClassModel>(
+        InlineDropdownField<EnrolledClassModel>(
           label: AppStrings.selectClass(lang),
           value: _selectedClass == null
               ? null
@@ -229,12 +226,7 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
           onSelected: _onClassSelected,
         ),
         const SizedBox(height: AppSpacing.sm),
-        if (_loadingLessons)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_lessons.isEmpty)
+        if (_lessons.isEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
             child: Text(
@@ -246,7 +238,7 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
             ),
           )
         else ...[
-          _InlineDropdownField<ClassLesson>(
+          InlineDropdownField<ClassLesson>(
             label: AppStrings.selectLesson(lang),
             value: _selectedLesson == null
                 ? null
@@ -260,12 +252,7 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
             onSelected: _onLessonSelected,
           ),
           const SizedBox(height: AppSpacing.md),
-          if (_loadingProgress)
-            const Padding(
-              padding: EdgeInsets.all(AppSpacing.lg),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (_progress != null &&
+          if (_progress != null &&
               _selectedLesson != null &&
               _selectedClass != null)
             _LessonProgressCard(
@@ -277,191 +264,6 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
               labelForContent: widget.labelForContent,
             ),
         ],
-      ],
-    );
-  }
-}
-
-class _InlineDropdownField<T> extends StatelessWidget {
-  const _InlineDropdownField({
-    required this.label,
-    required this.value,
-    required this.options,
-    required this.optionLabel,
-    required this.selected,
-    required this.isOpen,
-    required this.theme,
-    required this.onToggle,
-    required this.onSelected,
-  });
-
-  final String label;
-  final String? value;
-  final List<T> options;
-  final String Function(T) optionLabel;
-  final T? selected;
-  final bool isOpen;
-  final TapTalkThemeToken theme;
-  final VoidCallback onToggle;
-  final ValueChanged<T> onSelected;
-
-  static const _borderColor = Color(0xFFE9EEF2);
-
-  @override
-  Widget build(BuildContext context) {
-    final fieldRadius = BorderRadius.circular(10);
-    final openFieldRadius = const BorderRadius.only(
-      topLeft: Radius.circular(10),
-      topRight: Radius.circular(10),
-    );
-    final menuRadius = const BorderRadius.only(
-      bottomLeft: Radius.circular(10),
-      bottomRight: Radius.circular(10),
-    );
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Material(
-          color: theme.bgMid.withValues(alpha: 0.35),
-          borderRadius: isOpen ? openFieldRadius : fieldRadius,
-          child: InkWell(
-            onTap: options.isEmpty ? null : onToggle,
-            borderRadius: isOpen ? openFieldRadius : fieldRadius,
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.sm + 2,
-                vertical: AppSpacing.xs + 2,
-              ),
-              decoration: BoxDecoration(
-                borderRadius: isOpen ? openFieldRadius : fieldRadius,
-                border: Border.all(
-                  color: isOpen ? theme.bgAccent.withValues(alpha: 0.35) : _borderColor,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          label,
-                          style: GoogleFonts.poppins(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: theme.textMain.withValues(alpha: 0.52),
-                            height: 1.1,
-                          ),
-                        ),
-                        const SizedBox(height: 1),
-                        Text(
-                          value ?? '—',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.poppins(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: theme.textMain,
-                            height: 1.2,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  AnimatedRotation(
-                    turns: isOpen ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 180),
-                    child: Icon(
-                      Icons.keyboard_arrow_down_rounded,
-                      size: 20,
-                      color: theme.textMain.withValues(alpha: 0.45),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
-          alignment: Alignment.topCenter,
-          clipBehavior: Clip.hardEdge,
-          child: isOpen
-              ? Material(
-                  color: Colors.white,
-                  elevation: 3,
-                  shadowColor: theme.textMain.withValues(alpha: 0.12),
-                  borderRadius: menuRadius,
-                  clipBehavior: Clip.antiAlias,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      border: Border(
-                        left: BorderSide(
-                          color: theme.bgAccent.withValues(alpha: 0.35),
-                        ),
-                        right: BorderSide(
-                          color: theme.bgAccent.withValues(alpha: 0.35),
-                        ),
-                        bottom: BorderSide(
-                          color: theme.bgAccent.withValues(alpha: 0.35),
-                        ),
-                      ),
-                    ),
-                    constraints: const BoxConstraints(maxHeight: 180),
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      padding: EdgeInsets.zero,
-                      itemCount: options.length,
-                      separatorBuilder: (_, _) =>
-                          const Divider(height: 1, color: _borderColor),
-                      itemBuilder: (_, index) {
-                        final option = options[index];
-                        final isSelected = option == selected;
-                        return InkWell(
-                          onTap: () => onSelected(option),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.sm + 2,
-                              vertical: AppSpacing.sm,
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    optionLabel(option),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 13,
-                                      fontWeight: isSelected
-                                          ? FontWeight.w700
-                                          : FontWeight.w500,
-                                      color: isSelected
-                                          ? theme.bgAccent
-                                          : theme.textMain,
-                                      height: 1.25,
-                                    ),
-                                  ),
-                                ),
-                                if (isSelected)
-                                  Icon(
-                                    Icons.check_rounded,
-                                    color: theme.bgAccent,
-                                    size: 18,
-                                  ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                )
-              : const SizedBox(width: double.infinity),
-        ),
       ],
     );
   }

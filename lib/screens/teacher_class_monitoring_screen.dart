@@ -10,8 +10,8 @@ import '../data/models/parent_notification.dart';
 import '../data/models/teacher_class_student.dart';
 import '../providers/app_state.dart';
 import '../core/utils/parent_alert_icons.dart';
-import '../widgets/localized_content_text.dart';
 import '../widgets/learner_scaffold.dart';
+import '../widgets/student_count_badge.dart';
 import '../widgets/taptalk_result_dialog.dart';
 import 'child_monitoring_screen.dart';
 
@@ -33,35 +33,15 @@ class TeacherClassMonitoringScreen extends StatefulWidget {
 class _TeacherClassMonitoringScreenState
     extends State<TeacherClassMonitoringScreen> {
   List<TeacherClassStudent> _students = [];
-  bool _loading = false;
+  bool _refreshing = false;
 
   @override
   void initState() {
     super.initState();
-    _load(showLoading: true);
+    _loadLocal();
   }
 
-  Future<void> _load({bool showLoading = false}) async {
-    if (showLoading && mounted) {
-      setState(() => _loading = true);
-    }
-    final app = context.read<AppState>();
-    try {
-      final students = await app.getTeacherClassStudentsForClass(
-        widget.classId,
-        cloudSyncInBackground: !showLoading,
-      );
-      if (!mounted) return;
-      setState(() => _students = students);
-    } catch (e, st) {
-      debugPrint('Teacher class roster load failed: $e\n$st');
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _onRefresh() async {
-    setState(() => _loading = true);
+  Future<void> _loadLocal() async {
     final app = context.read<AppState>();
     try {
       final students = await app.getTeacherClassStudentsForClass(
@@ -71,9 +51,28 @@ class _TeacherClassMonitoringScreenState
       if (!mounted) return;
       setState(() => _students = students);
     } catch (e, st) {
+      debugPrint('Teacher class roster load failed: $e\n$st');
+    }
+  }
+
+  Future<void> _onRefresh() async {
+    if (_refreshing) return;
+    setState(() => _refreshing = true);
+    final app = context.read<AppState>();
+    try {
+      final students = await app.getTeacherClassStudentsForClass(
+        widget.classId,
+        cloudSyncInBackground: false,
+      );
+      if (!mounted) return;
+      setState(() => _students = students);
+      for (final student in students) {
+        await app.refreshChildMonitoringData(student.learnerId);
+      }
+    } catch (e, st) {
       debugPrint('Teacher class roster refresh failed: $e\n$st');
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() => _refreshing = false);
     }
   }
 
@@ -294,6 +293,10 @@ class _TeacherClassMonitoringScreenState
 
     return LearnerScaffold(
       title: displayClassName,
+      titleBadge: StudentCountBadge(
+        count: _students.length,
+        accent: theme.bgAccent,
+      ),
       currentRoute: AppRoute.teacherMonitoring,
       showBackButton: true,
       showBottomNav: false,
@@ -308,42 +311,7 @@ class _TeacherClassMonitoringScreenState
           AppSpacing.xxl,
         ),
         children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(AppSpacing.md),
-            decoration: BoxDecoration(
-              color: theme.bgMid.withValues(alpha: 0.55),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                LocalizedContentText(
-                  widget.className,
-                  style: GoogleFonts.poppins(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: theme.textMain,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  AppStrings.studentsInClass(_students.length, lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    color: theme.textMain.withValues(alpha: 0.72),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          if (_loading)
-            const Padding(
-              padding: EdgeInsets.all(AppSpacing.xxl),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (_students.isEmpty)
+          if (_students.isEmpty)
             Padding(
               padding: const EdgeInsets.all(AppSpacing.xxl),
               child: Center(

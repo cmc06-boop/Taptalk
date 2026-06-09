@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -8,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
+import '../core/utils/vocabulary_growth_calculator.dart';
 import '../data/models/category_model.dart';
 import '../data/models/child_session_summary.dart';
 import '../data/models/monitored_learner.dart';
@@ -45,44 +44,20 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
   List<CategoryModel> _childCategories = [];
   ChildSessionSummary _sessionSummary = ChildSessionSummary.empty;
   VocabularyGrowthSummary _vocabularyGrowth = VocabularyGrowthSummary.empty;
-  bool _loadingStats = false;
-  bool _hasLoadedOnce = false;
+  bool _refreshing = false;
   int _reloadNonce = 0;
   bool _monthPickerExpanded = false;
-  Timer? _liveSessionTimer;
   DateTime? _trackingSince;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => _reloadStats(refreshLinks: true),
-    );
-    _liveSessionTimer = Timer.periodic(
-      const Duration(seconds: 30),
-      (_) {
-        if (_period == ChildUsagePeriod.today && _hasLoadedOnce) {
-          _reloadStats();
-        }
-      },
-    );
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadLocalStats());
   }
 
-  @override
-  void dispose() {
-    _liveSessionTimer?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _reloadStats({bool refreshLinks = false}) async {
+  Future<void> _loadLocalStats() async {
     final app = context.read<AppState>();
-    if (mounted) {
-      setState(() => _loadingStats = true);
-    }
     try {
-      if (refreshLinks || !_hasLoadedOnce) {
-        await app.refreshChildMonitoringData(widget.learner.learnerId);
-      }
       final trackingSince = await app.getLearnerMonitoringSince(
         widget.learner.learnerId,
       );
@@ -119,13 +94,21 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
       });
     } catch (e, st) {
       debugPrint('Monitoring stats load failed: $e\n$st');
+    }
+  }
+
+  Future<void> _refreshFromCloud() async {
+    if (_refreshing) return;
+    setState(() => _refreshing = true);
+    try {
+      await context
+          .read<AppState>()
+          .refreshChildMonitoringData(widget.learner.learnerId);
+      await _loadLocalStats();
+    } catch (e, st) {
+      debugPrint('Monitoring cloud refresh failed: $e\n$st');
     } finally {
-      if (mounted) {
-        setState(() {
-          _loadingStats = false;
-          _hasLoadedOnce = true;
-        });
-      }
+      if (mounted) setState(() => _refreshing = false);
     }
   }
 
@@ -185,13 +168,17 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
     return seen.length;
   }
 
+  /// For Me usage per category (defaults + custom) from speak history.
+  List<CategoryVocabularySlice> get _categoryUsageSlices =>
+      VocabularyGrowthCalculator.categorySlicesFromPhraseStats(_stats);
+
   void _selectPeriod(ChildUsagePeriod period) {
     if (_period == period && period != ChildUsagePeriod.month) return;
     setState(() {
       _period = period;
       _monthPickerExpanded = false;
     });
-    _reloadStats();
+    _loadLocalStats();
   }
 
   void _selectMonth(DateTime month) {
@@ -199,7 +186,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
       _selectedMonth = month;
       _monthPickerExpanded = false;
     });
-    _reloadStats();
+    _loadLocalStats();
   }
 
   String _categoryLabel(AppState app, String categoryKey) {
@@ -499,7 +486,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
       showBackButton: true,
       showBottomNav: false,
       body: RefreshIndicator(
-        onRefresh: () => _reloadStats(refreshLinks: true),
+        onRefresh: _refreshFromCloud,
         child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
@@ -557,12 +544,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                 borderRadius: BorderRadius.circular(_cardRadius),
                 border: Border.all(color: const Color(0xFFE9EEF2)),
               ),
-              child: _loadingStats
-                  ? const Padding(
-                      padding: EdgeInsets.all(AppSpacing.xl),
-                      child: Center(child: CircularProgressIndicator()),
-                    )
-                  : VocabularyGrowthSection(
+              child: VocabularyGrowthSection(
                       key: ValueKey(
                         'vocab_${_period.name}_$_reloadNonce',
                       ),
@@ -597,16 +579,11 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                 borderRadius: BorderRadius.circular(_cardRadius),
                 border: Border.all(color: const Color(0xFFE9EEF2)),
               ),
-              child: _loadingStats
-                  ? const Padding(
-                      padding: EdgeInsets.all(AppSpacing.xl),
-                      child: Center(child: CircularProgressIndicator()),
-                    )
-                  : CategoriesUsedSection(
+              child: CategoriesUsedSection(
                       key: ValueKey(
                         'categories_${_period.name}_$_reloadNonce',
                       ),
-                      slices: _vocabularyGrowth.categorySlices,
+                      slices: _categoryUsageSlices,
                       allCategories: _childCategories,
                       theme: theme,
                       lang: lang,
@@ -644,6 +621,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                     ? _resolvedSelectedMonth(_monthOptions(_trackingSince))
                     : null,
                 reloadNonce: _reloadNonce,
+                syncCloudOnReload: true,
                 theme: theme,
                 lang: lang,
                 labelForContent: app.localizedContent,
@@ -673,12 +651,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                 borderRadius: BorderRadius.circular(_cardRadius),
                 border: Border.all(color: const Color(0xFFE9EEF2)),
               ),
-              child: _loadingStats
-                  ? const Padding(
-                      padding: EdgeInsets.all(AppSpacing.xl),
-                      child: Center(child: CircularProgressIndicator()),
-                    )
-                  : FrequentlyUsedSection(
+              child: FrequentlyUsedSection(
                       key: ValueKey(
                         'frequent_${_period.name}_$_reloadNonce',
                       ),
@@ -736,12 +709,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                 borderRadius: BorderRadius.circular(_cardRadius),
                 border: Border.all(color: const Color(0xFFE9EEF2)),
               ),
-              child: _loadingStats
-                  ? const Padding(
-                      padding: EdgeInsets.all(AppSpacing.xl),
-                      child: Center(child: CircularProgressIndicator()),
-                    )
-                  : SessionUsageChart(
+              child: SessionUsageChart(
                       key: ValueKey(
                         'sessions_${_period.name}_$_reloadNonce',
                       ),

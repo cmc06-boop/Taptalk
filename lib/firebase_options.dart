@@ -1,5 +1,6 @@
 // Firebase configuration for TapTalk (project: taptalk-2d809).
-// Android values come from android/app/google-services.json.
+// Android: android/app/google-services.json
+// iOS: ios/Runner/GoogleService-Info.plist + values below
 // Desktop (Windows/Linux/macOS) uses the same project credentials.
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'

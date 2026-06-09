@@ -1,0 +1,69 @@
+# TapTalk — build iOS on Codemagic (no Mac required).
+# Setup guide: connect repo at https://codemagic.io → enable this workflow →
+# add Apple Developer code signing under Team settings → run build → TestFlight.
+#
+# Requirements:
+# - Git repo (GitHub / GitLab / Bitbucket)
+# - Apple Developer account ($99/year) for install on real iPhone via TestFlight
+# - Firebase iOS app bundle ID: com.example.flutterApplication1
+
+workflows:
+  taptalk-ios-release:
+    name: TapTalk iOS (TestFlight)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.example.flutterApplication1
+
+    scripts:
+      - name: Install dependencies
+        script: flutter pub get
+
+      - name: Install CocoaPods
+        script: |
+          cd ios
+          pod install
+
+      - name: Build IPA
+        script: |
+          flutter build ipa --release \
+            --export-options-plist=$HOME/export_options.plist
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        beta_groups:
+          - Internal Testers
+
+  taptalk-ios-check:
+    name: TapTalk iOS (build check only)
+    max_build_duration: 45
+    instance_type: mac_mini_m2
+
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+
+    scripts:
+      - name: Install dependencies
+        script: flutter pub get
+
+      - name: Install CocoaPods
+        script: |
+          cd ios
+          pod install
+
+      - name: Verify iOS compiles
+        script: flutter build ios --release --no-codesign

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import 'providers/app_state.dart';
 import 'screens/choose_category_screen.dart';
+import 'screens/choose_language_screen.dart';
 import 'screens/choose_theme_screen.dart';
 import 'screens/favorites_screen.dart';
 import 'screens/history_screen.dart';
@@ -83,6 +84,8 @@ class TapTalkApp extends StatelessWidget {
       case AppRoute.register:
       case AppRoute.chooseRole:
         return const RegisterScreen();
+      case AppRoute.chooseLanguage:
+        return const ChooseLanguageScreen();
       case AppRoute.chooseTheme:
         return const ChooseThemeScreen();
       case AppRoute.chooseCategory:

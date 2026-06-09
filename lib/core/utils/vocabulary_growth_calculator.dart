@@ -1,11 +1,13 @@
 import 'package:intl/intl.dart';
 
 import '../../data/models/phrase_first_use.dart';
+import '../../data/models/phrase_usage_stat.dart';
 import '../../data/models/vocabulary_growth_summary.dart';
+import '../../data/repositories/app_repository.dart';
 
 enum VocabularyTrendGranularity { weeks, months }
 
-/// Builds vocabulary growth metrics from each phrase's first history entry.
+/// Builds vocabulary growth metrics from learner-added custom phrases.
 abstract final class VocabularyGrowthCalculator {
   static const _weekBucketCount = 8;
   static const _monthBucketCount = 6;
@@ -64,6 +66,35 @@ abstract final class VocabularyGrowthCalculator {
       weeklyTrend: weeklyTrend,
       monthlyTrend: monthlyTrend,
       categorySlices: categorySlices,
+    );
+  }
+
+  /// Usage-based category breakdown from speak history (defaults + custom).
+  static List<CategoryVocabularySlice> categorySlicesFromPhraseStats(
+    List<PhraseUsageStat> stats,
+  ) {
+    final usageByCategory = <String, int>{};
+    final wordsByCategory = <String, int>{};
+    final seenInPeriod = <String>{};
+    for (final stat in stats) {
+      if (!AppRepository.isPersonalCategoryKey(stat.categoryKey)) continue;
+      usageByCategory.update(
+        stat.categoryKey,
+        (v) => v + stat.count,
+        ifAbsent: () => stat.count,
+      );
+      final key = '${stat.categoryKey}|${stat.text}';
+      if (seenInPeriod.add(key)) {
+        wordsByCategory.update(
+          stat.categoryKey,
+          (v) => v + 1,
+          ifAbsent: () => 1,
+        );
+      }
+    }
+    return categorySlicesFromUsage(
+      usageByCategory: usageByCategory,
+      wordsByCategory: wordsByCategory,
     );
   }
 

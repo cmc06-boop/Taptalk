@@ -9,6 +9,7 @@ class AppHeader extends StatelessWidget {
   const AppHeader({
     super.key,
     required this.title,
+    this.titleBadge,
     this.onMenu,
     this.onBack,
     this.onProfile,
@@ -22,6 +23,7 @@ class AppHeader extends StatelessWidget {
   });
 
   final String title;
+  final Widget? titleBadge;
   final VoidCallback? onMenu;
   final VoidCallback? onBack;
   final VoidCallback? onProfile;
@@ -57,13 +59,28 @@ class AppHeader extends StatelessWidget {
             accent: theme.bgAccent,
           ),
           Expanded(
-            child: Text(
-              title,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: theme.textMain,
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      title,
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: theme.textMain,
+                      ),
+                    ),
+                  ),
+                  if (titleBadge != null) ...[
+                    const SizedBox(width: 8),
+                    titleBadge!,
+                  ],
+                ],
               ),
             ),
           ),

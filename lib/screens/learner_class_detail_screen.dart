@@ -8,9 +8,9 @@ import '../core/theme/theme_tokens.dart';
 import '../data/models/class_lesson.dart';
 import '../data/models/enrolled_class_model.dart';
 import '../providers/app_state.dart';
-import '../widgets/localized_content_text.dart';
+import '../widgets/class_color_card.dart';
 import '../widgets/learner_scaffold.dart';
-import '../widgets/panel_card.dart';
+import '../widgets/localized_content_text.dart';
 import 'learner_lesson_screen.dart';
 
 class LearnerClassDetailScreen extends StatefulWidget {
@@ -87,34 +87,21 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
           AppSpacing.xxl,
         ),
         children: [
-          PanelCard(
-            margin: EdgeInsets.zero,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                LocalizedContentText(
-                  enrolled.className,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.poppins(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: theme.textMain,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Text(
-                  enrolled.teacherName,
-                  style: GoogleFonts.poppins(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    color: theme.textMain.withValues(alpha: 0.65),
-                  ),
-                ),
-              ],
+          ClassColorHeaderBanner(
+            classId: enrolled.classId,
+            title: enrolled.className,
+            subtitle: enrolled.teacherName,
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Text(
+            AppStrings.lessons(lang),
+            style: GoogleFonts.poppins(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: theme.textMain,
             ),
           ),
-          const SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.md),
           if (_loading)
             const Center(child: CircularProgressIndicator())
           else if (_lessons.isEmpty)

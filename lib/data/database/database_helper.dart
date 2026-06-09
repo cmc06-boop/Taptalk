@@ -28,7 +28,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 15,
+      version: 16,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE users (
@@ -60,7 +60,8 @@ class DatabaseHelper {
             category_key TEXT NOT NULL,
             image_path TEXT,
             is_builtin INTEGER NOT NULL DEFAULT 0,
-            is_active INTEGER NOT NULL DEFAULT 1
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER
           )
         ''');
         await db.execute('''
@@ -194,6 +195,11 @@ class DatabaseHelper {
               )
             WHERE teacher_user_id IS NULL
           ''');
+        }
+        if (oldVersion < 16) {
+          await db.execute(
+            'ALTER TABLE phrases ADD COLUMN created_at INTEGER',
+          );
         }
       },
     );

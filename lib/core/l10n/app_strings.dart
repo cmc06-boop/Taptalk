@@ -1,3 +1,4 @@
+import '../constants/monitoring_constants.dart';
 import '../../data/models/parent_notification.dart';
 
 enum AppLanguage { english, filipino }
@@ -446,8 +447,8 @@ abstract final class AppStrings {
       : 'Internet connection is required to sign up or log in.';
 
   static String loginOfflineNotice(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Walang koneksyon sa internet. Kailangan ng internet para mag-log in.'
-      : 'No Internet Connection. Internet is required to log in.';
+      ? 'Walang internet. Maaari kang mag-log in kung nakapag-log in ka na dati sa device na ito. Ang Speak at voice input ay gumagana offline.'
+      : 'No internet. You can still log in if you have signed in on this device before. Speak and voice input work offline.';
 
   static String signUpOfflineNotice(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Walang koneksyon sa internet. Kailangan ng internet para mag-sign up.'
@@ -843,6 +844,21 @@ abstract final class AppStrings {
       ? 'May account na?'
       : 'Already have an account?';
 
+  static String chooseLanguageTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Piliin ang Iyong Wika'
+          : 'Choose Your Language';
+
+  static String chooseLanguageSub(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Piliin ang wikang gusto mong gamitin sa TapTalk.'
+          : 'Pick the language you want to use in TapTalk.';
+
+  static String chooseLanguageFooter(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Maaari mo itong baguhin mamaya sa Settings.'
+          : 'You can change this later in Settings.';
+
   static String chooseThemeTitle(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Pumili ng Tema 🌸'
       : 'Choose Your Theme 🌸';
@@ -1019,9 +1035,12 @@ abstract final class AppStrings {
       ? 'Wala pang naka-link na anak. Pindutin ang + para maglagay ng code.'
       : 'No child linked yet. Tap + to enter their code.';
 
-  static String noPhraseUsage(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Walang pariralang nagamit sa panahong ito.'
-      : 'No phrases used in this period.';
+  static String noPhraseUsage(AppLanguage lang) {
+    final min = MonitoringConstants.frequentlyUsedMinCount;
+    return lang == AppLanguage.filipino
+        ? 'Walang pariralang ginamit nang hindi bababa sa $min beses sa panahong ito.'
+        : 'No phrases used at least $min times in this period.';
+  }
 
   static String today(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Ngayon' : 'Today';
@@ -1050,8 +1069,8 @@ abstract final class AppStrings {
       : 'Total taps';
 
   static String newWordsInPeriod(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Bagong salita'
-      : 'New words';
+      ? 'Bagong parirala'
+      : 'New phrases';
 
   static String vocabularyGrowth(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Paglago ng bokabularyo'
@@ -1059,12 +1078,12 @@ abstract final class AppStrings {
 
   static String vocabularyGrowthSubtitle(AppLanguage lang) =>
       lang == AppLanguage.filipino
-          ? 'Mga bagong salita at kategoryang ginagamit ng anak mo.'
-          : 'New words and categories your child is building.';
+          ? 'Mga pariralang idinagdag ng bata (hindi kasama ang default).'
+          : 'Phrases your child added (defaults not included).';
 
   static String totalVocabulary(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Kabuuang salita'
-      : 'Total words';
+      ? 'Kabuuang parirala'
+      : 'Total phrases';
 
   static String newWordsThisWeek(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Bago ngayong linggo'
@@ -1075,8 +1094,8 @@ abstract final class AppStrings {
       : 'New this month';
 
   static String newWordsTrend(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Bagong salita sa paglipas ng panahon'
-      : 'New words over time';
+      ? 'Bagong parirala sa paglipas ng panahon'
+      : 'New phrases over time';
 
   static String categoriesUsed(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Mga kategorya'
@@ -1089,20 +1108,24 @@ abstract final class AppStrings {
       lang == AppLanguage.filipino ? 'Mga kategorya' : 'Categories used';
 
   static String categoriesUsedInfoBody(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Ipinapakita ang For Me na kategorya sa napiling panahon. '
-          'Ang bilog sa gitna ay kabuuang bilang ng kategorya. '
-          'Bawat slice ay isang kategorya; ipinapakita kung ilang beses pinindot ang mga parirala.'
-      : 'Shows For Me categories for the selected period. '
+      ? 'Ipinapakita ang For Me na kategorya sa napiling panahon — kasama ang default at custom na parirala na na-speak. '
+          'Ang laki ng slice ay base sa kabuuang pagpindot. '
+          'Ang bilog sa gitna ay kabuuang bilang ng kategorya.'
+      : 'Shows For Me categories for the selected period — including default and custom phrases that were spoken. '
+          'Slice size is based on total taps. '
           'The center number is the total category count. '
           'Each slice is one category; labels show how many times phrases were tapped.';
 
   static String categoryLegendDetail({
     required int wordCount,
-    required int equalPercent,
+    required int usageCount,
+    required int totalUsage,
     required AppLanguage lang,
   }) {
     final words = vocabularyWords(wordCount, lang);
-    final percent = wordCount == 0 ? 0 : equalPercent;
+    final percent = totalUsage > 0
+        ? ((usageCount / totalUsage) * 100).round()
+        : 0;
     return '$words · $percent%';
   }
 
@@ -1185,15 +1208,19 @@ abstract final class AppStrings {
       ? 'Madalas gamitin'
       : 'Frequently used';
 
-  static String frequentlyUsedSubtitle(AppLanguage lang) =>
-      lang == AppLanguage.filipino
-          ? 'For Me na kategorya lang — piliin ang kategorya na gusto mong tingnan.'
-          : 'For Me categories only — choose a category to view its phrases.';
+  static String frequentlyUsedSubtitle(AppLanguage lang) {
+    final min = MonitoringConstants.frequentlyUsedMinCount;
+    return lang == AppLanguage.filipino
+        ? 'For Me na kategorya lang — pariralang ginamit nang hindi bababa sa $min beses.'
+        : 'For Me categories only — phrases used at least $min times.';
+  }
 
-  static String noPhrasesInSelectedCategory(AppLanguage lang) =>
-      lang == AppLanguage.filipino
-          ? 'Walang pariralang ginamit sa kategoryang ito sa panahong ito.'
-          : 'No phrases used in this category for the selected period.';
+  static String noPhrasesInSelectedCategory(AppLanguage lang) {
+    final min = MonitoringConstants.frequentlyUsedMinCount;
+    return lang == AppLanguage.filipino
+        ? 'Walang pariralang ginamit nang hindi bababa sa $min beses sa kategoryang ito sa panahong ito.'
+        : 'No phrases in this category were used at least $min times for the selected period.';
+  }
 
   static String sessionActivity(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Oras ng paggamit'

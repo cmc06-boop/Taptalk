@@ -4,14 +4,12 @@ import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
-import '../core/theme/theme_tokens.dart';
 import '../data/models/enrolled_class_model.dart';
 import '../providers/app_state.dart';
-import '../widgets/localized_content_text.dart';
+import '../widgets/class_color_card.dart';
 import '../widgets/enroll_class_dialog.dart';
 import '../widgets/taptalk_result_dialog.dart';
 import '../widgets/learner_scaffold.dart';
-import '../widgets/panel_card.dart';
 import 'learner_class_detail_screen.dart';
 
 class ClassesScreen extends StatefulWidget {
@@ -167,18 +165,47 @@ class _ClassesScreenState extends State<ClassesScreen> {
                 )
               else
                 for (final enrolled in classes)
-                  _EnrolledClassCard(
+                  Padding(
                     key: ValueKey(
                       'class_${enrolled.classId}_${lang.name}_${app.languageRevision}',
                     ),
-                    enrolled: enrolled,
-                    theme: theme,
-                    lang: lang,
-                    onOpen: () => _openClass(context, enrolled),
-                    onUnenroll: () => _confirmUnenroll(
-                      context,
-                      className: enrolled.className,
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg,
+                      0,
+                      AppSpacing.lg,
+                      AppSpacing.sm,
+                    ),
+                    child: ClassColorCard(
                       classId: enrolled.classId,
+                      title: enrolled.className,
+                      subtitle: enrolled.teacherName,
+                      onTap: () => _openClass(context, enrolled),
+                      trailing: PopupMenuButton<String>(
+                        icon: Icon(
+                          Icons.more_vert_rounded,
+                          color: Colors.white.withValues(alpha: 0.92),
+                        ),
+                        onSelected: (value) {
+                          if (value == 'unenroll') {
+                            _confirmUnenroll(
+                              context,
+                              className: enrolled.className,
+                              classId: enrolled.classId,
+                            );
+                          }
+                        },
+                        itemBuilder: (ctx) => [
+                          PopupMenuItem(
+                            value: 'unenroll',
+                            child: Text(
+                              AppStrings.unenroll(lang),
+                              style: GoogleFonts.poppins(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
             ],
@@ -194,88 +221,6 @@ class _ClassesScreenState extends State<ClassesScreen> {
               tooltip: AppStrings.joinClass(lang),
               child: const Icon(Icons.group_add_rounded),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EnrolledClassCard extends StatelessWidget {
-  const _EnrolledClassCard({
-    super.key,
-    required this.enrolled,
-    required this.theme,
-    required this.lang,
-    required this.onOpen,
-    required this.onUnenroll,
-  });
-
-  final EnrolledClassModel enrolled;
-  final TapTalkThemeToken theme;
-  final AppLanguage lang;
-  final VoidCallback onOpen;
-  final VoidCallback onUnenroll;
-
-  @override
-  Widget build(BuildContext context) {
-    return PanelCard(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(14),
-                onTap: onOpen,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      LocalizedContentText(
-                        enrolled.className,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.poppins(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                          color: theme.textMain,
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.md),
-                      Text(
-                        enrolled.teacherName,
-                        style: GoogleFonts.poppins(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          color: theme.textMain.withValues(alpha: 0.65),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          PopupMenuButton<String>(
-            icon: Icon(
-              Icons.more_vert_rounded,
-              color: theme.textMain.withValues(alpha: 0.55),
-            ),
-            onSelected: (value) {
-              if (value == 'unenroll') onUnenroll();
-            },
-            itemBuilder: (ctx) => [
-              PopupMenuItem(
-                value: 'unenroll',
-                child: Text(
-                  AppStrings.unenroll(lang),
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
           ),
         ],
       ),

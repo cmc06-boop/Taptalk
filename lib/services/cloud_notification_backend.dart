@@ -130,6 +130,38 @@ class RemoteLearnerProfile {
   final int learnerUserId;
 }
 
+/// Learner-created phrase synced for cross-device vocabulary growth.
+class RemoteLearnerCustomPhrase {
+  const RemoteLearnerCustomPhrase({
+    required this.phraseText,
+    required this.categoryKey,
+    required this.createdAt,
+  });
+
+  final String phraseText;
+  final String categoryKey;
+  final DateTime createdAt;
+
+  Map<String, Object?> toFirestoreMap() => {
+        'phraseText': phraseText,
+        'categoryKey': categoryKey,
+        'createdAt': createdAt.toUtc().toIso8601String(),
+      };
+
+  factory RemoteLearnerCustomPhrase.fromMap(Map<String, dynamic> map) {
+    final createdRaw = map['createdAt'];
+    DateTime createdAt = DateTime.now();
+    if (createdRaw is String) {
+      createdAt = DateTime.tryParse(createdRaw)?.toLocal() ?? createdAt;
+    }
+    return RemoteLearnerCustomPhrase(
+      phraseText: (map['phraseText'] as String?) ?? '',
+      categoryKey: (map['categoryKey'] as String?) ?? '',
+      createdAt: createdAt,
+    );
+  }
+}
+
 class RemoteLearnerCategory {
   const RemoteLearnerCategory({
     required this.key,
@@ -429,6 +461,15 @@ abstract class CloudNotificationBackend {
     String learnerFirebaseUid,
   );
 
+  Future<void> upsertLearnerCustomPhrases({
+    required String learnerFirebaseUid,
+    required List<RemoteLearnerCustomPhrase> phrases,
+  });
+
+  Future<List<RemoteLearnerCustomPhrase>> getLearnerCustomPhrases(
+    String learnerFirebaseUid,
+  );
+
   Stream<List<RemoteParentNotification>> watchParentNotifications({
     required int parentUserId,
     required String parentFirebaseUid,
@@ -574,6 +615,18 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
 
   @override
   Future<List<RemoteLearnerCategory>> getLearnerCategories(
+    String learnerFirebaseUid,
+  ) async =>
+      const [];
+
+  @override
+  Future<void> upsertLearnerCustomPhrases({
+    required String learnerFirebaseUid,
+    required List<RemoteLearnerCustomPhrase> phrases,
+  }) async {}
+
+  @override
+  Future<List<RemoteLearnerCustomPhrase>> getLearnerCustomPhrases(
     String learnerFirebaseUid,
   ) async =>
       const [];

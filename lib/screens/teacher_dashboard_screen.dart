@@ -12,6 +12,7 @@ import '../data/models/teacher_recent_alert.dart';
 import '../data/models/teacher_recent_lesson.dart';
 import '../providers/app_state.dart';
 import '../widgets/class_color_card.dart';
+import '../widgets/inline_dropdown_field.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/teacher_alert_card.dart';
 
@@ -177,18 +178,18 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                         children: [
                           Expanded(
                             child: _ClassesStatCard(
-                              theme: theme,
-                              label: AppStrings.totalClasses(lang),
-                              value: '$classCount',
-                              subjects: _subjects,
-                              selectedSubject: _selectedSubject,
-                              allSubjectsLabel: AppStrings.allSubjects(lang),
-                              subjectLabel: app.localizedContent,
-                              onSubjectChanged: (value) =>
-                                  setState(() => _selectedSubject = value),
-                            ),
+                            theme: theme,
+                            label: AppStrings.totalClasses(lang),
+                            value: '$classCount',
+                            subjects: _subjects,
+                            selectedSubject: _selectedSubject,
+                            allSubjectsLabel: AppStrings.allSubjects(lang),
+                            subjectLabel: app.localizedContent,
+                            onSubjectChanged: (value) =>
+                                setState(() => _selectedSubject = value),
                           ),
-                          const SizedBox(width: AppSpacing.sm),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
                           Expanded(
                             child: _ModernStatCard(
                               theme: theme,
@@ -438,7 +439,7 @@ class _EmptySectionCard extends StatelessWidget {
   }
 }
 
-class _ClassesStatCard extends StatelessWidget {
+class _ClassesStatCard extends StatefulWidget {
   const _ClassesStatCard({
     required this.theme,
     required this.label,
@@ -460,7 +461,20 @@ class _ClassesStatCard extends StatelessWidget {
   final ValueChanged<String?> onSubjectChanged;
 
   @override
+  State<_ClassesStatCard> createState() => _ClassesStatCardState();
+}
+
+class _ClassesStatCardState extends State<_ClassesStatCard> {
+  String _displaySubject(String? subject) {
+    if (subject == null) return widget.allSubjectsLabel;
+    return widget.subjectLabel(subject);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final theme = widget.theme;
+    final subjectOptions = <String?>[null, ...widget.subjects];
+
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
@@ -476,15 +490,16 @@ class _ClassesStatCard extends StatelessWidget {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.max,
         children: [
           _StatValueIconRow(
             theme: theme,
-            value: value,
+            value: widget.value,
             icon: Icons.class_rounded,
           ),
           const SizedBox(height: 4),
           Text(
-            label,
+            widget.label,
             textAlign: TextAlign.left,
             style: GoogleFonts.poppins(
               fontSize: 12,
@@ -492,52 +507,18 @@ class _ClassesStatCard extends StatelessWidget {
               color: theme.textMain.withValues(alpha: 0.58),
             ),
           ),
-          if (subjects.isNotEmpty) ...[
+          if (widget.subjects.isNotEmpty) ...[
+            const Spacer(),
             const SizedBox(height: AppSpacing.sm),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              decoration: BoxDecoration(
-                color: theme.bgMid.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFE9EEF2)),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String?>(
-                  value: selectedSubject,
-                  isExpanded: true,
-                  isDense: true,
-                  icon: Icon(
-                    Icons.keyboard_arrow_down_rounded,
-                    size: 18,
-                    color: theme.textMain.withValues(alpha: 0.55),
-                  ),
-                  borderRadius: BorderRadius.circular(10),
-                  style: GoogleFonts.poppins(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: theme.textMain,
-                  ),
-                  items: [
-                    DropdownMenuItem<String?>(
-                      value: null,
-                      child: Text(
-                        allSubjectsLabel,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    for (final subject in subjects)
-                      DropdownMenuItem<String?>(
-                        value: subject,
-                        child: Text(
-                          subjectLabel(subject),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                  ],
-                  onChanged: onSubjectChanged,
-                ),
-              ),
+            InlineDropdownField<String?>(
+              overlayMenu: true,
+              value: _displaySubject(widget.selectedSubject),
+              options: subjectOptions,
+              optionLabel: _displaySubject,
+              selected: widget.selectedSubject,
+              theme: theme,
+              maxMenuHeight: 140,
+              onSelected: widget.onSubjectChanged,
             ),
           ],
         ],
@@ -576,6 +557,7 @@ class _ModernStatCard extends StatelessWidget {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.max,
         children: [
           _StatValueIconRow(theme: theme, value: value, icon: icon),
           const SizedBox(height: 4),
@@ -588,6 +570,7 @@ class _ModernStatCard extends StatelessWidget {
               color: theme.textMain.withValues(alpha: 0.58),
             ),
           ),
+          const Spacer(),
         ],
       ),
     );

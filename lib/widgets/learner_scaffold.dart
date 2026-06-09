@@ -11,6 +11,7 @@ class LearnerScaffold extends StatelessWidget {
   const LearnerScaffold({
     super.key,
     required this.title,
+    this.titleBadge,
     required this.body,
     required this.currentRoute,
     this.onMicTap,
@@ -21,6 +22,7 @@ class LearnerScaffold extends StatelessWidget {
   });
 
   final String title;
+  final Widget? titleBadge;
   final Widget body;
   final AppRoute currentRoute;
   final VoidCallback? onMicTap;
@@ -54,6 +56,7 @@ class LearnerScaffold extends StatelessWidget {
               children: [
                 AppHeader(
                   title: title,
+                  titleBadge: titleBadge,
                   showBackButton: showBackButton,
                   onBack: onBack,
                   onMenu: showBackButton ? null : () => app.toggleDrawer(),

@@ -15,6 +15,7 @@ class PhraseModel {
     this.imagePath,
     this.isBuiltin = false,
     this.isActive = true,
+    this.createdAt,
   });
 
   final int id;
@@ -24,6 +25,7 @@ class PhraseModel {
   final String? imagePath;
   final bool isBuiltin;
   final bool isActive;
+  final DateTime? createdAt;
 
   PhraseModel copyWith({
     int? id,
@@ -33,6 +35,7 @@ class PhraseModel {
     String? imagePath,
     bool? isBuiltin,
     bool? isActive,
+    DateTime? createdAt,
   }) {
     return PhraseModel(
       id: id ?? this.id,
@@ -42,6 +45,7 @@ class PhraseModel {
       imagePath: imagePath ?? this.imagePath,
       isBuiltin: isBuiltin ?? this.isBuiltin,
       isActive: isActive ?? this.isActive,
+      createdAt: createdAt ?? this.createdAt,
     );
   }
 
@@ -53,9 +57,11 @@ class PhraseModel {
         'image_path': imagePath,
         'is_builtin': isBuiltin ? 1 : 0,
         'is_active': isActive ? 1 : 0,
+        if (createdAt != null) 'created_at': createdAt!.millisecondsSinceEpoch,
       };
 
   factory PhraseModel.fromMap(Map<String, Object?> map) {
+    final createdRaw = map['created_at'];
     return PhraseModel(
       id: map['id'] as int,
       userId: map['user_id'] as int,
@@ -64,6 +70,9 @@ class PhraseModel {
       imagePath: map['image_path'] as String?,
       isBuiltin: _readBoolFlag(map['is_builtin'], defaultValue: false),
       isActive: _readBoolFlag(map['is_active'], defaultValue: true),
+      createdAt: createdRaw is int
+          ? DateTime.fromMillisecondsSinceEpoch(createdRaw)
+          : null,
     );
   }
 }

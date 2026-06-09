@@ -375,7 +375,7 @@ class AppRepository {
     }
 
     if (timestamps.isEmpty) {
-      return DateTime.now();
+      return DateTime.now().subtract(const Duration(days: 365 * 3));
     }
     return DateTime.fromMillisecondsSinceEpoch(
       timestamps.reduce((a, b) => a < b ? a : b),
@@ -676,6 +676,12 @@ class AppRepository {
         ),
       );
     }
+    for (final slice in usageSlices) {
+      if (!isPersonalCategoryKey(slice.categoryKey)) continue;
+      final key = normalizeCategoryKey(slice.categoryKey);
+      if (key.isEmpty || !seen.add(key)) continue;
+      results.add(slice);
+    }
     return results;
   }
 
@@ -724,6 +730,7 @@ class AppRepository {
     String? imagePath,
   }) async {
     final db = await _dbHelper.database;
+    final now = DateTime.now();
     final id = await db.insert('phrases', {
       'user_id': userId,
       'phrase_text': text.trim(),
@@ -731,6 +738,7 @@ class AppRepository {
       'image_path': imagePath,
       'is_builtin': 0,
       'is_active': 1,
+      'created_at': now.millisecondsSinceEpoch,
     });
     return PhraseModel(
       id: id,
@@ -738,7 +746,115 @@ class AppRepository {
       text: text.trim(),
       categoryKey: categoryKey,
       imagePath: imagePath,
+      createdAt: now,
     );
+  }
+
+  /// Learner-added phrases (not app defaults) for vocabulary growth tracking.
+  Future<List<PhraseFirstUse>> getCustomPhraseAdditions({
+    required int learnerUserId,
+  }) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'phrases',
+      columns: ['phrase_text', 'category_key', 'created_at'],
+      where: 'user_id = ? AND is_builtin = 0 AND is_active = 1 AND created_at IS NOT NULL',
+      whereArgs: [learnerUserId],
+      orderBy: 'created_at ASC',
+    );
+    final merged = <String, PhraseFirstUse>{};
+    for (final row in rows) {
+      final stored = storedUserText(row['phrase_text'] as String);
+      final categoryKey = normalizeCategoryKey(row['category_key'] as String);
+      if (!isPersonalCategoryKey(categoryKey)) continue;
+      final createdAt = DateTime.fromMillisecondsSinceEpoch(
+        row['created_at'] as int,
+      );
+      final mergeKey = '$categoryKey|$stored';
+      final existing = merged[mergeKey];
+      if (existing == null || createdAt.isBefore(existing.firstUsedAt)) {
+        merged[mergeKey] = PhraseFirstUse(
+          text: stored,
+          categoryKey: categoryKey,
+          firstUsedAt: createdAt,
+        );
+      }
+    }
+    return merged.values.toList()
+      ..sort((a, b) => a.firstUsedAt.compareTo(b.firstUsedAt));
+  }
+
+  Future<List<RemoteLearnerCustomPhrase>> getCustomPhrasesForCloudSync(
+    int learnerUserId,
+  ) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'phrases',
+      columns: ['phrase_text', 'category_key', 'created_at'],
+      where:
+          'user_id = ? AND is_builtin = 0 AND is_active = 1 AND created_at IS NOT NULL',
+      whereArgs: [learnerUserId],
+      orderBy: 'created_at ASC',
+    );
+    return rows
+        .map((row) {
+          final createdRaw = row['created_at'];
+          if (createdRaw is! int) return null;
+          return RemoteLearnerCustomPhrase(
+            phraseText: storedUserText(row['phrase_text'] as String),
+            categoryKey: normalizeCategoryKey(row['category_key'] as String),
+            createdAt: DateTime.fromMillisecondsSinceEpoch(createdRaw),
+          );
+        })
+        .whereType<RemoteLearnerCustomPhrase>()
+        .where((p) => p.phraseText.isNotEmpty && p.categoryKey.isNotEmpty)
+        .toList();
+  }
+
+  Future<void> mergeRemoteLearnerCustomPhrases({
+    required int learnerUserId,
+    required List<RemoteLearnerCustomPhrase> phrases,
+  }) async {
+    if (phrases.isEmpty) return;
+    final db = await _dbHelper.database;
+    for (final remote in phrases) {
+      final text = remote.phraseText.trim();
+      final categoryKey = normalizeCategoryKey(remote.categoryKey);
+      if (text.isEmpty || categoryKey.isEmpty) continue;
+      if (!isPersonalCategoryKey(categoryKey)) continue;
+      final createdAtMs = remote.createdAt.millisecondsSinceEpoch;
+      final existing = await db.query(
+        'phrases',
+        where:
+            'user_id = ? AND phrase_text = ? AND category_key = ? AND is_builtin = 0',
+        whereArgs: [learnerUserId, text, categoryKey],
+        limit: 1,
+      );
+      if (existing.isNotEmpty) {
+        final currentCreated = existing.first['created_at'] as int?;
+        if (currentCreated == null || createdAtMs < currentCreated) {
+          await db.update(
+            'phrases',
+            {'created_at': createdAtMs},
+            where: 'id = ?',
+            whereArgs: [existing.first['id']],
+          );
+        }
+        continue;
+      }
+      await db.insert(
+        'phrases',
+        {
+          'user_id': learnerUserId,
+          'phrase_text': text,
+          'category_key': categoryKey,
+          'is_builtin': 0,
+          'is_active': 1,
+          'created_at': createdAtMs,
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
   }
 
   Future<void> deletePhrase(int userId, int phraseId) async {
@@ -869,14 +985,15 @@ class AppRepository {
     return categoryKey;
   }
 
-  Future<void> addHistory({
+  Future<int?> addHistory({
     required int userId,
     required String text,
     required String categoryKey,
     String? className,
     String? lessonTitle,
+    DateTime? createdAt,
   }) async {
-    if (text.trim().isEmpty) return;
+    if (text.trim().isEmpty) return null;
     final db = await _dbHelper.database;
     final trimmedClass = className?.trim();
     final trimmedLesson = lessonTitle?.trim();
@@ -893,19 +1010,56 @@ class AppRepository {
       'user_id': userId,
       'phrase_text': text.trim(),
       'category_key': effectiveCategoryKey,
-      'created_at': DateTime.now().millisecondsSinceEpoch,
+      'created_at': (createdAt ?? DateTime.now()).millisecondsSinceEpoch,
     };
     if (hasLessonContext) {
       row['class_name'] = trimmedClass;
       row['lesson_title'] = trimmedLesson;
     }
     try {
-      await db.insert('history', row);
+      return await db.insert('history', row);
     } on DatabaseException {
       row.remove('class_name');
       row.remove('lesson_title');
-      await db.insert('history', row);
+      return await db.insert('history', row);
     }
+  }
+
+  /// History rows not yet uploaded to Firestore for parent/teacher monitoring.
+  Future<List<HistoryModel>> getUnsyncedHistory(int userId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'history',
+      where: 'user_id = ? AND remote_sync_key IS NULL',
+      whereArgs: [userId],
+      orderBy: 'created_at ASC',
+    );
+    return rows.map(HistoryModel.fromMap).toList();
+  }
+
+  Future<void> markHistoryCloudSynced({
+    required int historyId,
+    required String syncKey,
+  }) async {
+    final db = await _dbHelper.database;
+    await db.update(
+      'history',
+      {'remote_sync_key': syncKey},
+      where: 'id = ?',
+      whereArgs: [historyId],
+    );
+  }
+
+  static String syncKeyForHistoryItem(HistoryModel item) {
+    return remoteActivitySyncKey(
+      createdAt: item.createdAt,
+      phraseText: item.text,
+      categoryKey: resolveHistoryCategoryKey(
+        categoryKey: item.categoryKey,
+        className: item.className,
+        lessonTitle: item.lessonTitle,
+      ),
+    );
   }
 
   static String remoteActivitySyncKey({
@@ -1589,6 +1743,26 @@ class AppRepository {
     );
   }
 
+  /// Matches a locally enrolled learner when cloud enrollment carries a Firebase UID.
+  Future<UserModel?> findEnrolledLearnerInClassByName({
+    required int classId,
+    required String fullName,
+  }) async {
+    final normalized = fullName.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT u.id
+      FROM class_enrollments ce
+      INNER JOIN users u ON u.id = ce.learner_user_id
+      WHERE ce.class_id = ?
+        AND LOWER(TRIM(u.full_name)) = ?
+      LIMIT 1
+    ''', [classId, normalized]);
+    if (rows.isEmpty) return null;
+    return findUserById(rows.first['id'] as int);
+  }
+
   Future<void> unenrollLearnerFromClass(int learnerUserId, int classId) async {
     final db = await _dbHelper.database;
     await db.delete(
@@ -1747,6 +1921,15 @@ class AppRepository {
       if (learnerUid.isEmpty) continue;
       var learner = await findUserByFirebaseUid(learnerUid);
       if (learner == null) {
+        final enrolledName = enrollment.learnerName.trim();
+        if (enrolledName.isNotEmpty) {
+          learner = await findEnrolledLearnerInClassByName(
+            classId: classId,
+            fullName: enrolledName,
+          );
+        }
+      }
+      if (learner == null) {
         final stubId = await ensureUserStubFromFirebase(
           firebaseUid: learnerUid,
           role: 'learner',
@@ -1757,8 +1940,13 @@ class AppRepository {
         learner = await findUserById(stubId);
       }
       if (learner == null) continue;
-      if (await isLearnerEnrolled(learner.id, classId)) continue;
-      await enrollLearnerInClass(learner.id, classId);
+      final linkedUid = learner.firebaseUid?.trim() ?? '';
+      if (linkedUid != learnerUid) {
+        await linkFirebaseUid(learner.id, learnerUid);
+      }
+      if (!await isLearnerEnrolled(learner.id, classId)) {
+        await enrollLearnerInClass(learner.id, classId);
+      }
     }
 
     // Only prune when cloud returned enrollment rows. An empty snapshot usually

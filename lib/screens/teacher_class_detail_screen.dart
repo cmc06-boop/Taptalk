@@ -14,6 +14,7 @@ import '../widgets/create_lesson_dialog.dart';
 import '../widgets/edit_class_dialog.dart';
 import '../widgets/taptalk_result_dialog.dart';
 import '../widgets/learner_scaffold.dart';
+import '../widgets/student_count_badge.dart';
 import 'lesson_editor_screen.dart';
 
 class TeacherClassDetailScreen extends StatefulWidget {
@@ -35,6 +36,7 @@ class TeacherClassDetailScreen extends StatefulWidget {
 
 class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
   List<ClassLesson> _lessons = [];
+  int _studentCount = 0;
   bool _loading = true;
   late String _className;
 
@@ -42,16 +44,25 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
   void initState() {
     super.initState();
     _className = widget.className;
+    _studentCount =
+        context.read<AppState>().teacherClassStudentCount(widget.classId);
     _load();
   }
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final lessons =
-        await context.read<AppState>().getClassLessons(widget.classId);
+    final app = context.read<AppState>();
+    final results = await Future.wait([
+      app.getClassLessons(widget.classId),
+      app.getTeacherClassStudentsForClass(
+        widget.classId,
+        cloudSyncInBackground: false,
+      ),
+    ]);
     if (!mounted) return;
     setState(() {
-      _lessons = lessons;
+      _lessons = results[0] as List<ClassLesson>;
+      _studentCount = (results[1] as List).length;
       _loading = false;
     });
   }
@@ -182,6 +193,10 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
 
     return LearnerScaffold(
       title: displayClassName,
+      titleBadge: StudentCountBadge(
+        count: _studentCount,
+        accent: theme.bgAccent,
+      ),
       currentRoute: AppRoute.teacherMyClasses,
       showBackButton: true,
       showBottomNav: false,
@@ -316,23 +331,6 @@ class _ClassHeaderBanner extends StatelessWidget {
             padding: const EdgeInsets.all(AppSpacing.md),
             child: Row(
               children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: colors.iconBg,
-                    borderRadius: BorderRadius.circular(13),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.35),
-                    ),
-                  ),
-                  child: const Icon(
-                    Icons.menu_book_rounded,
-                    color: Colors.white,
-                    size: 22,
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.md),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

@@ -29,54 +29,24 @@ class _RegisterScreenState extends State<RegisterScreen> {
   String _role = 'learner';
   String? _error;
   bool _busy = false;
+  bool _attemptedSubmit = false;
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
   bool? _emailInUse;
   Timer? _emailCheckDebounce;
   int _emailCheckGeneration = 0;
-  final _passwordFieldKey = GlobalKey<FormFieldState<String>>();
-  final _confirmPasswordFieldKey = GlobalKey<FormFieldState<String>>();
+  final _emailFieldKey = GlobalKey<FormFieldState<String>>();
 
   @override
   void initState() {
     super.initState();
-    _password.addListener(_onPasswordChanged);
-    _confirmPassword.addListener(_onConfirmPasswordChanged);
     _email.addListener(_scheduleEmailAvailabilityCheck);
-  }
-
-  void _onPasswordChanged() {
-    _revalidatePasswordFields();
-    setState(() {});
-  }
-
-  void _onConfirmPasswordChanged() {
-    _revalidatePasswordFields(confirmOnly: true);
-    setState(() {});
-  }
-
-  void _revalidatePasswordFields({bool confirmOnly = false}) {
-    if (!confirmOnly) {
-      final passwordState = _passwordFieldKey.currentState;
-      if (passwordState != null &&
-          (_password.text.isNotEmpty || passwordState.hasError)) {
-        passwordState.validate();
-      }
-    }
-
-    final confirmState = _confirmPasswordFieldKey.currentState;
-    if (confirmState != null &&
-        (_confirmPassword.text.isNotEmpty || confirmState.hasError)) {
-      confirmState.validate();
-    }
   }
 
   @override
   void dispose() {
     _emailCheckDebounce?.cancel();
     _email.removeListener(_scheduleEmailAvailabilityCheck);
-    _password.removeListener(_onPasswordChanged);
-    _confirmPassword.removeListener(_onConfirmPasswordChanged);
     _name.dispose();
     _email.dispose();
     _password.dispose();
@@ -109,13 +79,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (AuthValidation.normalizeEmail(_email.text) != normalized) return;
 
     setState(() => _emailInUse = inUse);
-    _formKey.currentState?.validate();
+    _emailFieldKey.currentState?.validate();
   }
 
   Future<void> _submit() async {
     final app = context.read<AppState>();
     final lang = app.language;
 
+    setState(() => _attemptedSubmit = true);
     if (!_formKey.currentState!.validate()) {
       setState(() => _error = null);
       return;
@@ -133,7 +104,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (!mounted) return;
     if (emailTaken) {
       setState(() => _emailInUse = true);
-      _formKey.currentState?.validate();
+      _emailFieldKey.currentState?.validate();
       return;
     }
 
@@ -157,7 +128,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         }
       });
       if (err == AppStrings.emailInUse(lang)) {
-        _formKey.currentState?.validate();
+        _emailFieldKey.currentState?.validate();
       }
     } catch (e) {
       debugPrint('Register screen error: $e');
@@ -258,6 +229,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       child: Form(
                         key: _formKey,
+                        autovalidateMode: _attemptedSubmit
+                            ? AutovalidateMode.onUserInteraction
+                            : AutovalidateMode.disabled,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
@@ -303,6 +277,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             _field(
                               AppStrings.email(lang),
                               _email,
+                              fieldKey: _emailFieldKey,
                               keyboard: TextInputType.emailAddress,
                               textInputAction: TextInputAction.next,
                               autocorrect: false,
@@ -323,17 +298,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             _field(
                               AppStrings.password(lang),
                               _password,
-                              fieldKey: _passwordFieldKey,
-                              liveBorderStrength:
-                                  AuthValidation.evaluatePasswordStrength(
-                                _password.text,
-                              ),
+                              liveBorderStrength: _attemptedSubmit ||
+                                      _password.text.isNotEmpty
+                                  ? AuthValidation.evaluatePasswordStrength(
+                                      _password.text,
+                                    )
+                                  : PasswordStrength.empty,
                               obscure: _obscurePassword,
                               textInputAction: TextInputAction.next,
+                              onChanged: (_) => setState(() {}),
                               onToggleObscure: () => setState(
                                 () => _obscurePassword = !_obscurePassword,
                               ),
                               validator: (value) {
+                                if (!_attemptedSubmit &&
+                                    (value == null || value.isEmpty)) {
+                                  return null;
+                                }
                                 if (value == null || value.isEmpty) {
                                   return AppStrings.fillAllFields(lang);
                                 }
@@ -351,7 +332,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             _field(
                               AppStrings.confirmPassword(lang),
                               _confirmPassword,
-                              fieldKey: _confirmPasswordFieldKey,
                               obscure: _obscureConfirm,
                               textInputAction: TextInputAction.done,
                               onFieldSubmitted: (_) => _submit(),
@@ -359,6 +339,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 () => _obscureConfirm = !_obscureConfirm,
                               ),
                               validator: (value) {
+                                if (!_attemptedSubmit &&
+                                    (value == null || value.isEmpty)) {
+                                  return null;
+                                }
                                 if (value == null || value.isEmpty) {
                                   return AppStrings.fillAllFields(lang);
                                 }
@@ -567,6 +551,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     TextInputType? keyboard,
     TextInputAction? textInputAction,
     bool autocorrect = true,
+    ValueChanged<String>? onChanged,
     ValueChanged<String>? onFieldSubmitted,
     String? Function(String?)? validator,
   }) {
@@ -607,6 +592,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           keyboardType: keyboard,
           textInputAction: textInputAction,
           autocorrect: autocorrect,
+          onChanged: onChanged,
           onFieldSubmitted: onFieldSubmitted,
           validator: validator,
           decoration: InputDecoration(

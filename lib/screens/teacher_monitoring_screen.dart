@@ -17,25 +17,30 @@ class TeacherMonitoringScreen extends StatefulWidget {
 }
 
 class _TeacherMonitoringScreenState extends State<TeacherMonitoringScreen> {
-  bool _loading = false;
+  bool _refreshing = false;
 
   @override
   void initState() {
     super.initState();
-    final hasClasses = context.read<AppState>().teacherClasses.isNotEmpty;
-    _loading = !hasClasses;
-    _load(showLoading: !hasClasses);
+    _loadLocal();
   }
 
-  Future<void> _load({bool showLoading = false}) async {
-    if (showLoading && mounted) {
-      setState(() => _loading = true);
+  Future<void> _loadLocal() async {
+    final app = context.read<AppState>();
+    await app.refreshTeacherClasses(cloudSyncInBackground: false);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _refreshFromCloud() async {
+    if (_refreshing) return;
+    setState(() => _refreshing = true);
+    try {
+      await context.read<AppState>().refreshTeacherClasses(
+            cloudSyncInBackground: false,
+          );
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
     }
-    await context.read<AppState>().refreshTeacherClasses(
-          cloudSyncInBackground: !showLoading,
-        );
-    if (!mounted) return;
-    setState(() => _loading = false);
   }
 
   void _openClass(({int id, String name, String code}) teacherClass) {
@@ -48,7 +53,7 @@ class _TeacherMonitoringScreenState extends State<TeacherMonitoringScreen> {
             ),
           ),
         )
-        .then((_) => _load(showLoading: false));
+        .then((_) => _loadLocal());
   }
 
   @override
@@ -63,7 +68,7 @@ class _TeacherMonitoringScreenState extends State<TeacherMonitoringScreen> {
       currentRoute: AppRoute.teacherMonitoring,
       showBottomNav: false,
       body: RefreshIndicator(
-        onRefresh: () => _load(showLoading: true),
+        onRefresh: _refreshFromCloud,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(
@@ -104,12 +109,7 @@ class _TeacherMonitoringScreenState extends State<TeacherMonitoringScreen> {
               ),
             ),
             const SizedBox(height: AppSpacing.md),
-            if (_loading)
-              const Padding(
-                padding: EdgeInsets.all(AppSpacing.xxl),
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else if (classes.isEmpty)
+            if (classes.isEmpty)
               Padding(
                 padding: const EdgeInsets.all(AppSpacing.xxl),
                 child: Center(

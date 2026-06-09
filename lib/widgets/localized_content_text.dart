@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../providers/app_state.dart';
 
-/// Displays [storedText] translated to the user's preferred language.
+/// Displays [storedText] as saved (phrases, lessons, class names are not translated).
 class LocalizedContentText extends StatelessWidget {
   const LocalizedContentText(
     this.storedText, {

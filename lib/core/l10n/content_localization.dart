@@ -751,25 +751,25 @@ abstract final class ContentLocalization {
     if (lang == AppLanguage.filipino) {
       return _categoryFilForKey(categoryKey) ??
           _categoryFilForKey(storedName) ??
-          _translateText(storedName, lang);
+          storedName;
     }
     return _categoryEnForKey(categoryKey) ??
         _categoryEnForKey(storedName) ??
-        _translateText(storedName, lang);
+        storedName;
   }
 
+  /// Phrases are shown and spoken exactly as stored (no auto-translation).
   static String phrase(
     String storedText,
     String categoryKey, {
     bool isBuiltin = false,
     required AppLanguage lang,
   }) {
-    return _translateText(storedText, lang);
+    return storedText;
   }
 
-  /// Localized display for user-entered phrases, lesson titles, and class names.
-  static String freeText(String storedText, AppLanguage lang) =>
-      phrase(storedText, '', lang: lang);
+  /// Class names, lesson titles, and other user content — stored text only.
+  static String freeText(String storedText, AppLanguage lang) => storedText;
 
   static String themeName(String themeKey, String storedName, AppLanguage lang) {
     if (lang == AppLanguage.filipino) {
