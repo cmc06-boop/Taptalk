@@ -376,6 +376,7 @@ class AppState extends ChangeNotifier {
 
     if (needsMonitoringSync) {
       await _syncPendingLearnerActivityToCloud();
+      await _startLearnerEnrollmentSync();
     }
 
     if (!needsFullCloud) return;
@@ -387,9 +388,98 @@ class AppState extends ChangeNotifier {
     if (_user!.isParent || _user!.isTeacher) {
       if (_user!.isTeacher) {
         await _syncTeacherClassesFromCloud();
+        await _startTeacherMonitoringSync();
+      }
+      if (_user!.isParent) {
+        await _startParentChildLinkSync();
       }
       unawaited(_prefetchMonitoredLearnerCaches());
     }
+  }
+
+  Future<void> _startLearnerEnrollmentSync() async {
+    if (_user == null || !_user!.isLearner || !CloudScope.syncMonitoring) return;
+    final uid = await _learnerFirebaseUidForSync();
+    if (uid == null || uid.isEmpty) return;
+    await _notificationSync.startLearnerEnrollmentSync(
+      learnerFirebaseUid: uid,
+      onChanged: () async {
+        if (_user == null || !_user!.isLearner) return;
+        try {
+          // Never push before pull here — teacher may have deleted the class.
+          await _syncEnrolledClassesFromCloud();
+          _enrolledClasses = await _repo.getEnrolledClasses(_user!.id);
+          notifyListeners();
+        } catch (e, st) {
+          debugPrint('Learner enrollment live sync failed: $e\n$st');
+        }
+      },
+    );
+  }
+
+  Future<void> _startParentChildLinkSync() async {
+    if (_user == null || !_user!.isParent || !CloudScope.syncMonitoring) return;
+    final parentFirebaseUid = await _resolveParentFirebaseUid();
+    if (parentFirebaseUid == null) return;
+    await _notificationSync.startParentChildLinkSync(
+      parentFirebaseUid: parentFirebaseUid,
+      onChanged: () async {
+        if (_user == null || !_user!.isParent) return;
+        try {
+          await _syncLinkedChildrenFromCloud();
+          _linkedChildren = await _repo.getLinkedChildren(_user!.id);
+          notifyListeners();
+        } catch (e, st) {
+          debugPrint('Parent child link live sync failed: $e\n$st');
+        }
+      },
+    );
+  }
+
+  Future<void> _startTeacherMonitoringSync() async {
+    if (_user == null || !_user!.isTeacher || !CloudScope.syncMonitoring) return;
+    final teacherFirebaseUid = await _resolveAccountFirebaseUid();
+    if (teacherFirebaseUid == null) return;
+    await _notificationSync.startTeacherMonitoringSync(
+      teacherFirebaseUid: teacherFirebaseUid,
+      onEnrollmentsChanged: (enrollments) async {
+        if (_user == null || !_user!.isTeacher) return;
+        try {
+          await _repo.mergeRemoteEnrollmentsForTeacher(
+            teacherUserId: _user!.id,
+            enrollments: enrollments,
+          );
+          await _refreshTeacherClassCounts();
+          notifyListeners();
+        } catch (e, st) {
+          debugPrint('Teacher enrollment live sync failed: $e\n$st');
+        }
+      },
+      onClassesChanged: (remoteClasses) async {
+        if (_user == null || !_user!.isTeacher) return;
+        try {
+          await _repo.mergeRemoteTeacherClasses(
+            teacherUserId: _user!.id,
+            remoteClasses: remoteClasses,
+            skipClassCodes: _deletedClassCodes,
+          );
+          final remoteClassCodes = remoteClasses
+              .map((c) => AppRepository.normalizeClassCode(c.classCode))
+              .where(AppRepository.isValidClassCodeFormat)
+              .toSet();
+          await _repo.pruneStaleTeacherClasses(
+            teacherUserId: _user!.id,
+            remoteClassCodes: remoteClassCodes,
+            skipClassCodes: _deletedClassCodes,
+          );
+          await _loadTeacherClasses();
+          await _refreshTeacherClassCounts();
+          notifyListeners();
+        } catch (e, st) {
+          debugPrint('Teacher class live sync failed: $e\n$st');
+        }
+      },
+    );
   }
 
   Future<void> _syncCloudDataAfterFirebaseReady() async {
@@ -407,6 +497,7 @@ class AppState extends ChangeNotifier {
         await _loadNotifications();
         await _syncLinkedChildrenToCloud();
         await _startParentNotificationSync();
+        await _startParentChildLinkSync();
       }
       notifyListeners();
     } catch (e, st) {
@@ -568,6 +659,8 @@ class AppState extends ChangeNotifier {
         }
       }
       await _syncUserProfileToCloud();
+      await _loadEnrolledClasses();
+      notifyListeners();
     } catch (e, st) {
       debugPrint('Learner cloud sync failed: $e\n$st');
     }
@@ -903,6 +996,8 @@ class AppState extends ChangeNotifier {
         await _loadLearnerData(cloudSyncInBackground: true);
         await _ensureStarterData();
         await refreshTeacherClasses(cloudSyncInBackground: true);
+        await _notificationSync.initialize();
+        await _syncFirebaseSessionAfterRestore();
       }
       unawaited(_activateMonitoringSync());
       notifyListeners();
@@ -1128,6 +1223,7 @@ class AppState extends ChangeNotifier {
     await _connectivitySubscription?.cancel();
     _connectivitySubscription = null;
     await _notificationSync.stopParentSync();
+    await _notificationSync.stopMonitoringSync();
     await FirebaseService.instance.signOut();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('user_id');
@@ -1443,15 +1539,16 @@ class AppState extends ChangeNotifier {
 
     if (_user!.isLearner && CloudScope.syncMonitoring) {
       await _syncLearnerCloudData();
+      await refreshEnrolledClasses(cloudSyncInBackground: false);
       return;
     }
     if (_user!.isParent || _user!.isTeacher) {
       await _syncFirebaseSessionAfterRestore();
-      if (_user!.isParent && CloudScope.notifications) {
-        await _syncCloudDataAfterFirebaseReady();
+      if (_user!.isParent) {
+        await refreshLinkedChildren(cloudSyncInBackground: false);
       }
       if (_user!.isTeacher) {
-        await _syncTeacherClassesFromCloud();
+        await refreshTeacherClasses(cloudSyncInBackground: false);
       }
       await _prefetchMonitoredLearnerCaches();
     }
@@ -1485,10 +1582,13 @@ class AppState extends ChangeNotifier {
   /// Pulls cloud learner activity into local SQLite for offline parent/teacher views.
   Future<void> _pullLearnerMonitoringCacheFromCloud(int learnerUserId) async {
     if (!CloudScope.syncMonitoring) return;
-    if (await NetworkStatus.isOffline() || NetworkStatus.isCloudBlocked) return;
+    if (await NetworkStatus.isOffline()) return;
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
     if (!_notificationSync.isCloudAvailable) return;
+    if (_user != null && (_user!.isParent || _user!.isTeacher)) {
+      if (!await _ensureCloudAuthSession()) return;
+    }
     final learnerFirebaseUid = await _resolveLearnerFirebaseUid(learnerUserId);
     if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) {
       debugPrint(
@@ -1555,9 +1655,9 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Firebase UID for the signed-in parent, waiting for auth restore when needed.
-  Future<String?> _resolveParentFirebaseUid() async {
-    if (_user == null || !_user!.isParent) return null;
+  /// Firebase UID for the signed-in account, waiting for auth restore when needed.
+  Future<String?> _resolveAccountFirebaseUid() async {
+    if (_user == null) return null;
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
 
@@ -1574,6 +1674,25 @@ class AppState extends ChangeNotifier {
     return uid;
   }
 
+  /// Parent/teacher Firestore reads require an active Firebase Auth session.
+  Future<bool> _ensureCloudAuthSession() async {
+    final uid = await _resolveAccountFirebaseUid();
+    if (uid == null || uid.isEmpty) {
+      debugPrint(
+        'Cloud auth session missing for ${_user?.role ?? "unknown"}; '
+        'monitoring sync needs online sign-in.',
+      );
+      return false;
+    }
+    return true;
+  }
+
+  /// Firebase UID for the signed-in parent, waiting for auth restore when needed.
+  Future<String?> _resolveParentFirebaseUid() async {
+    if (_user == null || !_user!.isParent) return null;
+    return _resolveAccountFirebaseUid();
+  }
+
   Future<void> _syncLinkedChildrenFromCloud() async {
     if (_user == null || !_user!.isParent) return;
     final parentFirebaseUid = await _resolveParentFirebaseUid();
@@ -1587,6 +1706,20 @@ class AppState extends ChangeNotifier {
         parentUserId: _user!.id,
         links: links,
       );
+      for (final link in links) {
+        final uid = link.learnerFirebaseUid.trim();
+        if (uid.isEmpty) continue;
+        final profile = await _notificationSync.getUserProfileFromCloud(uid);
+        final remoteName = profile?.fullName.trim() ?? '';
+        if (remoteName.isEmpty) continue;
+        var learner = await _repo.findUserByFirebaseUid(uid);
+        if (learner == null && link.learnerUserId > 0) {
+          learner = await _repo.findUserById(link.learnerUserId);
+        }
+        if (learner != null && remoteName != learner.fullName) {
+          await _repo.updateUserFullName(learner.id, remoteName);
+        }
+      }
     } catch (e, st) {
       debugPrint('Pull parent-child links failed: $e\n$st');
     }
@@ -1719,12 +1852,17 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> refreshLinkedChildren({bool cloudSyncInBackground = false}) async {
+  Future<void> refreshLinkedChildren({bool cloudSyncInBackground = true}) async {
     await _loadLinkedChildren(syncCloudInBackground: cloudSyncInBackground);
+    if (!cloudSyncInBackground) {
+      for (final child in _linkedChildren) {
+        await refreshChildMonitoringData(child.learnerId);
+      }
+    }
     notifyListeners();
   }
 
-  Future<void> refreshTeacherClasses({bool cloudSyncInBackground = false}) async {
+  Future<void> refreshTeacherClasses({bool cloudSyncInBackground = true}) async {
     if (_user == null || !_user!.isTeacher) {
       _teacherClasses = [];
       _teacherStudentCount = 0;
@@ -1815,6 +1953,15 @@ class AppState extends ChangeNotifier {
         remoteClasses: remoteClasses,
         skipClassCodes: _deletedClassCodes,
       );
+      final remoteClassCodes = remoteClasses
+          .map((c) => AppRepository.normalizeClassCode(c.classCode))
+          .where(AppRepository.isValidClassCodeFormat)
+          .toSet();
+      await _repo.pruneStaleTeacherClasses(
+        teacherUserId: _user!.id,
+        remoteClassCodes: remoteClassCodes,
+        skipClassCodes: _deletedClassCodes,
+      );
 
       final enrollments = await _notificationSync
           .getClassEnrollmentsFromCloud(teacherFirebaseUid)
@@ -1834,7 +1981,6 @@ class AppState extends ChangeNotifier {
       }
     } catch (e, st) {
       debugPrint('Teacher class cloud sync failed: $e\n$st');
-      NetworkStatus.markCloudUnreachable();
     }
   }
 
@@ -2023,13 +2169,60 @@ class AppState extends ChangeNotifier {
 
   Future<bool> updateTeacherClassName(int classId, String className) async {
     if (_user == null || !_user!.isTeacher) return false;
+    final trimmed = className.trim();
+    final classRow = await _repo.findClassById(classId);
     final ok = await _repo.updateTeacherClassName(
       teacherUserId: _user!.id,
       classId: classId,
-      className: className,
+      className: trimmed,
     );
+    if (ok) {
+      final classCode = classRow?['class_code'] as String?;
+      if (classCode != null && classCode.isNotEmpty) {
+        await _pushTeacherClassToCloud(
+          classCode: classCode,
+          className: trimmed,
+        );
+        await _resyncClassEnrollmentsToCloud(classId: classId);
+      }
+    }
     await refreshTeacherClasses();
     return ok;
+  }
+
+  Future<void> _resyncClassEnrollmentsToCloud({required int classId}) async {
+    if (!CloudScope.syncMonitoring || _user == null || !_user!.isTeacher) {
+      return;
+    }
+    if (!_notificationSync.isCloudAvailable) return;
+    final teacherFirebaseUid =
+        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) return;
+
+    final classRow = await _repo.findClassById(classId);
+    if (classRow == null) return;
+    final classCode = (classRow['class_code'] as String?) ?? '';
+    final className = (classRow['class_name'] as String?) ?? '';
+    if (classCode.isEmpty) return;
+
+    final students = await _repo.getTeacherClassStudentsForClass(
+      teacherUserId: _user!.id,
+      classId: classId,
+    );
+    for (final student in students) {
+      final learnerFirebaseUid =
+          await _repo.getFirebaseUidForUser(student.learnerId);
+      if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) continue;
+      await _notificationSync.syncClassEnrollment(
+        classId: classId,
+        classCode: classCode,
+        className: className,
+        teacherFirebaseUid: teacherFirebaseUid,
+        learnerUserId: student.learnerId,
+        learnerName: student.fullName,
+        learnerFirebaseUid: learnerFirebaseUid,
+      );
+    }
   }
 
   Future<int> studentCountForClass(int classId) async {
@@ -2067,24 +2260,73 @@ class AppState extends ChangeNotifier {
       learnerUserId: _user!.id,
       classId: classId,
     );
-    if (classCode.isNotEmpty) {
-      if (cloudSyncInBackground) {
-        unawaited(_syncClassLessonsFromCloud(
-          classId: classId,
-          classCode: classCode,
-        ));
-      } else {
-        await _syncClassLessonsFromCloud(
-          classId: classId,
-          classCode: classCode,
-        );
-        return _repo.getEnrolledClassLessons(
-          learnerUserId: _user!.id,
-          classId: classId,
-        );
-      }
+    if (classCode.isEmpty) return lessons;
+    if (cloudSyncInBackground) {
+      unawaited(_syncEnrolledClassLessonsFromCloudAndReload(classId, classCode));
+      return lessons;
     }
-    return lessons;
+    await _syncClassLessonsFromCloud(
+      classId: classId,
+      classCode: classCode,
+    );
+    return _repo.getEnrolledClassLessons(
+      learnerUserId: _user!.id,
+      classId: classId,
+    );
+  }
+
+  Future<void> _syncEnrolledClassLessonsFromCloudAndReload(
+    int classId,
+    String classCode,
+  ) async {
+    try {
+      await _syncClassLessonsFromCloud(
+        classId: classId,
+        classCode: classCode,
+      );
+      notifyListeners();
+    } catch (e, st) {
+      debugPrint('Background lesson sync failed: $e\n$st');
+    }
+  }
+
+  /// Local lessons first, then optional cloud lesson merge for teacher class detail.
+  Future<List<ClassLesson>> getTeacherClassLessonsForDisplay(
+    int classId, {
+    bool cloudSyncInBackground = true,
+  }) async {
+    if (_user == null || !_user!.isTeacher) return [];
+    final lessons = await _repo.getClassLessons(
+      teacherUserId: _user!.id,
+      classId: classId,
+    );
+    final classRow = await _repo.findClassById(classId);
+    final classCode = (classRow?['class_code'] as String?) ?? '';
+    if (classCode.isEmpty) return lessons;
+    if (cloudSyncInBackground) {
+      unawaited(_syncTeacherClassLessonsFromCloudAndReload(classId, classCode));
+      return lessons;
+    }
+    await _syncClassLessonsFromCloud(classId: classId, classCode: classCode);
+    return _repo.getClassLessons(
+      teacherUserId: _user!.id,
+      classId: classId,
+    );
+  }
+
+  Future<void> _syncTeacherClassLessonsFromCloudAndReload(
+    int classId,
+    String classCode,
+  ) async {
+    try {
+      await _syncClassLessonsFromCloud(
+        classId: classId,
+        classCode: classCode,
+      );
+      notifyListeners();
+    } catch (e, st) {
+      debugPrint('Background teacher lesson sync failed: $e\n$st');
+    }
   }
 
   Future<List<LessonPhrase>> getEnrolledLessonPhrases(
@@ -2495,46 +2737,108 @@ class AppState extends ChangeNotifier {
       _enrolledClasses = [];
       return;
     }
-    // Pull enrollments from cloud first so cross-device joins appear immediately.
+    _enrolledClasses = await _repo.getEnrolledClasses(_user!.id);
+    // Push only enrollments whose class still exists on cloud, then pull/prune.
+    // Pushing blindly would re-create enrollments the teacher already deleted.
+    await _resyncLearnerEnrollmentsToCloud();
     await _syncEnrolledClassesFromCloud();
     _enrolledClasses = await _repo.getEnrolledClasses(_user!.id);
-    await _resyncLearnerEnrollmentsToCloud();
   }
 
   /// Pulls cloud enrollment records for this learner and imports any missing
   /// teacher-class records into local SQLite so the learner sees them.
   Future<void> _syncEnrolledClassesFromCloud() async {
     if (!CloudScope.syncMonitoring) return;
-    if (_user == null || !_user!.isLearner || !_notificationSync.isCloudAvailable) return;
-    final uid = _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (_user == null || !_user!.isLearner || !_notificationSync.isCloudAvailable) {
+      return;
+    }
+    final uid = await _learnerFirebaseUidForSync();
     if (uid == null || uid.isEmpty) return;
     try {
       final remoteEnrollments = await _notificationSync
           .getClassEnrollmentsForLearnerFromCloud(uid)
           .timeout(const Duration(seconds: 12));
-      for (final enrollment in remoteEnrollments) {
-        final code = AppRepository.normalizeClassCode(enrollment.classCode);
-        if (!AppRepository.isValidClassCodeFormat(code)) continue;
-        // Ensure the teacher class exists locally.
-        var classRow = await _repo.findClassByCode(code);
-        if (classRow == null) {
-          // Fetch the class details from cloud and import.
-          final remoteClass = await _notificationSync
-              .getTeacherClassByCodeFromCloud(code)
-              .timeout(const Duration(seconds: 8));
-          if (remoteClass != null) {
-            classRow = await _repo.importRemoteTeacherClassForEnrollment(remoteClass);
-          }
-        }
-        if (classRow == null) continue;
-        final classId = classRow['id'] as int;
-        if (!await _repo.isLearnerEnrolled(_user!.id, classId)) {
-          await _repo.enrollLearnerInClass(_user!.id, classId);
-        }
-        await _syncClassLessonsFromCloud(classId: classId, classCode: code);
-      }
+      await _applyRemoteEnrollmentsForLearner(
+        learnerUserId: _user!.id,
+        remoteEnrollments: remoteEnrollments,
+      );
     } catch (e, st) {
       debugPrint('Sync enrolled classes from cloud failed: $e\n$st');
+    }
+  }
+
+  Future<void> _applyRemoteEnrollmentsForLearner({
+    required int learnerUserId,
+    required List<RemoteClassEnrollment> remoteEnrollments,
+  }) async {
+    final remoteClassCodes = <String>{};
+    for (final enrollment in remoteEnrollments) {
+      final code = AppRepository.normalizeClassCode(enrollment.classCode);
+      if (!AppRepository.isValidClassCodeFormat(code)) continue;
+      remoteClassCodes.add(code);
+
+      var classRow = await _repo.findClassByCode(code);
+      if (classRow == null) {
+        final remoteClass = await _notificationSync
+            .getTeacherClassByCodeFromCloud(code)
+            .timeout(const Duration(seconds: 8));
+        if (remoteClass != null) {
+          classRow =
+              await _repo.importRemoteTeacherClassForEnrollment(remoteClass);
+        }
+      }
+      if (classRow == null) continue;
+
+      final classId = classRow['id'] as int;
+      final enrollmentName = enrollment.className.trim();
+      if (enrollmentName.isNotEmpty) {
+        await _repo.updateClassDisplayName(
+          classId: classId,
+          className: enrollmentName,
+        );
+      } else {
+        final remoteClass = await _notificationSync
+            .getTeacherClassByCodeFromCloud(code)
+            .timeout(const Duration(seconds: 8));
+        final cloudName = remoteClass?.className.trim() ?? '';
+        if (cloudName.isNotEmpty) {
+          await _repo.updateClassDisplayName(
+            classId: classId,
+            className: cloudName,
+          );
+        }
+      }
+
+      if (!await _repo.isLearnerEnrolled(learnerUserId, classId)) {
+        await _repo.enrollLearnerInClass(learnerUserId, classId);
+      }
+      await _syncClassLessonsFromCloud(classId: classId, classCode: code);
+    }
+
+    await _repo.pruneStaleEnrollmentsForLearner(
+      learnerUserId: learnerUserId,
+      remoteClassCodes: remoteClassCodes,
+    );
+    await _pruneEnrollmentsForDeletedCloudClasses(learnerUserId);
+  }
+
+  /// Drops local enrollments when the teacher removed the class from cloud.
+  Future<void> _pruneEnrollmentsForDeletedCloudClasses(int learnerUserId) async {
+    if (!CloudScope.syncMonitoring || !_notificationSync.isCloudAvailable) return;
+    final local = await _repo.getEnrolledClasses(learnerUserId);
+    for (final enrolled in local) {
+      final code = AppRepository.normalizeClassCode(enrolled.classCode);
+      if (!AppRepository.isValidClassCodeFormat(code)) continue;
+      try {
+        final remoteClass = await _notificationSync
+            .getTeacherClassByCodeFromCloud(code)
+            .timeout(const Duration(seconds: 8));
+        if (remoteClass == null) {
+          await _repo.unenrollLearnerFromClass(learnerUserId, enrolled.classId);
+        }
+      } catch (e, st) {
+        debugPrint('Deleted-class prune lookup failed: $e\n$st');
+      }
     }
   }
 
@@ -2543,17 +2847,30 @@ class AppState extends ChangeNotifier {
     if (_user == null || !_user!.isLearner || !_notificationSync.isCloudAvailable) {
       return;
     }
-    final learnerFirebaseUid =
-        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    final learnerFirebaseUid = await _learnerFirebaseUidForSync();
     if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) return;
 
     for (final enrolled in _enrolledClasses) {
-      final teacherFirebaseUid =
-          await _repo.getFirebaseUidForUser(enrolled.teacherId);
+      final code = AppRepository.normalizeClassCode(enrolled.classCode);
+      RemoteTeacherClass? remoteClass;
+      try {
+        remoteClass = await _notificationSync
+            .getTeacherClassByCodeFromCloud(code)
+            .timeout(const Duration(seconds: 8));
+      } catch (e, st) {
+        debugPrint('Skip enrollment resync; class lookup failed: $e\n$st');
+        continue;
+      }
+      // Teacher deleted this class — do not re-create the cloud enrollment.
+      if (remoteClass == null) continue;
+
+      final teacherFirebaseUid = remoteClass.teacherFirebaseUid.trim().isNotEmpty
+          ? remoteClass.teacherFirebaseUid.trim()
+          : await _repo.getFirebaseUidForUser(enrolled.teacherId);
       if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) continue;
       await _notificationSync.syncClassEnrollment(
         classId: enrolled.classId,
-        classCode: enrolled.classCode,
+        classCode: code,
         className: enrolled.className,
         teacherFirebaseUid: teacherFirebaseUid,
         learnerUserId: _user!.id,
@@ -2629,10 +2946,34 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
-  /// Reload enrolled classes from DB and refresh listeners.
-  Future<void> refreshEnrolledClasses() async {
+  /// Reload enrolled classes from DB; optionally merge cloud enrollments in background.
+  Future<void> refreshEnrolledClasses({
+    bool cloudSyncInBackground = true,
+  }) async {
+    if (_user == null || !_user!.isLearner) {
+      _enrolledClasses = [];
+      notifyListeners();
+      return;
+    }
     await _loadEnrolledClasses();
     notifyListeners();
+    if (cloudSyncInBackground) {
+      unawaited(_syncEnrolledClassesFromCloudAndReload());
+      return;
+    }
+    await _syncEnrolledClassesFromCloud();
+    await _loadEnrolledClasses();
+    notifyListeners();
+  }
+
+  Future<void> _syncEnrolledClassesFromCloudAndReload() async {
+    try {
+      await _syncEnrolledClassesFromCloud();
+      await _loadEnrolledClasses();
+      notifyListeners();
+    } catch (e, st) {
+      debugPrint('Background enrolled-class sync failed: $e\n$st');
+    }
   }
 
   /// Call after UI that triggered enroll has closed (avoids rebuild during dialog).
@@ -2701,10 +3042,13 @@ class AppState extends ChangeNotifier {
 
   Future<void> _pullLearnerCustomPhrasesFromCloud(int learnerUserId) async {
     if (!CloudScope.syncMonitoring) return;
-    if (await NetworkStatus.isOffline() || NetworkStatus.isCloudBlocked) return;
+    if (await NetworkStatus.isOffline()) return;
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
     if (!_notificationSync.isCloudAvailable) return;
+    if (_user != null && (_user!.isParent || _user!.isTeacher)) {
+      if (!await _ensureCloudAuthSession()) return;
+    }
     final learnerFirebaseUid = await _resolveLearnerFirebaseUid(learnerUserId);
     if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) return;
     try {
@@ -2763,6 +3107,16 @@ class AppState extends ChangeNotifier {
     );
   }
 
+  Future<String?> _linkLearnerFirebaseUid({
+    required int learnerUserId,
+    required String learnerFirebaseUid,
+  }) async {
+    final uid = learnerFirebaseUid.trim();
+    if (uid.isEmpty) return null;
+    await _repo.linkFirebaseUid(learnerUserId, uid);
+    return uid;
+  }
+
   Future<String?> _resolveLearnerFirebaseUid(int learnerUserId) async {
     final fromUser = await _repo.getFirebaseUidForUser(learnerUserId);
     if (fromUser != null && fromUser.isNotEmpty) return fromUser;
@@ -2771,8 +3125,83 @@ class AppState extends ChangeNotifier {
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
     if (!_notificationSync.isCloudAvailable || _user == null) return null;
+    if (_user!.isParent || _user!.isTeacher) {
+      if (!await _ensureCloudAuthSession()) return null;
+    }
 
     try {
+      final learner = await _repo.findUserById(learnerUserId);
+      final learnerName = learner?.fullName.trim().toLowerCase();
+
+      if (_user!.isParent) {
+        final parentFirebaseUid = await _resolveParentFirebaseUid();
+        if (parentFirebaseUid != null && parentFirebaseUid.isNotEmpty) {
+          final links = await _notificationSync
+              .getParentChildLinksFromCloud(parentFirebaseUid)
+              .timeout(const Duration(seconds: 8));
+          for (final link in links) {
+            final uid = link.learnerFirebaseUid.trim();
+            if (uid.isEmpty) continue;
+            if (link.learnerUserId == learnerUserId) {
+              return _linkLearnerFirebaseUid(
+                learnerUserId: learnerUserId,
+                learnerFirebaseUid: uid,
+              );
+            }
+            if (learnerName != null &&
+                learnerName.isNotEmpty &&
+                link.learnerName.trim().toLowerCase() == learnerName) {
+              return _linkLearnerFirebaseUid(
+                learnerUserId: learnerUserId,
+                learnerFirebaseUid: uid,
+              );
+            }
+            final byUid = await _repo.findUserByFirebaseUid(uid);
+            if (byUid?.id == learnerUserId) {
+              return _linkLearnerFirebaseUid(
+                learnerUserId: learnerUserId,
+                learnerFirebaseUid: uid,
+              );
+            }
+          }
+        }
+      }
+
+      if (_user!.isTeacher) {
+        final teacherFirebaseUid = await _resolveAccountFirebaseUid();
+        if (teacherFirebaseUid != null && teacherFirebaseUid.isNotEmpty) {
+          await _syncTeacherClassesFromCloud();
+          final enrollments = await _notificationSync
+              .getClassEnrollmentsFromCloud(teacherFirebaseUid)
+              .timeout(const Duration(seconds: 10));
+          for (final enrollment in enrollments) {
+            final uid = enrollment.learnerFirebaseUid.trim();
+            if (uid.isEmpty) continue;
+            if (enrollment.learnerUserId == learnerUserId) {
+              return _linkLearnerFirebaseUid(
+                learnerUserId: learnerUserId,
+                learnerFirebaseUid: uid,
+              );
+            }
+            if (learnerName != null &&
+                learnerName.isNotEmpty &&
+                enrollment.learnerName.trim().toLowerCase() == learnerName) {
+              return _linkLearnerFirebaseUid(
+                learnerUserId: learnerUserId,
+                learnerFirebaseUid: uid,
+              );
+            }
+            final byUid = await _repo.findUserByFirebaseUid(uid);
+            if (byUid?.id == learnerUserId) {
+              return _linkLearnerFirebaseUid(
+                learnerUserId: learnerUserId,
+                learnerFirebaseUid: uid,
+              );
+            }
+          }
+        }
+      }
+
       final profileCode = await _repo.ensureLearnerProfileCode(learnerUserId);
       if (profileCode.trim().isNotEmpty) {
         final remote = await _notificationSync
@@ -2784,93 +3213,8 @@ class AppState extends ChangeNotifier {
           return uid;
         }
       }
-      if (_user!.isTeacher) {
-        final teacherFirebaseUid =
-            _user!.firebaseUid ?? FirebaseService.instance.currentUid;
-        if (teacherFirebaseUid != null && teacherFirebaseUid.isNotEmpty) {
-          await _syncTeacherClassesFromCloud();
-          final enrollments = await _notificationSync
-              .getClassEnrollmentsFromCloud(teacherFirebaseUid)
-              .timeout(const Duration(seconds: 10));
-          final learner = await _repo.findUserById(learnerUserId);
-          final learnerName = learner?.fullName.trim().toLowerCase();
-          for (final enrollment in enrollments) {
-            final uid = enrollment.learnerFirebaseUid.trim();
-            if (uid.isEmpty) continue;
-            if (enrollment.learnerUserId == learnerUserId) {
-              await _repo.linkFirebaseUid(learnerUserId, uid);
-              return uid;
-            }
-            if (learnerName != null &&
-                learnerName.isNotEmpty &&
-                enrollment.learnerName.trim().toLowerCase() == learnerName) {
-              await _repo.linkFirebaseUid(learnerUserId, uid);
-              return uid;
-            }
-            final byUid = await _repo.findUserByFirebaseUid(uid);
-            if (byUid?.id == learnerUserId) {
-              await _repo.linkFirebaseUid(learnerUserId, uid);
-              return uid;
-            }
-          }
-        }
-      }
-
-      if (_user!.isParent) {
-        for (final child in _linkedChildren) {
-          if (child.learnerId != learnerUserId) continue;
-          final uid = await _repo.getFirebaseUidForUser(child.learnerId);
-          if (uid != null && uid.isNotEmpty) return uid;
-        }
-        final parentFirebaseUid =
-            _user!.firebaseUid ?? FirebaseService.instance.currentUid;
-        if (parentFirebaseUid != null && parentFirebaseUid.isNotEmpty) {
-          final links = await _notificationSync
-              .getParentChildLinksFromCloud(parentFirebaseUid)
-              .timeout(const Duration(seconds: 8));
-          final learner = await _repo.findUserById(learnerUserId);
-          final learnerName = learner?.fullName.trim().toLowerCase();
-          for (final link in links) {
-            final uid = link.learnerFirebaseUid.trim();
-            if (uid.isEmpty) continue;
-            if (link.learnerUserId == learnerUserId) {
-              await _repo.linkFirebaseUid(learnerUserId, uid);
-              return uid;
-            }
-            if (learnerName != null &&
-                learnerName.isNotEmpty &&
-                link.learnerName.trim().toLowerCase() == learnerName) {
-              await _repo.linkFirebaseUid(learnerUserId, uid);
-              return uid;
-            }
-            final byUid = await _repo.findUserByFirebaseUid(uid);
-            if (byUid?.id == learnerUserId) {
-              await _repo.linkFirebaseUid(learnerUserId, uid);
-              return uid;
-            }
-          }
-        }
-      }
     } catch (e, st) {
       debugPrint('Resolve learner firebase uid failed: $e\n$st');
-    }
-
-    if (CloudScope.syncMonitoring && _notificationSync.isCloudAvailable) {
-      try {
-        final profileCode = await _repo.ensureLearnerProfileCode(learnerUserId);
-        if (profileCode.trim().isNotEmpty) {
-          final remote = await _notificationSync
-              .findLearnerProfileByCodeFromCloud(profileCode)
-              .timeout(const Duration(seconds: 8));
-          final uid = remote?.learnerFirebaseUid.trim() ?? '';
-          if (uid.isNotEmpty) {
-            await _repo.linkFirebaseUid(learnerUserId, uid);
-            return uid;
-          }
-        }
-      } catch (e, st) {
-        debugPrint('Profile-code uid resolve failed: $e\n$st');
-      }
     }
 
     return null;
@@ -2885,6 +3229,9 @@ class AppState extends ChangeNotifier {
     if (_user == null) return;
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
+    if (_user!.isParent || _user!.isTeacher) {
+      if (!await _ensureCloudAuthSession()) return;
+    }
     final online = !await NetworkStatus.isOffline();
     if (online) {
       if (_user!.isTeacher) {
@@ -2910,8 +3257,7 @@ class AppState extends ChangeNotifier {
   }) async {
     if (syncCloud &&
         CloudScope.syncMonitoring &&
-        !await NetworkStatus.isOffline() &&
-        !NetworkStatus.isCloudBlocked) {
+        !await NetworkStatus.isOffline()) {
       await _pullLearnerMonitoringCacheFromCloud(learnerUserId);
     }
     final range = _dateRangeForPeriod(period, month: month);
@@ -2975,26 +3321,10 @@ class AppState extends ChangeNotifier {
       final remoteEnrollments = await _notificationSync
           .getClassEnrollmentsForLearnerFromCloud(uid)
           .timeout(const Duration(seconds: 12));
-      for (final enrollment in remoteEnrollments) {
-        final code = AppRepository.normalizeClassCode(enrollment.classCode);
-        if (!AppRepository.isValidClassCodeFormat(code)) continue;
-        var classRow = await _repo.findClassByCode(code);
-        if (classRow == null) {
-          final remoteClass = await _notificationSync
-              .getTeacherClassByCodeFromCloud(code)
-              .timeout(const Duration(seconds: 8));
-          if (remoteClass != null) {
-            classRow =
-                await _repo.importRemoteTeacherClassForEnrollment(remoteClass);
-          }
-        }
-        if (classRow == null) continue;
-        final classId = classRow['id'] as int;
-        if (!await _repo.isLearnerEnrolled(learnerUserId, classId)) {
-          await _repo.enrollLearnerInClass(learnerUserId, classId);
-        }
-        await _syncClassLessonsFromCloud(classId: classId, classCode: code);
-      }
+      await _applyRemoteEnrollmentsForLearner(
+        learnerUserId: learnerUserId,
+        remoteEnrollments: remoteEnrollments,
+      );
     } catch (e, st) {
       debugPrint('Sync learner enrollments for monitoring failed: $e\n$st');
     }
@@ -3049,8 +3379,7 @@ class AppState extends ChangeNotifier {
   }) async {
     if (syncCloud &&
         CloudScope.syncMonitoring &&
-        !await NetworkStatus.isOffline() &&
-        !NetworkStatus.isCloudBlocked) {
+        !await NetworkStatus.isOffline()) {
       await _pullLearnerMonitoringCacheFromCloud(learnerUserId);
     }
     final range = _dateRangeForPeriod(period, month: month);
@@ -3103,6 +3432,26 @@ class AppState extends ChangeNotifier {
     if (trimmed.isEmpty) return AppStrings.fillAllFields(_language);
     await _repo.updateUserFullName(_user!.id, trimmed);
     _user = _user!.copyWith(fullName: trimmed);
+    if (CloudScope.syncMonitoring) {
+      await FirebaseService.instance.initialize();
+      await _notificationSync.initialize();
+      await _syncUserProfileToCloud();
+      if (_user!.isLearner) {
+        final learnerFirebaseUid =
+            _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+        if (learnerFirebaseUid != null && learnerFirebaseUid.isNotEmpty) {
+          final profileCode = _profileCode.isNotEmpty
+              ? _profileCode
+              : await _repo.ensureLearnerProfileCode(_user!.id);
+          await _notificationSync.updateLearnerReferencesOnCloud(
+            learnerFirebaseUid: learnerFirebaseUid,
+            learnerName: trimmed,
+            learnerProfileCode: profileCode,
+          );
+          await _resyncLearnerEnrollmentsToCloud();
+        }
+      }
+    }
     notifyListeners();
     return null;
   }

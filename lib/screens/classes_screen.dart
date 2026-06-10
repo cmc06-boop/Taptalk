@@ -20,6 +20,14 @@ class ClassesScreen extends StatefulWidget {
 }
 
 class _ClassesScreenState extends State<ClassesScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<AppState>().refreshEnrolledClasses();
+    });
+  }
+
   Future<void> _showEnrollDialog(BuildContext context) async {
     final joined = await EnrollClassDialog.show(context);
     if (!context.mounted || joined != true) return;
@@ -80,7 +88,9 @@ class _ClassesScreenState extends State<ClassesScreen> {
   }
 
   Future<void> _onRefresh() async {
-    await context.read<AppState>().refreshEnrolledClasses();
+    await context.read<AppState>().refreshEnrolledClasses(
+          cloudSyncInBackground: false,
+        );
   }
 
   void _openClass(BuildContext context, EnrolledClassModel enrolled) {

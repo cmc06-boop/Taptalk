@@ -31,7 +31,7 @@ class LearnerLessonScreen extends StatefulWidget {
 
 class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
   List<LessonPhrase> _phrases = [];
-  bool _loading = true;
+  bool _loading = false;
 
   @override
   void initState() {
@@ -40,7 +40,7 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    if (_phrases.isEmpty) setState(() => _loading = true);
     final phrases = await context
         .read<AppState>()
         .getEnrolledLessonPhrases(widget.lessonId);

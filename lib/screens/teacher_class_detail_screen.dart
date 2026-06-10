@@ -37,7 +37,7 @@ class TeacherClassDetailScreen extends StatefulWidget {
 class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
   List<ClassLesson> _lessons = [];
   int _studentCount = 0;
-  bool _loading = true;
+  bool _loading = false;
   late String _className;
 
   @override
@@ -49,22 +49,43 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
     _load();
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  Future<void> _load({bool userRefresh = false}) async {
+    if (userRefresh || _lessons.isEmpty) setState(() => _loading = true);
     final app = context.read<AppState>();
-    final results = await Future.wait([
-      app.getClassLessons(widget.classId),
-      app.getTeacherClassStudentsForClass(
-        widget.classId,
-        cloudSyncInBackground: false,
-      ),
-    ]);
-    if (!mounted) return;
-    setState(() {
-      _lessons = results[0] as List<ClassLesson>;
-      _studentCount = (results[1] as List).length;
-      _loading = false;
-    });
+    try {
+      final cached = await Future.wait([
+        app.getTeacherClassLessonsForDisplay(widget.classId),
+        app.getTeacherClassStudentsForClass(
+          widget.classId,
+          cloudSyncInBackground: true,
+        ),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _lessons = cached[0] as List<ClassLesson>;
+        _studentCount = (cached[1] as List).length;
+        _loading = false;
+      });
+
+      final synced = await Future.wait([
+        app.getTeacherClassLessonsForDisplay(
+          widget.classId,
+          cloudSyncInBackground: false,
+        ),
+        app.getTeacherClassStudentsForClass(
+          widget.classId,
+          cloudSyncInBackground: false,
+        ),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _lessons = synced[0] as List<ClassLesson>;
+        _studentCount = (synced[1] as List).length;
+      });
+    } catch (e, st) {
+      debugPrint('Teacher class detail load failed: $e\n$st');
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _createLesson() async {
@@ -203,7 +224,7 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
       body: Stack(
         children: [
           RefreshIndicator(
-            onRefresh: _load,
+            onRefresh: () => _load(userRefresh: true),
             color: theme.bgAccent,
             child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),

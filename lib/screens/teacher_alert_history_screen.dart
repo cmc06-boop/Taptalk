@@ -22,7 +22,7 @@ class TeacherAlertHistoryScreen extends StatefulWidget {
 
 class _TeacherAlertHistoryScreenState extends State<TeacherAlertHistoryScreen> {
   List<TeacherRecentAlert> _alerts = [];
-  bool _loading = true;
+  bool _loading = false;
   int _lastAlertsRevision = 0;
 
   @override
@@ -43,8 +43,8 @@ class _TeacherAlertHistoryScreenState extends State<TeacherAlertHistoryScreen> {
     }
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  Future<void> _load({bool userRefresh = false}) async {
+    if (userRefresh || _alerts.isEmpty) setState(() => _loading = true);
     final alerts = await context.read<AppState>().getTeacherAlertHistory();
     if (!mounted) return;
     setState(() {
@@ -130,7 +130,7 @@ class _TeacherAlertHistoryScreenState extends State<TeacherAlertHistoryScreen> {
                         ),
                       )
                     : RefreshIndicator(
-                        onRefresh: _load,
+                        onRefresh: () => _load(userRefresh: true),
                         color: theme.bgAccent,
                         child: ListView.builder(
                           padding: const EdgeInsets.only(bottom: AppSpacing.xxl),

@@ -13,11 +13,28 @@ import '../widgets/link_child_dialog.dart';
 import '../widgets/taptalk_result_dialog.dart';
 import 'child_monitoring_screen.dart';
 
-class MyChildScreen extends StatelessWidget {
+class MyChildScreen extends StatefulWidget {
   const MyChildScreen({super.key});
 
+  @override
+  State<MyChildScreen> createState() => _MyChildScreenState();
+}
+
+class _MyChildScreenState extends State<MyChildScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<AppState>().refreshLinkedChildren(
+            cloudSyncInBackground: true,
+          );
+    });
+  }
+
   Future<void> _refresh(BuildContext context) async {
-    await context.read<AppState>().refreshLinkedChildren();
+    await context.read<AppState>().refreshLinkedChildren(
+          cloudSyncInBackground: false,
+        );
   }
 
   Future<void> _showLinkChildDialog(BuildContext context) async {

@@ -28,7 +28,7 @@ class LearnerClassDetailScreen extends StatefulWidget {
 
 class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
   List<ClassLesson> _lessons = [];
-  bool _loading = true;
+  bool _loading = false;
 
   @override
   void initState() {
@@ -36,16 +36,30 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
     _load();
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  Future<void> _load({bool userRefresh = false}) async {
+    if (userRefresh || _lessons.isEmpty) setState(() => _loading = true);
     final app = context.read<AppState>();
-    final lessons =
-        await app.getEnrolledClassLessons(widget.enrolledClass.classId);
-    if (!mounted) return;
-    setState(() {
-      _lessons = lessons;
-      _loading = false;
-    });
+    try {
+      final cached = await app.getEnrolledClassLessons(
+        widget.enrolledClass.classId,
+        cloudSyncInBackground: true,
+      );
+      if (!mounted) return;
+      setState(() {
+        _lessons = cached;
+        _loading = false;
+      });
+
+      final synced = await app.getEnrolledClassLessons(
+        widget.enrolledClass.classId,
+        cloudSyncInBackground: false,
+      );
+      if (!mounted) return;
+      setState(() => _lessons = synced);
+    } catch (e, st) {
+      debugPrint('Learner class detail load failed: $e\n$st');
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _openLesson(ClassLesson lesson) async {
@@ -77,7 +91,7 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
       showBackButton: true,
       showBottomNav: false,
       body: RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: () => _load(userRefresh: true),
         child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(

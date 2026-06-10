@@ -291,6 +291,11 @@ class AppRepository {
           profileCode: normalizeProfileCode(remote.profileCode),
         );
       }
+      final remoteName = remote.learnerName.trim();
+      if (remoteName.isNotEmpty && remoteName != existing.fullName) {
+        await updateUserFullName(existing.id, remoteName);
+        return existing.copyWith(fullName: remoteName);
+      }
       return existing;
     }
 
@@ -345,6 +350,11 @@ class AppRepository {
 
       if (!await isChildLinked(parentUserId, learner.id)) {
         await linkParentToChild(parentUserId, learner.id);
+      }
+
+      final remoteName = link.learnerName.trim();
+      if (remoteName.isNotEmpty && remoteName != learner.fullName) {
+        await updateUserFullName(learner.id, remoteName);
       }
     }
   }
@@ -1675,6 +1685,46 @@ class AppRepository {
     return true;
   }
 
+  Future<void> updateClassDisplayName({
+    required int classId,
+    required String className,
+  }) async {
+    final trimmed = className.trim();
+    if (trimmed.isEmpty) return;
+    final db = await _dbHelper.database;
+    await db.update(
+      'teacher_classes',
+      {'class_name': trimmed},
+      where: 'id = ?',
+      whereArgs: [classId],
+    );
+  }
+
+  /// Removes local enrollments that no longer exist in cloud for this learner.
+  Future<void> pruneStaleEnrollmentsForLearner({
+    required int learnerUserId,
+    required Set<String> remoteClassCodes,
+  }) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT ce.class_id, tc.class_code
+      FROM class_enrollments ce
+      INNER JOIN teacher_classes tc ON tc.id = ce.class_id
+      WHERE ce.learner_user_id = ?
+    ''', [learnerUserId]);
+
+    for (final row in rows) {
+      final code = normalizeClassCode((row['class_code'] as String?) ?? '');
+      if (!isValidClassCodeFormat(code)) continue;
+      if (!remoteClassCodes.contains(code)) {
+        await unenrollLearnerFromClass(
+          learnerUserId,
+          row['class_id'] as int,
+        );
+      }
+    }
+  }
+
   Future<bool> updateTeacherClassName({
     required int teacherUserId,
     required int classId,
@@ -1916,6 +1966,30 @@ class AppRepository {
         .toList();
   }
 
+  Future<void> pruneStaleTeacherClasses({
+    required int teacherUserId,
+    required Set<String> remoteClassCodes,
+    Set<String> skipClassCodes = const {},
+  }) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'teacher_classes',
+      where: 'teacher_user_id = ?',
+      whereArgs: [teacherUserId],
+    );
+    for (final row in rows) {
+      final code = normalizeClassCode((row['class_code'] as String?) ?? '');
+      if (!isValidClassCodeFormat(code)) continue;
+      if (skipClassCodes.contains(code)) continue;
+      if (!remoteClassCodes.contains(code)) {
+        await deleteTeacherClass(
+          teacherUserId: teacherUserId,
+          classId: row['id'] as int,
+        );
+      }
+    }
+  }
+
   Future<void> mergeRemoteTeacherClasses({
     required int teacherUserId,
     required List<RemoteTeacherClass> remoteClasses,
@@ -1999,6 +2073,10 @@ class AppRepository {
       }
       if (!await isLearnerEnrolled(learner.id, classId)) {
         await enrollLearnerInClass(learner.id, classId);
+      }
+      final remoteName = enrollment.learnerName.trim();
+      if (remoteName.isNotEmpty && remoteName != learner.fullName) {
+        await updateUserFullName(learner.id, remoteName);
       }
     }
 

@@ -29,7 +29,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
   List<String> _subjects = [];
   Map<String, int> _subjectStudentCounts = {};
   String? _selectedSubject;
-  bool _loading = true;
+  bool _loadingFeed = true;
   int _lastAlertsRevision = 0;
 
   @override
@@ -50,40 +50,58 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
     }
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool userRefresh = false}) async {
     final app = context.read<AppState>();
     try {
-      await app.refreshTeacherClasses(cloudSyncInBackground: true);
-      final alerts = await app.getTeacherRecentAlerts();
-      final lessons = await app.getTeacherRecentLessons();
-      final subjects = <String>{};
-      final classIdsBySubject = <String, List<int>>{};
-      for (final teacherClass in app.teacherClasses) {
-        final subject = ClassNameUtils.subjectFrom(teacherClass.name);
-        subjects.add(subject);
-        classIdsBySubject.putIfAbsent(subject, () => []).add(teacherClass.id);
+      if (userRefresh) {
+        await app.refreshTeacherClasses(cloudSyncInBackground: false);
+      } else {
+        await app.refreshTeacherClasses(cloudSyncInBackground: true);
       }
-      final subjectStudentCounts = <String, int>{};
-      for (final entry in classIdsBySubject.entries) {
-        subjectStudentCounts[entry.key] =
-            await app.countStudentsInClasses(entry.value);
-      }
+      _applyClassStats(app);
+      if (mounted) setState(() => _loadingFeed = true);
+
+      final results = await Future.wait([
+        app.getTeacherRecentAlerts(),
+        app.getTeacherRecentLessons(),
+      ]);
       if (!mounted) return;
-      final sortedSubjects = subjects.toList()..sort();
       setState(() {
-        _recentAlerts = alerts;
-        _recentLessons = lessons;
-        _subjects = sortedSubjects;
-        _subjectStudentCounts = subjectStudentCounts;
-        if (_selectedSubject != null && !sortedSubjects.contains(_selectedSubject)) {
-          _selectedSubject = null;
-        }
-        _loading = false;
+        _recentAlerts = results[0] as List<TeacherRecentAlert>;
+        _recentLessons = results[1] as List<TeacherRecentLesson>;
+        _loadingFeed = false;
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _loading = false);
+      setState(() => _loadingFeed = false);
     }
+  }
+
+  void _applyClassStats(AppState app) {
+    final subjects = <String>{};
+    final classIdsBySubject = <String, List<int>>{};
+    for (final teacherClass in app.teacherClasses) {
+      final subject = ClassNameUtils.subjectFrom(teacherClass.name);
+      subjects.add(subject);
+      classIdsBySubject.putIfAbsent(subject, () => []).add(teacherClass.id);
+    }
+    final subjectStudentCounts = <String, int>{};
+    for (final entry in classIdsBySubject.entries) {
+      var total = 0;
+      for (final classId in entry.value) {
+        total += app.teacherClassStudentCount(classId);
+      }
+      subjectStudentCounts[entry.key] = total;
+    }
+    final sortedSubjects = subjects.toList()..sort();
+    setState(() {
+      _subjects = sortedSubjects;
+      _subjectStudentCounts = subjectStudentCounts;
+      if (_selectedSubject != null &&
+          !sortedSubjects.contains(_selectedSubject)) {
+        _selectedSubject = null;
+      }
+    });
   }
 
   int _classCountForFilter(AppState app) {
@@ -114,7 +132,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
       currentRoute: AppRoute.teacherDashboard,
       showBottomNav: false,
       body: RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: () => _load(userRefresh: true),
         color: accent,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -164,15 +182,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                     ),
                   ),
                   const SizedBox(height: AppSpacing.lg),
-                  if (_loading)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
-                      child: Center(
-                        child: CircularProgressIndicator(color: Colors.white),
-                      ),
-                    )
-                  else
-                    IntrinsicHeight(
+                  IntrinsicHeight(
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
@@ -210,7 +220,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
               actionLabel: AppStrings.viewAll(lang),
               onAction: () => app.setRoute(AppRoute.teacherAlertHistory),
             ),
-            if (_loading)
+            if (_loadingFeed)
               const Padding(
                 padding: EdgeInsets.all(AppSpacing.lg),
                 child: Center(child: CircularProgressIndicator()),
@@ -248,7 +258,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
               actionLabel: AppStrings.viewAll(lang),
               onAction: () => app.setRoute(AppRoute.teacherMyClasses),
             ),
-            if (_loading)
+            if (_loadingFeed)
               const SizedBox.shrink()
             else if (_recentLessons.isEmpty)
               _EmptySectionCard(

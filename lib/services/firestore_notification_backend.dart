@@ -115,8 +115,12 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
         event.learnerFirebaseUid.trim().isEmpty) {
       return;
     }
-    final docId = '${event.classCode.trim()}_${event.learnerFirebaseUid.trim()}';
+    final classCode =
+        AppRepository.normalizeClassCode(event.classCode);
+    final learnerUid = event.learnerFirebaseUid.trim();
+    final docId = '${classCode}_$learnerUid';
     final payload = event.toFirestoreMap()
+      ..['classCode'] = classCode
       ..['enrolledAt'] = Timestamp.fromDate(event.enrolledAt.toUtc());
     await FirebaseFirestore.instance
         .collection(enrollmentCollectionName)
@@ -134,7 +138,8 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
         learnerFirebaseUid.trim().isEmpty) {
       return;
     }
-    final docId = '${classCode.trim()}_${learnerFirebaseUid.trim()}';
+    final normalized = AppRepository.normalizeClassCode(classCode);
+    final docId = '${normalized}_${learnerFirebaseUid.trim()}';
     await FirebaseFirestore.instance
         .collection(enrollmentCollectionName)
         .doc(docId)
@@ -369,12 +374,20 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   Future<void> removeClassEnrollmentsForClass({required String classCode}) async {
     if (!isAvailable || classCode.trim().isEmpty) return;
     final normalized = AppRepository.normalizeClassCode(classCode);
-    final snapshot = await FirebaseFirestore.instance
-        .collection(enrollmentCollectionName)
-        .where('classCode', isEqualTo: normalized)
-        .get();
-    for (final doc in snapshot.docs) {
-      await doc.reference.delete();
+    final codesToMatch = {
+      normalized,
+      classCode.trim(),
+      classCode.trim().toUpperCase(),
+    };
+    for (final code in codesToMatch) {
+      if (code.isEmpty) continue;
+      final snapshot = await FirebaseFirestore.instance
+          .collection(enrollmentCollectionName)
+          .where('classCode', isEqualTo: code)
+          .get();
+      for (final doc in snapshot.docs) {
+        await doc.reference.delete();
+      }
     }
   }
 
@@ -483,6 +496,53 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
         .collection(userProfileCollectionName)
         .doc(profile.firebaseUid.trim())
         .set(payload, SetOptions(merge: true));
+  }
+
+  @override
+  Future<void> updateLearnerReferencesOnCloud({
+    required String learnerFirebaseUid,
+    required String learnerName,
+    String? learnerProfileCode,
+  }) async {
+    if (!isAvailable || learnerFirebaseUid.trim().isEmpty) return;
+    final uid = learnerFirebaseUid.trim();
+    final name = learnerName.trim();
+    if (name.isEmpty) return;
+
+    try {
+      final linkSnapshot = await FirebaseFirestore.instance
+          .collection(linkCollectionName)
+          .where('learnerFirebaseUid', isEqualTo: uid)
+          .get();
+      for (final doc in linkSnapshot.docs) {
+        final payload = <String, Object?>{
+          'learnerName': name,
+          'updatedAt': FieldValue.serverTimestamp(),
+        };
+        final code = learnerProfileCode?.trim();
+        if (code != null && code.isNotEmpty) {
+          payload['learnerProfileCode'] =
+              AppRepository.normalizeProfileCode(code);
+        }
+        await doc.reference.set(payload, SetOptions(merge: true));
+      }
+
+      final enrollmentSnapshot = await FirebaseFirestore.instance
+          .collection(enrollmentCollectionName)
+          .where('learnerFirebaseUid', isEqualTo: uid)
+          .get();
+      for (final doc in enrollmentSnapshot.docs) {
+        await doc.reference.set(
+          {
+            'learnerName': name,
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+      }
+    } catch (e, st) {
+      debugPrint('updateLearnerReferencesOnCloud failed: $e\n$st');
+    }
   }
 
   @override
@@ -658,6 +718,65 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     } catch (e, st) {
       debugPrint('markParentNotificationRead failed: $e\n$st');
     }
+  }
+
+  @override
+  Stream<List<RemoteClassEnrollment>> watchClassEnrollmentsForLearner(
+    String learnerFirebaseUid,
+  ) {
+    if (!isAvailable || learnerFirebaseUid.trim().isEmpty) {
+      return const Stream.empty();
+    }
+    return FirebaseFirestore.instance
+        .collection(enrollmentCollectionName)
+        .where('learnerFirebaseUid', isEqualTo: learnerFirebaseUid.trim())
+        .snapshots()
+        .map((snapshot) => snapshot.docs.map(_enrollmentFromDocument).toList());
+  }
+
+  @override
+  Stream<List<RemoteClassEnrollment>> watchClassEnrollmentsForTeacher(
+    String teacherFirebaseUid,
+  ) {
+    if (!isAvailable || teacherFirebaseUid.trim().isEmpty) {
+      return const Stream.empty();
+    }
+    return FirebaseFirestore.instance
+        .collection(enrollmentCollectionName)
+        .where('teacherFirebaseUid', isEqualTo: teacherFirebaseUid.trim())
+        .snapshots()
+        .map((snapshot) => snapshot.docs.map(_enrollmentFromDocument).toList());
+  }
+
+  @override
+  Stream<List<RemoteParentChildLink>> watchParentChildLinks(
+    String parentFirebaseUid,
+  ) {
+    if (!isAvailable || parentFirebaseUid.trim().isEmpty) {
+      return const Stream.empty();
+    }
+    return FirebaseFirestore.instance
+        .collection(linkCollectionName)
+        .where('parentFirebaseUid', isEqualTo: parentFirebaseUid.trim())
+        .snapshots()
+        .map(
+          (snapshot) =>
+              snapshot.docs.map(_parentChildLinkFromDocument).toList(),
+        );
+  }
+
+  @override
+  Stream<List<RemoteTeacherClass>> watchTeacherClassesForTeacher(
+    String teacherFirebaseUid,
+  ) {
+    if (!isAvailable || teacherFirebaseUid.trim().isEmpty) {
+      return const Stream.empty();
+    }
+    return FirebaseFirestore.instance
+        .collection(teacherClassCollectionName)
+        .where('teacherFirebaseUid', isEqualTo: teacherFirebaseUid.trim())
+        .snapshots()
+        .map((snapshot) => snapshot.docs.map(_teacherClassFromDocument).toList());
   }
 
   @override

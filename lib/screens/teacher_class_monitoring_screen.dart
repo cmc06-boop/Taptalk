@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -34,47 +36,62 @@ class _TeacherClassMonitoringScreenState
     extends State<TeacherClassMonitoringScreen> {
   List<TeacherClassStudent> _students = [];
   bool _refreshing = false;
+  bool _syncingRoster = false;
 
   @override
   void initState() {
     super.initState();
-    _loadLocal();
+    _loadStudents();
   }
 
-  Future<void> _loadLocal() async {
+  /// Shows cached roster immediately, then merges cloud enrollments and prefetches
+  /// monitoring data without requiring a manual pull-to-refresh.
+  Future<void> _loadStudents({bool userRefresh = false}) async {
     final app = context.read<AppState>();
+    if (userRefresh) {
+      if (_refreshing) return;
+      setState(() => _refreshing = true);
+    } else if (mounted) {
+      setState(() => _syncingRoster = true);
+    }
     try {
-      final students = await app.getTeacherClassStudentsForClass(
+      final cached = await app.getTeacherClassStudentsForClass(
+        widget.classId,
+        cloudSyncInBackground: true,
+      );
+      if (mounted) {
+        setState(() => _students = cached);
+      }
+
+      final synced = await app.getTeacherClassStudentsForClass(
         widget.classId,
         cloudSyncInBackground: false,
       );
       if (!mounted) return;
-      setState(() => _students = students);
+      setState(() => _students = synced);
+
+      unawaited(_prefetchMonitoring(synced));
     } catch (e, st) {
       debugPrint('Teacher class roster load failed: $e\n$st');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _refreshing = false;
+          _syncingRoster = false;
+        });
+      }
     }
   }
 
-  Future<void> _onRefresh() async {
-    if (_refreshing) return;
-    setState(() => _refreshing = true);
+  Future<void> _prefetchMonitoring(List<TeacherClassStudent> students) async {
     final app = context.read<AppState>();
-    try {
-      final students = await app.getTeacherClassStudentsForClass(
-        widget.classId,
-        cloudSyncInBackground: false,
-      );
+    for (final student in students) {
       if (!mounted) return;
-      setState(() => _students = students);
-      for (final student in students) {
-        await app.refreshChildMonitoringData(student.learnerId);
-      }
-    } catch (e, st) {
-      debugPrint('Teacher class roster refresh failed: $e\n$st');
-    } finally {
-      if (mounted) setState(() => _refreshing = false);
+      await app.refreshChildMonitoringData(student.learnerId);
     }
   }
+
+  Future<void> _onRefresh() => _loadStudents(userRefresh: true);
 
   void _openMonitoring(TeacherClassStudent student) {
     Navigator.of(context).push(
@@ -311,7 +328,12 @@ class _TeacherClassMonitoringScreenState
           AppSpacing.xxl,
         ),
         children: [
-          if (_students.isEmpty)
+          if (_syncingRoster && _students.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(AppSpacing.xxl),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_students.isEmpty)
             Padding(
               padding: const EdgeInsets.all(AppSpacing.xxl),
               child: Center(

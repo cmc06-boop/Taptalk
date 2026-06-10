@@ -442,6 +442,13 @@ abstract class CloudNotificationBackend {
 
   Future<RemoteUserProfile?> getUserProfile(String firebaseUid);
 
+  /// Updates learner name on all parent-child links and class enrollments.
+  Future<void> updateLearnerReferencesOnCloud({
+    required String learnerFirebaseUid,
+    required String learnerName,
+    String? learnerProfileCode,
+  });
+
   Future<void> upsertLearnerEmergencyContacts({
     required int learnerUserId,
     required String learnerName,
@@ -474,6 +481,22 @@ abstract class CloudNotificationBackend {
     required int parentUserId,
     required String parentFirebaseUid,
   });
+
+  Stream<List<RemoteClassEnrollment>> watchClassEnrollmentsForLearner(
+    String learnerFirebaseUid,
+  );
+
+  Stream<List<RemoteClassEnrollment>> watchClassEnrollmentsForTeacher(
+    String teacherFirebaseUid,
+  );
+
+  Stream<List<RemoteParentChildLink>> watchParentChildLinks(
+    String parentFirebaseUid,
+  );
+
+  Stream<List<RemoteTeacherClass>> watchTeacherClassesForTeacher(
+    String teacherFirebaseUid,
+  );
 
   Future<void> markParentNotificationRead(String remoteId);
 
@@ -593,6 +616,13 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
   Future<RemoteUserProfile?> getUserProfile(String firebaseUid) async => null;
 
   @override
+  Future<void> updateLearnerReferencesOnCloud({
+    required String learnerFirebaseUid,
+    required String learnerName,
+    String? learnerProfileCode,
+  }) async {}
+
+  @override
   Future<void> upsertLearnerEmergencyContacts({
     required int learnerUserId,
     required String learnerName,
@@ -636,6 +666,30 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
     required int parentUserId,
     required String parentFirebaseUid,
   }) =>
+      const Stream.empty();
+
+  @override
+  Stream<List<RemoteClassEnrollment>> watchClassEnrollmentsForLearner(
+    String learnerFirebaseUid,
+  ) =>
+      const Stream.empty();
+
+  @override
+  Stream<List<RemoteClassEnrollment>> watchClassEnrollmentsForTeacher(
+    String teacherFirebaseUid,
+  ) =>
+      const Stream.empty();
+
+  @override
+  Stream<List<RemoteParentChildLink>> watchParentChildLinks(
+    String parentFirebaseUid,
+  ) =>
+      const Stream.empty();
+
+  @override
+  Stream<List<RemoteTeacherClass>> watchTeacherClassesForTeacher(
+    String teacherFirebaseUid,
+  ) =>
       const Stream.empty();
 
   @override

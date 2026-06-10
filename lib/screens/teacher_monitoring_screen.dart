@@ -27,7 +27,8 @@ class _TeacherMonitoringScreenState extends State<TeacherMonitoringScreen> {
 
   Future<void> _loadLocal() async {
     final app = context.read<AppState>();
-    await app.refreshTeacherClasses(cloudSyncInBackground: false);
+    // Show cached classes/counts immediately; cloud merge updates via notifyListeners.
+    await app.refreshTeacherClasses(cloudSyncInBackground: true);
     if (mounted) setState(() {});
   }
 

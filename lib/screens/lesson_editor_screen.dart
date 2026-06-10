@@ -32,7 +32,7 @@ class LessonEditorScreen extends StatefulWidget {
 
 class _LessonEditorScreenState extends State<LessonEditorScreen> {
   List<LessonPhrase> _phrases = [];
-  bool _loading = true;
+  bool _loading = false;
   final _composerController = PhraseComposerPanelController();
 
   @override
@@ -42,7 +42,7 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    if (_phrases.isEmpty) setState(() => _loading = true);
     final phrases =
         await context.read<AppState>().getLessonPhrases(widget.lessonId);
     if (!mounted) return;

@@ -20,8 +20,10 @@ class TeacherMyClassesScreen extends StatefulWidget {
 }
 
 class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
-  Future<void> _refresh() =>
-      context.read<AppState>().refreshTeacherClasses();
+  Future<void> _refresh({bool forceCloud = false}) =>
+      context.read<AppState>().refreshTeacherClasses(
+            cloudSyncInBackground: !forceCloud,
+          );
 
   Future<void> _showCreateDialog() async {
     final lang = context.read<AppState>().language;
@@ -135,7 +137,7 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
       body: Stack(
         children: [
           RefreshIndicator(
-            onRefresh: _refresh,
+            onRefresh: () => _refresh(forceCloud: true),
             child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -52,7 +54,11 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshFromCloud());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _loadLocalStats(syncCloud: false);
+      if (!mounted) return;
+      unawaited(_refreshFromCloud());
+    });
   }
 
   Future<void> _loadLocalStats({bool syncCloud = true}) async {
