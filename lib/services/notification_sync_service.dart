@@ -393,6 +393,48 @@ class NotificationSyncService {
     return _cloud.getUserProfile(firebaseUid);
   }
 
+  /// Restores account metadata on a new device after Firebase sign-in.
+  Future<RemoteUserProfile> resolveUserProfileForLogin({
+    required String firebaseUid,
+    required String email,
+  }) async {
+    final normalizedUid = firebaseUid.trim();
+    final normalizedEmail = email.trim().toLowerCase();
+    final existing = await getUserProfileFromCloud(normalizedUid);
+    if (existing != null) return existing;
+
+    if (_cloud.isAvailable) {
+      final teacherClasses =
+          await _cloud.getTeacherClassesForTeacher(normalizedUid);
+      if (teacherClasses.isNotEmpty) {
+        return RemoteUserProfile(
+          firebaseUid: normalizedUid,
+          email: normalizedEmail,
+          fullName: normalizedEmail.split('@').first,
+          role: 'teacher',
+        );
+      }
+
+      final parentLinks =
+          await _cloud.getParentChildLinksForParent(normalizedUid);
+      if (parentLinks.isNotEmpty) {
+        return RemoteUserProfile(
+          firebaseUid: normalizedUid,
+          email: normalizedEmail,
+          fullName: normalizedEmail.split('@').first,
+          role: 'parent',
+        );
+      }
+    }
+
+    return RemoteUserProfile(
+      firebaseUid: normalizedUid,
+      email: normalizedEmail,
+      fullName: normalizedEmail.split('@').first,
+      role: 'learner',
+    );
+  }
+
   Future<void> syncLearnerEmergencyContacts({
     required int learnerUserId,
     required String learnerName,

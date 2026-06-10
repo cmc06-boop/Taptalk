@@ -1,7 +1,8 @@
 /// TapTalk cloud usage policy.
 ///
-/// Online-only: sign up, log in, forgot password, push notifications,
-/// and parent/teacher monitoring (learner activity sync).
+/// Online-only: sign up, log in, forgot password, user profile metadata
+/// (for cross-device restore), push notifications, and parent/teacher
+/// monitoring (learner activity sync).
 /// Most other app data (phrases, classes, etc.) stays in local SQLite.
 class CloudScope {
   CloudScope._();

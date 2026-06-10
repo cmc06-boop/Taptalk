@@ -419,8 +419,25 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
           .where('profileCode', isEqualTo: normalized)
           .limit(1)
           .get();
-      if (snapshot.docs.isEmpty) return null;
-      return _learnerProfileFromDocument(snapshot.docs.first);
+      if (snapshot.docs.isNotEmpty) {
+        return _learnerProfileFromDocument(snapshot.docs.first);
+      }
+
+      final userSnapshot = await FirebaseFirestore.instance
+          .collection(userProfileCollectionName)
+          .where('profileCode', isEqualTo: normalized)
+          .where('role', isEqualTo: 'learner')
+          .limit(1)
+          .get();
+      if (userSnapshot.docs.isEmpty) return null;
+      final doc = userSnapshot.docs.first;
+      final data = doc.data();
+      return RemoteLearnerProfile(
+        learnerFirebaseUid: doc.id,
+        learnerName: (data['fullName'] as String?) ?? '',
+        profileCode: normalized,
+        learnerUserId: 0,
+      );
     } catch (e, st) {
       debugPrint('findLearnerByProfileCode failed: $e\n$st');
       return null;

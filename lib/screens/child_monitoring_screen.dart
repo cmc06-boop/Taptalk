@@ -55,7 +55,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _refreshFromCloud());
   }
 
-  Future<void> _loadLocalStats() async {
+  Future<void> _loadLocalStats({bool syncCloud = true}) async {
     final app = context.read<AppState>();
     try {
       final trackingSince = await app.getLearnerMonitoringSince(
@@ -69,11 +69,13 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
           learnerUserId: widget.learner.learnerId,
           period: _period,
           month: month,
+          syncCloud: syncCloud,
         ),
         app.getChildSessionSummary(
           learnerUserId: widget.learner.learnerId,
           period: _period,
           month: month,
+          syncCloud: syncCloud,
         ),
         app.getChildVocabularyGrowth(
           learnerUserId: widget.learner.learnerId,
@@ -104,7 +106,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
       await context
           .read<AppState>()
           .refreshChildMonitoringData(widget.learner.learnerId);
-      await _loadLocalStats();
+      await _loadLocalStats(syncCloud: false);
     } catch (e, st) {
       debugPrint('Monitoring cloud refresh failed: $e\n$st');
     } finally {

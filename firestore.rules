@@ -71,7 +71,10 @@ service cloud.firestore {
     }
 
     match /user_profiles/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && (
+        request.auth.uid == userId
+        || resource.data.role == 'learner'
+      );
       allow create, update: if request.auth != null && request.auth.uid == userId;
       allow delete: if false;
     }

@@ -571,8 +571,40 @@ class AppRepository {
     );
   }
 
+  Future<bool> hasStarterPersonalData(int userId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'phrases',
+      columns: ['id'],
+      where: 'user_id = ? AND is_builtin = 1',
+      whereArgs: [userId],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
+  Future<void> dedupeBuiltinPhrases(int userId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'phrases',
+      columns: ['id', 'phrase_text', 'category_key'],
+      where: 'user_id = ? AND is_builtin = 1',
+      whereArgs: [userId],
+      orderBy: 'id ASC',
+    );
+    final seen = <String>{};
+    for (final row in rows) {
+      final key = '${row['phrase_text']}|${row['category_key']}';
+      if (!seen.add(key)) {
+        await db.delete('phrases', where: 'id = ?', whereArgs: [row['id']]);
+      }
+    }
+  }
+
   Future<void> seedLearnerData(int userId) async {
     final db = await _dbHelper.database;
+    await dedupeBuiltinPhrases(userId);
+
     final defaults = [
       ('feelings', 'Feelings', 'feelings'),
       ('food', 'Food', 'food'),
@@ -589,6 +621,8 @@ class AppRepository {
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
     }
 
+    if (await hasStarterPersonalData(userId)) return;
+
     final builtinPhrases = [
       ('I am happy', 'feelings', _builtinImageUrls['I am happy']!),
       ('I feel sad', 'feelings', _builtinImageUrls['I feel sad']!),
@@ -598,6 +632,15 @@ class AppRepository {
       ('I want to see a dog', 'animals', _builtinImageUrls['I want to see a dog']!),
     ];
     for (final (text, cat, img) in builtinPhrases) {
+      final existing = await db.query(
+        'phrases',
+        columns: ['id'],
+        where:
+            'user_id = ? AND phrase_text = ? AND category_key = ? AND is_builtin = 1',
+        whereArgs: [userId, text, cat],
+        limit: 1,
+      );
+      if (existing.isNotEmpty) continue;
       await db.insert(
         'phrases',
         {
@@ -608,7 +651,6 @@ class AppRepository {
           'is_builtin': 1,
           'is_active': 1,
         },
-        conflictAlgorithm: ConflictAlgorithm.ignore,
       );
     }
   }
@@ -1099,11 +1141,13 @@ class AppRepository {
           trimmedClass.isNotEmpty &&
           trimmedLesson != null &&
           trimmedLesson.isNotEmpty;
-      final effectiveCategoryKey = resolveHistoryCategoryKey(
-        categoryKey: activity.categoryKey,
-        className: activity.className,
-        lessonTitle: activity.lessonTitle,
-      );
+      final effectiveCategoryKey = hasLessonContext
+          ? resolveHistoryCategoryKey(
+              categoryKey: activity.categoryKey,
+              className: activity.className,
+              lessonTitle: activity.lessonTitle,
+            )
+          : normalizeCategoryKey(activity.categoryKey);
       final createdAtMs = activity.createdAt.millisecondsSinceEpoch;
       final syncKey = remoteActivitySyncKey(
         createdAt: activity.createdAt,
@@ -1254,10 +1298,11 @@ class AppRepository {
     required int learnerUserId,
     required DateTime rangeStart,
     required DateTime rangeEnd,
+    bool personalOnly = false,
   }) async {
     final db = await _dbHelper.database;
     final rows = await db.rawQuery('''
-      SELECT created_at
+      SELECT created_at, category_key, class_name, lesson_title
       FROM history
       WHERE user_id = ?
         AND created_at >= ?
@@ -1268,13 +1313,21 @@ class AppRepository {
       rangeStart.millisecondsSinceEpoch,
       rangeEnd.millisecondsSinceEpoch,
     ]);
-    return rows
-        .map(
-          (row) => DateTime.fromMillisecondsSinceEpoch(
-            row['created_at'] as int,
-          ),
-        )
-        .toList();
+    final events = <DateTime>[];
+    for (final row in rows) {
+      if (personalOnly) {
+        final categoryKey = monitoringCategoryKey(
+          categoryKey: row['category_key'] as String,
+          className: row['class_name'] as String?,
+          lessonTitle: row['lesson_title'] as String?,
+        );
+        if (!isPersonalCategoryKey(categoryKey)) continue;
+      }
+      events.add(
+        DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int),
+      );
+    }
+    return events;
   }
 
   Future<List<PhraseFirstUse>> getPhraseFirstUses({

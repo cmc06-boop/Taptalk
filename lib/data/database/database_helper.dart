@@ -28,7 +28,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 16,
+      version: 17,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE users (
@@ -201,8 +201,33 @@ class DatabaseHelper {
             'ALTER TABLE phrases ADD COLUMN created_at INTEGER',
           );
         }
+        if (oldVersion < 17) {
+          await _dedupeAllBuiltinPhrases(db);
+          await db.execute(
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_phrases_builtin_unique '
+            'ON phrases(user_id, phrase_text, category_key) '
+            'WHERE is_builtin = 1',
+          );
+        }
       },
     );
+  }
+
+  Future<void> _dedupeAllBuiltinPhrases(Database db) async {
+    final rows = await db.query(
+      'phrases',
+      columns: ['id', 'user_id', 'phrase_text', 'category_key'],
+      where: 'is_builtin = 1',
+      orderBy: 'id ASC',
+    );
+    final seen = <String>{};
+    for (final row in rows) {
+      final key =
+          '${row['user_id']}|${row['phrase_text']}|${row['category_key']}';
+      if (!seen.add(key)) {
+        await db.delete('phrases', where: 'id = ?', whereArgs: [row['id']]);
+      }
+    }
   }
 
   Future<void> _backfillLearnerProfileCodes(Database db) async {

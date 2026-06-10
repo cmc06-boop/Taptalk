@@ -385,6 +385,9 @@ class AppState extends ChangeNotifier {
       await _syncCloudDataAfterFirebaseReady();
     }
     if (_user!.isParent || _user!.isTeacher) {
+      if (_user!.isTeacher) {
+        await _syncTeacherClassesFromCloud();
+      }
       unawaited(_prefetchMonitoredLearnerCaches());
     }
   }
@@ -437,12 +440,7 @@ class AppState extends ChangeNotifier {
 
   Future<bool> _isLanguageOnboardingDone(int userId) async {
     final prefs = await SharedPreferences.getInstance();
-    final key = _languageOnboardingKey(userId);
-    if (!prefs.containsKey(key)) {
-      await prefs.setBool(key, true);
-      return true;
-    }
-    return prefs.getBool(key) ?? false;
+    return prefs.getBool(_languageOnboardingKey(userId)) ?? false;
   }
 
   Future<void> _setLanguageOnboardingDone(int userId, bool done) async {
@@ -499,6 +497,9 @@ class AppState extends ChangeNotifier {
   Future<void> _loadLearnerData({bool cloudSyncInBackground = false}) async {
     if (_user == null) return;
     final userId = _user!.id;
+    if (_user!.isLearner || _user!.isParent || _user!.isTeacher) {
+      await _repo.dedupeBuiltinPhrases(userId);
+    }
     final settings = await _repo.getUserSettings(_user!.id);
     _ttsSpeed = TtsSpeedOptions.snap(
       (settings['tts_speed'] as num?)?.toDouble() ?? TtsSpeedOptions.defaultSpeed,
@@ -566,8 +567,6 @@ class AppState extends ChangeNotifier {
           );
         }
       }
-      if (!CloudScope.appData) return;
-
       await _syncUserProfileToCloud();
     } catch (e, st) {
       debugPrint('Learner cloud sync failed: $e\n$st');
@@ -575,8 +574,10 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _syncUserProfileToCloud() async {
-    if (!CloudScope.appData) return;
-    if (_user == null || !_notificationSync.isCloudAvailable) return;
+    if (_user == null) return;
+    await FirebaseService.instance.initialize();
+    await _notificationSync.initialize();
+    if (!_notificationSync.isCloudAvailable) return;
     final firebaseUid =
         _user!.firebaseUid ?? FirebaseService.instance.currentUid;
     if (firebaseUid == null || firebaseUid.isEmpty) return;
@@ -598,6 +599,16 @@ class AppState extends ChangeNotifier {
         profileCode: profileCode,
       ),
     );
+
+    if (_user!.isLearner && CloudScope.syncMonitoring) {
+      await _notificationSync.syncLearnerEmergencyContacts(
+        learnerUserId: _user!.id,
+        learnerName: _user!.fullName,
+        learnerFirebaseUid: firebaseUid,
+        contacts: _emergencyContacts,
+        profileCode: profileCode,
+      );
+    }
   }
 
   Future<void> _refreshPersonalBoard() async {
@@ -628,7 +639,13 @@ class AppState extends ChangeNotifier {
         (!_user!.isParent && !_user!.isLearner && !_user!.isTeacher)) {
       return;
     }
-    if (_categories.isNotEmpty) return;
+    await _repo.dedupeBuiltinPhrases(_user!.id);
+    if (await _repo.hasStarterPersonalData(_user!.id)) {
+      if (_categories.isEmpty) {
+        await _refreshLearnerCollections();
+      }
+      return;
+    }
     await _repo.seedLearnerData(_user!.id);
     await _refreshLearnerCollections();
   }
@@ -793,17 +810,16 @@ class AppState extends ChangeNotifier {
         );
         if (uid != null) {
           final cloudProfile =
-              await _notificationSync.getUserProfileFromCloud(uid);
-          if (cloudProfile != null) {
-            user = await _repo.provisionLocalUserFromCloud(
-              email: normalizedEmail,
-              password: password,
-              firebaseUid: uid,
-              profile: cloudProfile,
-            );
-          } else {
-            return AppStrings.accountNotOnThisDevice(_language);
-          }
+              await _notificationSync.resolveUserProfileForLogin(
+            firebaseUid: uid,
+            email: normalizedEmail,
+          );
+          user = await _repo.provisionLocalUserFromCloud(
+            email: normalizedEmail,
+            password: password,
+            firebaseUid: uid,
+            profile: cloudProfile,
+          );
         }
       }
       if (user == null) {
@@ -1273,6 +1289,9 @@ class AppState extends ChangeNotifier {
       className: className,
       lessonTitle: lessonTitle,
     );
+    final cloudCategoryKey = AppRepository.isLessonCategoryKey(storedCategoryKey)
+        ? storedCategoryKey
+        : AppRepository.normalizeCategoryKey(baseCategoryKey);
     final now = DateTime.now();
     final historyId = await _repo.addHistory(
       userId: _user!.id,
@@ -1289,7 +1308,7 @@ class AppState extends ChangeNotifier {
         _pushHistoryItemToCloud(
           historyId: historyId,
           phraseText: stored,
-          categoryKey: storedCategoryKey,
+          categoryKey: cloudCategoryKey,
           createdAt: now,
           className: className,
           lessonTitle: lessonTitle,
@@ -1370,7 +1389,14 @@ class AppState extends ChangeNotifier {
       final pending = await _repo.getUnsyncedHistory(_user!.id);
       for (final item in pending) {
         if (await NetworkStatus.isOffline()) break;
-        final categoryKey = AppRepository.normalizeCategoryKey(item.categoryKey);
+        final storedCategoryKey = AppRepository.resolveHistoryCategoryKey(
+          categoryKey: item.categoryKey,
+          className: item.className,
+          lessonTitle: item.lessonTitle,
+        );
+        final categoryKey = AppRepository.isLessonCategoryKey(storedCategoryKey)
+            ? storedCategoryKey
+            : AppRepository.normalizeCategoryKey(item.categoryKey);
         final syncKey = AppRepository.syncKeyForHistoryItem(item);
         final pushed = await _notificationSync.pushLearnerActivity(
           LearnerActivityCloudEvent(
@@ -1424,6 +1450,9 @@ class AppState extends ChangeNotifier {
       if (_user!.isParent && CloudScope.notifications) {
         await _syncCloudDataAfterFirebaseReady();
       }
+      if (_user!.isTeacher) {
+        await _syncTeacherClassesFromCloud();
+      }
       await _prefetchMonitoredLearnerCaches();
     }
   }
@@ -1434,12 +1463,16 @@ class AppState extends ChangeNotifier {
       return;
     }
     if (_user!.isParent) {
+      if (_linkedChildren.isEmpty) {
+        await _loadLinkedChildren(syncCloudInBackground: false);
+      }
       for (final child in _linkedChildren) {
         await refreshChildMonitoringData(child.learnerId);
       }
       return;
     }
     if (_user!.isTeacher) {
+      await _syncTeacherClassesFromCloud();
       final students = await _repo.getTeacherClassStudents(_user!.id);
       final seen = <int>{};
       for (final student in students) {
@@ -2283,23 +2316,18 @@ class AppState extends ChangeNotifier {
 
   Future<List<TeacherClassStudent>> getTeacherClassStudents() async {
     if (_user == null || !_user!.isTeacher) return [];
-    final local = await _repo.getTeacherClassStudents(_user!.id);
-    _scheduleTeacherEnrollmentCloudSync(local);
-    if (local.isNotEmpty || !CloudScope.appData) return local;
-
-    final teacherFirebaseUid =
-        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
-    if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) {
-      return local;
+    if (CloudScope.syncMonitoring &&
+        !await NetworkStatus.isOffline() &&
+        !NetworkStatus.isCloudBlocked) {
+      await FirebaseService.instance.initialize();
+      await _notificationSync.initialize();
+      if (_notificationSync.isCloudAvailable) {
+        await _syncTeacherClassesFromCloud();
+      }
     }
-    try {
-      return await _notificationSync
-          .getTeacherClassStudentsFromCloud(teacherFirebaseUid)
-          .timeout(const Duration(seconds: 12));
-    } catch (e, st) {
-      debugPrint('Cloud teacher roster fetch failed: $e\n$st');
-      return local;
-    }
+    final students = await _repo.getTeacherClassStudents(_user!.id);
+    _scheduleTeacherEnrollmentCloudSync(students);
+    return students;
   }
 
   /// Background Firestore sync for SMS authorization (does not block UI).
@@ -2878,16 +2906,20 @@ class AppState extends ChangeNotifier {
     required int learnerUserId,
     required ChildUsagePeriod period,
     DateTime? month,
+    bool syncCloud = true,
   }) async {
+    if (syncCloud &&
+        CloudScope.syncMonitoring &&
+        !await NetworkStatus.isOffline() &&
+        !NetworkStatus.isCloudBlocked) {
+      await _pullLearnerMonitoringCacheFromCloud(learnerUserId);
+    }
     final range = _dateRangeForPeriod(period, month: month);
-    final localStats = await _repo.getPhraseUsageStats(
+    return _repo.getPhraseUsageStats(
       learnerUserId: learnerUserId,
       rangeStart: range.$1,
       rangeEnd: range.$2,
     );
-    return localStats
-        .where((s) => AppRepository.isPersonalCategoryKey(s.categoryKey))
-        .toList();
   }
 
   Future<VocabularyGrowthSummary> getChildVocabularyGrowth({
@@ -3013,12 +3045,20 @@ class AppState extends ChangeNotifier {
     required int learnerUserId,
     required ChildUsagePeriod period,
     DateTime? month,
+    bool syncCloud = true,
   }) async {
+    if (syncCloud &&
+        CloudScope.syncMonitoring &&
+        !await NetworkStatus.isOffline() &&
+        !NetworkStatus.isCloudBlocked) {
+      await _pullLearnerMonitoringCacheFromCloud(learnerUserId);
+    }
     final range = _dateRangeForPeriod(period, month: month);
     final allEvents = await _repo.getHistoryTimestamps(
       learnerUserId: learnerUserId,
       rangeStart: range.$1,
       rangeEnd: range.$2,
+      personalOnly: true,
     );
     final locale =
         _language == AppLanguage.filipino ? 'fil_PH' : 'en_US';
@@ -3040,12 +3080,12 @@ class AppState extends ChangeNotifier {
     switch (period) {
       case ChildUsagePeriod.today:
         final start = DateTime(now.year, now.month, now.day);
-        return (start, now.add(const Duration(milliseconds: 1)));
+        return (start, start.add(const Duration(days: 1)));
       case ChildUsagePeriod.thisWeek:
         final weekday = now.weekday;
         final start = DateTime(now.year, now.month, now.day)
             .subtract(Duration(days: weekday - 1));
-        return (start, now.add(const Duration(milliseconds: 1)));
+        return (start, start.add(const Duration(days: 7)));
       case ChildUsagePeriod.month:
         final m = month ?? DateTime(now.year, now.month);
         final start = DateTime(m.year, m.month);
