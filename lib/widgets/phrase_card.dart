@@ -53,6 +53,7 @@ class PhraseCard extends StatelessWidget {
     final phraseText = displayText ??
         app.localizedPhraseText(phrase);
     final canEdit = showEdit && !phrase.isBuiltin && onEdit != null;
+    final canDelete = showDelete && !phrase.isBuiltin;
     final isSpeakingThisPhrase = app.isSpeaking &&
         app.speakingText.trim() == phraseText.trim();
     final phraseStyle = GoogleFonts.poppins(
@@ -211,7 +212,7 @@ class PhraseCard extends StatelessWidget {
                                     ),
                                   ),
                           ),
-                          if (showDelete) ...[
+                          if (canDelete) ...[
                             SizedBox(width: gap),
                             _PhraseActionButton(
                               icon: Icons.delete_outline_rounded,

@@ -10,7 +10,6 @@ import '../core/theme/theme_tokens.dart';
 import '../data/models/history_model.dart';
 import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
-import '../widgets/panel_card.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -133,12 +132,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
         onRefresh: _refresh,
         color: theme.bgAccent,
         child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-            child: Container(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            0,
+            AppSpacing.lg,
+            AppSpacing.xxl,
+          ),
+          children: [
+            Container(
               width: double.infinity,
               padding: const EdgeInsets.all(AppSpacing.md),
               decoration: BoxDecoration(
@@ -168,30 +170,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 ],
               ),
             ),
-          ),
-          if (_items.isEmpty)
-            SizedBox(
-              width: double.infinity,
-              height: MediaQuery.sizeOf(context).height * 0.38,
-              child: Center(
-                child: Text(
-                  AppStrings.emptyHistory(lang),
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.poppins(
-                    color: theme.textMain.withValues(alpha: 0.7),
+            if (_items.isEmpty)
+              SizedBox(
+                width: double.infinity,
+                height: MediaQuery.sizeOf(context).height * 0.38,
+                child: Center(
+                  child: Text(
+                    AppStrings.emptyHistory(lang),
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.poppins(
+                      color: theme.textMain.withValues(alpha: 0.7),
+                    ),
                   ),
                 ),
-              ),
-            )
-          else ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.sm,
-                AppSpacing.lg,
-                AppSpacing.xs,
-              ),
-              child: Align(
+              )
+            else ...[
+              const SizedBox(height: AppSpacing.md),
+              Align(
                 alignment: Alignment.centerRight,
                 child: TextButton(
                   onPressed: () => _clearAll(lang),
@@ -211,19 +206,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   ),
                 ),
               ),
-            ),
-            for (final item in _items)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.lg,
-                  0,
-                  AppSpacing.lg,
-                  AppSpacing.sm,
+              const SizedBox(height: AppSpacing.xs),
+              for (final item in _items)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  child: _buildCard(item, lang),
                 ),
-                child: _buildCard(item, lang),
-              ),
+            ],
           ],
-        ],
         ),
       ),
     );
@@ -318,7 +308,26 @@ class _HistoryCardState extends State<_HistoryCard>
           opacity: _fadeOut,
           child: SlideTransition(
             position: _slideOut,
-            child: PanelCard(
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.md,
+              ),
+              decoration: BoxDecoration(
+                color: theme.bgMid,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: theme.bgAccent.withValues(alpha: 0.22),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: theme.bgAccent.withValues(alpha: 0.12),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -327,8 +336,7 @@ class _HistoryCardState extends State<_HistoryCard>
                       color: Colors.transparent,
                       child: InkWell(
                         onTap: _deleting ? null : widget.onSpeak,
-                        borderRadius:
-                            BorderRadius.circular(AppSpacing.radiusLg),
+                        borderRadius: BorderRadius.circular(10),
                         child: Padding(
                           padding:
                               const EdgeInsets.only(right: AppSpacing.xs),
@@ -427,3 +435,4 @@ class _HistoryCardState extends State<_HistoryCard>
     );
   }
 }
+

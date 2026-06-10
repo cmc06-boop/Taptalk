@@ -32,6 +32,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _undoStack = <String>[];
   final SttService _stt = SttService();
   bool _listening = false;
+  String _micSessionPrefix = '';
   String? _attachedImagePath;
 
   @override
@@ -53,24 +54,27 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  void _syncMicListening() {
+    if (!mounted) return;
+    final active = _stt.isListening;
+    if (_listening != active) {
+      setState(() => _listening = active);
+    }
+  }
+
   Future<void> _toggleMic() async {
     final app = context.read<AppState>();
-    if (_listening) {
+    if (_listening || _stt.isListening) {
       await _stt.stop();
-      setState(() => _listening = false);
+      _syncMicListening();
       return;
     }
 
     final ready = await _stt.initialize(
-      onStatus: (_) {
-        if (!mounted) return;
-        if (!_stt.isListening) {
-          setState(() => _listening = false);
-        }
-      },
+      onStatus: (_) => _syncMicListening(),
       onError: (error) {
+        _syncMicListening();
         if (!mounted) return;
-        setState(() => _listening = false);
         if (error.permanent) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(AppStrings.speechNotAvailable(app.language))),
@@ -87,18 +91,26 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    final locale = await _stt.resolveLocale(app.language);
+    _micSessionPrefix = _textController.text;
+    if (_micSessionPrefix.isNotEmpty && !_micSessionPrefix.endsWith(' ')) {
+      _micSessionPrefix = '$_micSessionPrefix ';
+    }
+
     setState(() => _listening = true);
+
+    final locale = await _stt.resolveLocale(app.language);
     final started = await _stt.startListening(
       localeId: locale,
       onResult: (words, isFinal) {
-        if (!isFinal || words.trim().isEmpty) return;
-        final current = _textController.text.trim();
-        _textController.text = current.isEmpty ? words.trim() : '$current ${words.trim()}';
+        if (words.trim().isEmpty) return;
+        if (!mounted) return;
+        setState(() {
+          _textController.text = '$_micSessionPrefix${words.trim()}';
+        });
       },
     );
+    _syncMicListening();
     if (!started && mounted) {
-      setState(() => _listening = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(AppStrings.speechNotAvailable(app.language))),
       );

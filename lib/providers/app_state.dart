@@ -100,6 +100,11 @@ class AppState extends ChangeNotifier {
   int _readAlongWordIndex = 0;
   int _ttsGeneration = 0;
   int? _currentSpeakGeneration;
+  bool _speechPaused = false;
+  String _pausedSpeechText = '';
+  int _resumeWordIndex = 0;
+  int _speechResumeCharOffset = 0;
+  int _speechHighlightOffset = 0;
   List<String> _emergencyContacts = [];
   String _profileCode = '';
 
@@ -135,7 +140,8 @@ class AppState extends ChangeNotifier {
 
   /// Read-along highlight for a composer field only when it matches [spokenText].
   (int start, int end) composerHighlightRange(String composerText) {
-    if (!_isSpeaking || _speakingText.trim() != composerText.trim()) {
+    final active = _isSpeaking || _speechPaused;
+    if (!active || _speakingText.trim() != composerText.trim()) {
       return (-1, -1);
     }
     return (_spokenWordStart, _spokenWordEnd);
@@ -227,19 +233,18 @@ class AppState extends ChangeNotifier {
     tts.onStart = () {
       if (!_isActiveSpeakGeneration()) return;
       _isSpeaking = true;
-      _startReadAlongFallback();
       notifyListeners();
     };
     tts.onProgress = (text, start, end, word) {
       if (!_isActiveSpeakGeneration()) return;
       _stopReadAlongFallback();
-      _speakingText = text;
-      _spokenWordStart = start;
-      _spokenWordEnd = end;
+      _spokenWordStart = start + _speechHighlightOffset;
+      _spokenWordEnd = end + _speechHighlightOffset;
       notifyListeners();
     };
     tts.onComplete = () {
       if (!_isActiveSpeakGeneration()) return;
+      if (_speechPaused) return;
       _stopReadAlongFallback();
       _isSpeaking = false;
       _spokenWordStart = -1;
@@ -248,6 +253,7 @@ class AppState extends ChangeNotifier {
     };
     tts.onError = (_) {
       if (!_isActiveSpeakGeneration()) return;
+      if (_speechPaused) return;
       _stopReadAlongFallback();
       _isSpeaking = false;
       _spokenWordStart = -1;
@@ -261,13 +267,24 @@ class AppState extends ChangeNotifier {
     return matches.map((m) => (m.start, m.end)).toList();
   }
 
-  void _startReadAlongFallback() {
+  int _wordIndexAtOffset(String text, int offset) {
+    if (offset < 0) return 0;
+    final ranges = _wordRanges(text);
+    for (var i = 0; i < ranges.length; i++) {
+      final (start, end) = ranges[i];
+      if (offset < end) return i;
+      if (offset == end && i + 1 < ranges.length) return i + 1;
+    }
+    return ranges.isEmpty ? 0 : ranges.length - 1;
+  }
+
+  void _startReadAlongFallback({int? fromWordIndex}) {
     _stopReadAlongFallback();
     final text = _speakingText.trim();
     if (text.isEmpty) return;
     final ranges = _wordRanges(_speakingText);
     if (ranges.isEmpty) return;
-    _readAlongWordIndex = 0;
+    _readAlongWordIndex = fromWordIndex ?? 0;
     final tick = Duration(
       milliseconds: (360 / _ttsSpeed).clamp(180, 700).round(),
     );
@@ -298,6 +315,11 @@ class AppState extends ChangeNotifier {
   void _resetSpeechTracking() {
     _stopReadAlongFallback();
     _isSpeaking = false;
+    _speechPaused = false;
+    _pausedSpeechText = '';
+    _resumeWordIndex = 0;
+    _speechResumeCharOffset = 0;
+    _speechHighlightOffset = 0;
     _speakingText = '';
     _spokenWordStart = -1;
     _spokenWordEnd = -1;
@@ -3500,11 +3522,6 @@ class AppState extends ChangeNotifier {
     String? lessonTitle,
   }) async {
     final catKey = categoryKey ?? _selectedCategoryKey;
-    final gen = ++_ttsGeneration;
-    _currentSpeakGeneration = null;
-    await tts.stop();
-    _currentSpeakGeneration = gen;
-
     final spoken = text.trim();
     if (spoken.isEmpty) {
       _currentSpeakGeneration = null;
@@ -3513,11 +3530,30 @@ class AppState extends ChangeNotifier {
       return false;
     }
 
+    if (_speechPaused && spoken == _pausedSpeechText.trim()) {
+      return _resumePausedSpeech(
+        record: record,
+        categoryKey: catKey,
+        className: className,
+        lessonTitle: lessonTitle,
+      );
+    }
+
+    final gen = ++_ttsGeneration;
+    _currentSpeakGeneration = null;
+    _speechPaused = false;
+    _pausedSpeechText = '';
+    _resumeWordIndex = 0;
+    _speechResumeCharOffset = 0;
+    _speechHighlightOffset = 0;
+    await tts.stop();
+    _currentSpeakGeneration = gen;
+
     _speakingText = spoken;
     _isSpeaking = true;
     _spokenWordStart = -1;
     _spokenWordEnd = -1;
-    _startReadAlongFallback();
+    _startReadAlongFallback(fromWordIndex: 0);
     notifyListeners();
 
     final ok = await tts.speak(spoken, rate: ttsSpeed, lang: _language);
@@ -3546,14 +3582,99 @@ class AppState extends ChangeNotifier {
     return true;
   }
 
+  Future<bool> _resumePausedSpeech({
+    required bool record,
+    required String categoryKey,
+    String? className,
+    String? lessonTitle,
+  }) async {
+    final fullText = _pausedSpeechText.trim();
+    if (fullText.isEmpty) {
+      _resetSpeechTracking();
+      notifyListeners();
+      return false;
+    }
+
+    final offset = _speechResumeCharOffset.clamp(0, fullText.length);
+    final remaining = fullText.substring(offset).trimLeft();
+    if (remaining.isEmpty) {
+      _resetSpeechTracking();
+      notifyListeners();
+      return true;
+    }
+
+    final gen = ++_ttsGeneration;
+    _currentSpeakGeneration = gen;
+    _speechPaused = false;
+    _speechHighlightOffset = offset;
+
+    _speakingText = fullText;
+    _isSpeaking = true;
+    _startReadAlongFallback(fromWordIndex: _resumeWordIndex);
+    notifyListeners();
+
+    final ok = await tts.speak(remaining, rate: ttsSpeed, lang: _language);
+    final cancelled = gen != _ttsGeneration;
+    if (cancelled || !ok) {
+      if (!cancelled) {
+        _currentSpeakGeneration = null;
+        _resetSpeechTracking();
+        notifyListeners();
+      }
+      return false;
+    }
+
+    _currentSpeakGeneration = null;
+    _resetSpeechTracking();
+    notifyListeners();
+
+    if (record) {
+      await recordHistory(
+        fullText,
+        categoryKey: categoryKey,
+        className: className,
+        lessonTitle: lessonTitle,
+      );
+    }
+    return true;
+  }
+
   Future<void> pauseSpeech() async {
+    if (!_isSpeaking || _speechPaused) return;
+
+    _pausedSpeechText = _speakingText;
+    if (_spokenWordStart >= 0) {
+      _resumeWordIndex = _wordIndexAtOffset(_speakingText, _spokenWordStart);
+      final ranges = _wordRanges(_speakingText);
+      if (_resumeWordIndex < ranges.length) {
+        _speechResumeCharOffset = ranges[_resumeWordIndex].$1;
+      } else {
+        _speechResumeCharOffset = _spokenWordStart;
+      }
+    } else {
+      _resumeWordIndex = _readAlongWordIndex;
+      final ranges = _wordRanges(_speakingText);
+      if (_resumeWordIndex < ranges.length) {
+        _speechResumeCharOffset = ranges[_resumeWordIndex].$1;
+      } else {
+        _speechResumeCharOffset = 0;
+      }
+    }
+
+    final ranges = _wordRanges(_speakingText);
+    if (_resumeWordIndex < ranges.length) {
+      final (start, end) = ranges[_resumeWordIndex];
+      _spokenWordStart = start;
+      _spokenWordEnd = end;
+    }
+
     _ttsGeneration++;
     _currentSpeakGeneration = null;
-    await tts.pause();
-    _stopReadAlongFallback();
+    await tts.stop();
+
     _isSpeaking = false;
-    _spokenWordStart = -1;
-    _spokenWordEnd = -1;
+    _speechPaused = true;
+    _stopReadAlongFallback();
     notifyListeners();
   }
 
