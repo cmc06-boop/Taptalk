@@ -52,7 +52,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadLocalStats());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshFromCloud());
   }
 
   Future<void> _loadLocalStats() async {

@@ -168,16 +168,12 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   @override
   Future<void> appendLearnerActivity(LearnerActivityCloudEvent event) async {
     if (!isAvailable || event.learnerFirebaseUid.trim().isEmpty) return;
-    final uid = event.learnerFirebaseUid.trim();
-    final ts = event.createdAt.toUtc().millisecondsSinceEpoch;
-    final textKey = event.phraseText.trim().hashCode;
-    final docId = '${uid}_${ts}_$textKey';
     final payload = event.toFirestoreMap()
       ..['createdAt'] = Timestamp.fromDate(event.createdAt.toUtc());
+    // Each tap is its own document so usage counts stay accurate.
     await FirebaseFirestore.instance
         .collection(activityCollectionName)
-        .doc(docId)
-        .set(payload, SetOptions(merge: true));
+        .add(payload);
   }
 
   @override

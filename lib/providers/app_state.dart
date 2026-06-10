@@ -320,16 +320,15 @@ class AppState extends ChangeNotifier {
         }
         await _loadLearnerData(cloudSyncInBackground: true);
         if (_user!.isLearner) {
-          await _routeLearnerAfterOnboardingChecks();
+          await _routeUserAfterOnboardingChecks();
         } else if (_user!.isParent) {
           await _ensureStarterData();
           await _loadLinkedChildren(syncCloudInBackground: true);
-          _route = AppRoute.home;
+          await _routeUserAfterOnboardingChecks();
         } else if (_user!.isTeacher) {
-          await _loadLearnerData(cloudSyncInBackground: true);
           await _ensureStarterData();
           await refreshTeacherClasses(cloudSyncInBackground: true);
-          _route = AppRoute.teacherDashboard;
+          await _routeUserAfterOnboardingChecks();
         } else {
           _route = AppRoute.login;
         }
@@ -376,7 +375,7 @@ class AppState extends ChangeNotifier {
     _startMonitoringConnectivitySync();
 
     if (needsMonitoringSync) {
-      unawaited(_syncPendingLearnerActivityToCloud());
+      await _syncPendingLearnerActivityToCloud();
     }
 
     if (!needsFullCloud) return;
@@ -451,20 +450,26 @@ class AppState extends ChangeNotifier {
     await prefs.setBool(_languageOnboardingKey(userId), done);
   }
 
-  Future<void> _routeLearnerAfterOnboardingChecks() async {
-    if (_user == null || !_user!.isLearner) return;
+  Future<void> _routeUserAfterOnboardingChecks() async {
+    if (_user == null) return;
     final languageDone = await _isLanguageOnboardingDone(_user!.id);
     if (!languageDone) {
       _route = AppRoute.chooseLanguage;
       return;
     }
-    if (_user!.needsTheme) {
-      _route = AppRoute.chooseTheme;
-      return;
+    if (_user!.isLearner) {
+      if (_user!.needsTheme) {
+        _route = AppRoute.chooseTheme;
+        return;
+      }
+      await _ensureStarterData();
+      final categoryDone = await _isCategoryOnboardingDone(_user!.id);
+      _route = categoryDone ? AppRoute.home : AppRoute.chooseCategory;
+    } else if (_user!.isParent) {
+      _route = AppRoute.home;
+    } else if (_user!.isTeacher) {
+      _route = AppRoute.teacherDashboard;
     }
-    await _ensureStarterData();
-    final categoryDone = await _isCategoryOnboardingDone(_user!.id);
-    _route = categoryDone ? AppRoute.home : AppRoute.chooseCategory;
   }
 
   /// Clears in-memory words/phrases/categories so a new login never briefly
@@ -548,10 +553,9 @@ class AppState extends ChangeNotifier {
       if (CloudScope.syncMonitoring) {
         await _syncLearnerCategoriesToCloud();
         await _syncLearnerCustomPhrasesToCloud();
-        unawaited(_syncPendingLearnerActivityToCloud());
+        await _syncPendingLearnerActivityToCloud();
         await _resyncLearnerEnrollmentsToCloud();
-        final learnerFirebaseUid =
-            _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+        final learnerFirebaseUid = await _learnerFirebaseUidForSync();
         if (learnerFirebaseUid != null && learnerFirebaseUid.isNotEmpty) {
           await _notificationSync.syncLearnerEmergencyContacts(
             learnerUserId: _user!.id,
@@ -854,18 +858,13 @@ class AppState extends ChangeNotifier {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('user_id', _user!.id);
-    if (_user!.needsTheme) {
-      _theme = TapTalkThemes.appDefault;
-    } else {
-      _theme = TapTalkThemes.byKey(_user!.themeKey);
-    }
-    if (_user!.isLearner) {
-      await _routeLearnerAfterOnboardingChecks();
-    } else if (_user!.isParent) {
-      _route = AppRoute.home;
-    } else if (_user!.isTeacher) {
-      _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
-      _route = AppRoute.teacherDashboard;
+    if (_user!.isLearner || _user!.isParent || _user!.isTeacher) {
+      if (_user!.needsTheme) {
+        _theme = TapTalkThemes.appDefault;
+      } else {
+        _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
+      }
+      await _routeUserAfterOnboardingChecks();
     } else {
       _route = AppRoute.login;
       return AppStrings.parentTeacherComingSoon(_language);
@@ -999,10 +998,12 @@ class AppState extends ChangeNotifier {
       _route = AppRoute.chooseLanguage;
     } else if (role == 'parent') {
       _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
-      _route = AppRoute.home;
+      await _setLanguageOnboardingDone(_user!.id, false);
+      _route = AppRoute.chooseLanguage;
     } else if (role == 'teacher') {
       _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
-      _route = AppRoute.teacherDashboard;
+      await _setLanguageOnboardingDone(_user!.id, false);
+      _route = AppRoute.chooseLanguage;
     } else {
       _route = AppRoute.login;
     }
@@ -1131,7 +1132,13 @@ class AppState extends ChangeNotifier {
     if (_user != null) {
       await _setLanguageOnboardingDone(_user!.id, true);
     }
-    _route = AppRoute.chooseTheme;
+    if (_user?.isLearner ?? false) {
+      _route = AppRoute.chooseTheme;
+    } else if (_user?.isParent ?? false) {
+      _route = AppRoute.home;
+    } else if (_user?.isTeacher ?? false) {
+      _route = AppRoute.teacherDashboard;
+    }
     notifyListeners();
   }
 
@@ -1428,7 +1435,7 @@ class AppState extends ChangeNotifier {
     }
     if (_user!.isParent) {
       for (final child in _linkedChildren) {
-        await _pullLearnerMonitoringCacheFromCloud(child.learnerId);
+        await refreshChildMonitoringData(child.learnerId);
       }
       return;
     }
@@ -1437,7 +1444,7 @@ class AppState extends ChangeNotifier {
       final seen = <int>{};
       for (final student in students) {
         if (!seen.add(student.learnerId)) continue;
-        await _pullLearnerMonitoringCacheFromCloud(student.learnerId);
+        await refreshChildMonitoringData(student.learnerId);
       }
     }
   }
@@ -1450,7 +1457,12 @@ class AppState extends ChangeNotifier {
     await _notificationSync.initialize();
     if (!_notificationSync.isCloudAvailable) return;
     final learnerFirebaseUid = await _resolveLearnerFirebaseUid(learnerUserId);
-    if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) return;
+    if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) {
+      debugPrint(
+        'Pull learner monitoring skipped: no Firebase UID for user $learnerUserId',
+      );
+      return;
+    }
     try {
       final activities = await _notificationSync
           .getLearnerActivitiesFromCloud(
@@ -1458,7 +1470,10 @@ class AppState extends ChangeNotifier {
             rangeStart: MonitoringConstants.cloudActivityPullRangeStart(),
             rangeEnd: MonitoringConstants.cloudActivityPullRangeEnd(),
           )
-          .timeout(const Duration(seconds: 20));
+          .timeout(const Duration(seconds: 30));
+      debugPrint(
+        'Pulled ${activities.length} learner activities for user $learnerUserId',
+      );
       await _repo.mergeRemoteLearnerActivities(
         learnerUserId: learnerUserId,
         activities: activities,
@@ -1882,7 +1897,7 @@ class AppState extends ChangeNotifier {
     await _repo.linkParentToChild(_user!.id, learner.id);
     final parentFirebaseUid =
         _user!.firebaseUid ?? FirebaseService.instance.currentUid;
-    final learnerFirebaseUid = learner.firebaseUid;
+    final learnerFirebaseUid = await _resolveLearnerFirebaseUid(learner.id);
     if (parentFirebaseUid != null &&
         parentFirebaseUid.isNotEmpty &&
         learnerFirebaseUid != null &&
@@ -1900,7 +1915,7 @@ class AppState extends ChangeNotifier {
     await _loadLinkedChildren();
     _selectedChildId = learner.id;
     notifyListeners();
-    unawaited(_pullLearnerMonitoringCacheFromCloud(learner.id));
+    await refreshChildMonitoringData(learner.id);
     return null;
   }
 
@@ -2624,7 +2639,7 @@ class AppState extends ChangeNotifier {
     if (_user == null || !_user!.isLearner || !_notificationSync.isCloudAvailable) {
       return;
     }
-    final uid = _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    final uid = await _learnerFirebaseUidForSync();
     if (uid == null || uid.isEmpty) return;
     final categories = await _repo.getCategories(_user!.id);
     if (categories.isEmpty) return;
@@ -2647,7 +2662,7 @@ class AppState extends ChangeNotifier {
     if (_user == null || !_user!.isLearner || !_notificationSync.isCloudAvailable) {
       return;
     }
-    final uid = _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    final uid = await _learnerFirebaseUidForSync();
     if (uid == null || uid.isEmpty) return;
     final phrases = await _repo.getCustomPhrasesForCloudSync(_user!.id);
     await _notificationSync.syncLearnerCustomPhrases(
