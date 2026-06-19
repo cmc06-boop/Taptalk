@@ -5,8 +5,12 @@ import 'package:crypto/crypto.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../../core/constants/tts_speed_options.dart';
+import '../../core/utils/favorite_image_sync.dart';
+import '../../core/utils/phrase_image_cloud_sync.dart';
+import '../../core/utils/phrase_image_storage.dart';
 import '../../services/cloud_notification_backend.dart';
 import '../database/database_helper.dart';
+import '../default_builtin_content.dart';
 import '../models/vocabulary_growth_summary.dart';
 import '../models/category_model.dart';
 import '../models/favorite_model.dart';
@@ -34,20 +38,16 @@ class AppRepository {
   /// Preserves user typing; only trims outer whitespace.
   static String storedUserText(String text) => text.trim();
 
+  static String customPhraseDedupeKey(String text, String categoryKey) =>
+      '${storedUserText(text).toLowerCase()}|${normalizeCategoryKey(categoryKey)}';
+
+  static String lessonPhraseTextKey(String text) =>
+      storedUserText(text).toLowerCase();
+
   static bool sameStoredText(String a, String b) => a.trim() == b.trim();
 
   static bool sameLessonTitle(String a, String b) =>
       a.trim().toLowerCase() == b.trim().toLowerCase();
-
-  /// Bundled images for built-in phrases (offline + matches UI prototype).
-  static const Map<String, String> _builtinImageUrls = {
-    'I am happy': 'assets/images/phrase_happy.jpg',
-    'I feel sad': 'assets/images/phrase_sad.jpg',
-    'I want pizza': 'assets/images/phrase_pizza.jpg',
-    'I want water': 'assets/images/phrase_water.jpg',
-    'I want to sleep': 'assets/images/phrase_sleep.jpg',
-    'I want to see a dog': 'assets/images/phrase_dog.jpg',
-  };
 
   static const _profileCodeChars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -161,6 +161,197 @@ class AppRepository {
     return UserModel.fromMap(rows.first);
   }
 
+  static bool isStubEmail(String email) =>
+      email.trim().toLowerCase().endsWith('@taptalk.stub');
+
+  static bool isGenericAccountName(String name) {
+    final n = name.trim().toLowerCase();
+    return n == 'teacher' || n == 'parent' || n == 'learner';
+  }
+
+  static bool looksLikeEmail(String value) => value.contains('@');
+
+  static String welcomeFirstNameFrom({
+    required Map<String, dynamic> settings,
+    required String fullName,
+  }) {
+    final stored = (settings['first_name'] as String?)?.trim() ?? '';
+    if (stored.isNotEmpty && !looksLikeEmail(stored)) return stored;
+    final parts = fullName.trim().split(RegExp(r'\s+'));
+    final first = parts.isNotEmpty ? parts.first.trim() : '';
+    if (first.isNotEmpty && !looksLikeEmail(first)) return first;
+    return '';
+  }
+
+  static String resolveLoginFullName({
+    required RemoteUserProfile profile,
+    String? existingName,
+  }) {
+    final remote = profile.fullName.trim();
+    if (remote.isNotEmpty &&
+        !isGenericAccountName(remote) &&
+        !looksLikeEmail(remote)) {
+      return remote;
+    }
+    final local = existingName?.trim() ?? '';
+    if (local.isNotEmpty &&
+        !isGenericAccountName(local) &&
+        !looksLikeEmail(local)) {
+      return local;
+    }
+    final first = profile.firstName?.trim() ?? '';
+    if (first.isNotEmpty) return first;
+    return local.isNotEmpty ? local : remote;
+  }
+
+  Future<void> releaseFirebaseUidFromOtherUsers({
+    required String firebaseUid,
+    required int keepUserId,
+  }) async {
+    final db = await _dbHelper.database;
+    await db.update(
+      'users',
+      {'firebase_uid': null},
+      where: 'firebase_uid = ? AND id != ?',
+      whereArgs: [firebaseUid.trim(), keepUserId],
+    );
+  }
+
+  Future<UserModel> upgradeStubAccountForLogin({
+    required int userId,
+    required String email,
+    required String password,
+    required RemoteUserProfile profile,
+  }) async {
+    final existing = await findUserById(userId);
+    final fullName = resolveLoginFullName(
+      profile: profile,
+      existingName: existing?.fullName,
+    );
+    final role = profile.role.trim().isNotEmpty
+        ? profile.role.trim()
+        : (existing?.role ?? 'teacher');
+    final db = await _dbHelper.database;
+    await db.update(
+      'users',
+      {
+        'email': email.trim().toLowerCase(),
+        'password_hash': hashPassword(password),
+        'full_name': fullName,
+        'role': role,
+        'firebase_uid': profile.firebaseUid.trim(),
+        if (profile.themeKey != null && profile.themeKey!.trim().isNotEmpty)
+          'theme': profile.themeKey!.trim(),
+      },
+      where: 'id = ?',
+      whereArgs: [userId],
+    );
+    if (profile.profileCode != null && profile.profileCode!.trim().isNotEmpty) {
+      await updateUserSettings(
+        userId,
+        profileCode: normalizeProfileCode(profile.profileCode!),
+      );
+    }
+    if (profile.firstName?.trim().isNotEmpty == true) {
+      await updateUserSettings(userId, firstName: profile.firstName!.trim());
+    }
+    if (role == 'learner' || role == 'parent' || role == 'teacher') {
+      if (!await hasStarterPersonalData(userId)) {
+        await seedLearnerData(userId);
+      }
+    }
+    return (await findUserById(userId))!;
+  }
+
+  /// Picks the real SQLite account after Firebase sign-in (handles stub collisions).
+  Future<UserModel> finalizeCloudLoginUser({
+    required UserModel? userByEmail,
+    required String email,
+    required String password,
+    required String firebaseUid,
+    required RemoteUserProfile profile,
+  }) async {
+    final uid = firebaseUid.trim();
+    final normalizedEmail = email.trim().toLowerCase();
+    final byUid = await findUserByFirebaseUid(uid);
+
+    if (userByEmail != null) {
+      await releaseFirebaseUidFromOtherUsers(
+        firebaseUid: uid,
+        keepUserId: userByEmail.id,
+      );
+      final fullName = resolveLoginFullName(
+        profile: profile,
+        existingName: userByEmail.fullName,
+      );
+      final db = await _dbHelper.database;
+      await db.update(
+        'users',
+        {
+          'firebase_uid': uid,
+          'password_hash': hashPassword(password),
+          'email': normalizedEmail,
+          'full_name': fullName,
+          if (profile.role.trim().isNotEmpty) 'role': profile.role.trim(),
+          if (profile.themeKey != null && profile.themeKey!.trim().isNotEmpty)
+            'theme': profile.themeKey!.trim(),
+        },
+        where: 'id = ?',
+        whereArgs: [userByEmail.id],
+      );
+      if (profile.profileCode != null && profile.profileCode!.trim().isNotEmpty) {
+        await updateUserSettings(
+          userByEmail.id,
+          profileCode: normalizeProfileCode(profile.profileCode!),
+        );
+      }
+      if (profile.firstName?.trim().isNotEmpty == true) {
+        await updateUserSettings(
+          userByEmail.id,
+          firstName: profile.firstName!.trim(),
+        );
+      }
+      if (userByEmail.isLearner ||
+          userByEmail.isParent ||
+          userByEmail.isTeacher) {
+        if (!await hasStarterPersonalData(userByEmail.id)) {
+          await seedLearnerData(userByEmail.id);
+        }
+      }
+      return (await findUserById(userByEmail.id))!;
+    }
+
+    if (byUid != null && isStubEmail(byUid.email)) {
+      return upgradeStubAccountForLogin(
+        userId: byUid.id,
+        email: normalizedEmail,
+        password: password,
+        profile: profile,
+      );
+    }
+
+    if (byUid != null) {
+      final updated = await applyRemoteUserProfile(
+        userId: byUid.id,
+        profile: profile,
+      );
+      final linked = updated ?? byUid;
+      if (linked.passwordHash == null ||
+          linked.passwordHash!.isEmpty ||
+          linked.passwordHash != hashPassword(password)) {
+        await updatePasswordHash(linked.id, password);
+      }
+      return (await findUserById(linked.id))!;
+    }
+
+    return provisionLocalUserFromCloud(
+      email: normalizedEmail,
+      password: password,
+      firebaseUid: uid,
+      profile: profile,
+    );
+  }
+
   Future<void> linkFirebaseUid(int userId, String firebaseUid) async {
     final db = await _dbHelper.database;
     await db.update(
@@ -222,8 +413,26 @@ class AppRepository {
     required RemoteUserProfile profile,
   }) async {
     final byUid = await findUserByFirebaseUid(firebaseUid);
-    if (byUid != null) return byUid;
+    if (byUid != null && isStubEmail(byUid.email)) {
+      return upgradeStubAccountForLogin(
+        userId: byUid.id,
+        email: email,
+        password: password,
+        profile: profile,
+      );
+    }
+    if (byUid != null) {
+      final updated = await applyRemoteUserProfile(
+        userId: byUid.id,
+        profile: profile,
+      );
+      return updated ?? byUid;
+    }
 
+    final fullName = resolveLoginFullName(
+      profile: profile,
+      existingName: null,
+    );
     final db = await _dbHelper.database;
     final settings = <String, dynamic>{
       'language': 'English',
@@ -232,13 +441,15 @@ class AppRepository {
     if (profile.profileCode != null && profile.profileCode!.trim().isNotEmpty) {
       settings['profile_code'] = normalizeProfileCode(profile.profileCode!);
     }
+    final remoteFirst = profile.firstName?.trim() ?? '';
+    if (remoteFirst.isNotEmpty) {
+      settings['first_name'] = remoteFirst;
+    }
 
     final id = await db.insert('users', {
       'email': email.trim().toLowerCase(),
       'password_hash': hashPassword(password),
-      'full_name': profile.fullName.trim().isEmpty
-          ? email.trim()
-          : profile.fullName.trim(),
+      'full_name': fullName,
       'role': profile.role,
       'theme': profile.role == 'learner'
           ? profile.themeKey
@@ -248,7 +459,9 @@ class AppRepository {
     });
 
     final user = (await findUserById(id))!;
-    if (profile.role == 'learner' || profile.role == 'parent') {
+    if (profile.role == 'learner' ||
+        profile.role == 'parent' ||
+        profile.role == 'teacher') {
       await seedLearnerData(user.id);
     }
     return user;
@@ -260,14 +473,37 @@ class AppRepository {
     final code = normalizeClassCode(remote.classCode);
     if (!isValidClassCodeFormat(code)) return null;
 
-    final existing = await findClassByCode(code);
-    if (existing != null) return existing;
+    final cloudTeacherName = remote.teacherName?.trim() ?? '';
+    final stubName = cloudTeacherName.isNotEmpty &&
+            !isGenericAccountName(cloudTeacherName)
+        ? cloudTeacherName
+        : 'Teacher';
 
     final teacherId = await ensureUserStubFromFirebase(
       firebaseUid: remote.teacherFirebaseUid,
       role: 'teacher',
-      displayName: 'Teacher',
+      displayName: stubName,
     );
+    if (cloudTeacherName.isNotEmpty) {
+      await applyTeacherNameIfKnown(
+        teacherUserId: teacherId,
+        teacherName: cloudTeacherName,
+      );
+    }
+
+    final existing = await findClassByCode(code);
+    if (existing != null) {
+      if (cloudTeacherName.isNotEmpty) {
+        final linkedTeacherId = existing['teacher_user_id'] as int?;
+        if (linkedTeacherId != null) {
+          await applyTeacherNameIfKnown(
+            teacherUserId: linkedTeacherId,
+            teacherName: cloudTeacherName,
+          );
+        }
+      }
+      return existing;
+    }
 
     final db = await _dbHelper.database;
     await db.insert('teacher_classes', {
@@ -359,6 +595,22 @@ class AppRepository {
     }
   }
 
+  /// Removes local parent-child links missing from the remote snapshot.
+  Future<void> pruneStaleParentChildLinks({
+    required int parentUserId,
+    required Set<String> remoteLearnerFirebaseUids,
+  }) async {
+    if (remoteLearnerFirebaseUids.isEmpty) return;
+    final children = await getLinkedChildren(parentUserId);
+    for (final child in children) {
+      final learner = await findUserById(child.learnerId);
+      final uid = learner?.firebaseUid?.trim() ?? '';
+      if (uid.isNotEmpty && !remoteLearnerFirebaseUids.contains(uid)) {
+        await unlinkParentChild(parentUserId, child.learnerId);
+      }
+    }
+  }
+
   /// Earliest parent link or class enrollment — same tracking window for all roles.
   Future<DateTime> getEarliestLearnerTrackingDate(int learnerUserId) async {
     final db = await _dbHelper.database;
@@ -404,6 +656,7 @@ class AppRepository {
 
   Future<UserModel> registerUser({
     required String fullName,
+    required String firstName,
     required String email,
     required String password,
     required String role,
@@ -413,6 +666,7 @@ class AppRepository {
     final settings = <String, dynamic>{
       'language': 'English',
       'tts_speed': TtsSpeedOptions.defaultSpeed,
+      'first_name': firstName.trim(),
     };
     if (role == 'learner') {
       settings['profile_code'] = generateProfileCode();
@@ -475,6 +729,72 @@ class AppRepository {
     );
   }
 
+  Future<void> applyTeacherNameIfKnown({
+    required int teacherUserId,
+    required String teacherName,
+  }) async {
+    final trimmed = teacherName.trim();
+    if (trimmed.isEmpty ||
+        isGenericAccountName(trimmed) ||
+        looksLikeEmail(trimmed)) {
+      return;
+    }
+    await updateUserFullName(teacherUserId, trimmed);
+  }
+
+  Future<UserModel?> applyRemoteUserProfile({
+    required int userId,
+    required RemoteUserProfile profile,
+  }) async {
+    final existing = await findUserById(userId);
+    if (existing == null) return null;
+
+    final resolvedName = resolveLoginFullName(
+      profile: profile,
+      existingName: existing.fullName,
+    );
+
+    final updates = <String, Object?>{};
+    if (resolvedName.isNotEmpty) {
+      updates['full_name'] = resolvedName;
+    }
+    final remoteEmail = profile.email.trim().toLowerCase();
+    if (remoteEmail.isNotEmpty && !isStubEmail(remoteEmail)) {
+      updates['email'] = remoteEmail;
+    }
+    final remoteTheme = profile.themeKey?.trim();
+    if (remoteTheme != null && remoteTheme.isNotEmpty) {
+      updates['theme'] = remoteTheme;
+    }
+    if (updates.isNotEmpty) {
+      final db = await _dbHelper.database;
+      await db.update(
+        'users',
+        updates,
+        where: 'id = ?',
+        whereArgs: [userId],
+      );
+    }
+    if (profile.profileCode != null && profile.profileCode!.trim().isNotEmpty) {
+      await updateUserSettings(
+        userId,
+        profileCode: normalizeProfileCode(profile.profileCode!),
+      );
+    }
+    final remoteFirstName = profile.firstName?.trim() ?? '';
+    if (remoteFirstName.isNotEmpty) {
+      await updateUserSettings(userId, firstName: remoteFirstName);
+    }
+    final remoteLanguage = profile.language?.trim();
+    if (remoteLanguage != null && remoteLanguage.isNotEmpty) {
+      await updateUserSettings(userId, language: remoteLanguage);
+    }
+    if (profile.ttsSpeed != null) {
+      await updateUserSettings(userId, ttsSpeed: profile.ttsSpeed);
+    }
+    return findUserById(userId);
+  }
+
   Future<bool> resetPasswordByEmail(String email, String newPassword) async {
     final user = await findUserByEmail(email);
     if (user == null) return false;
@@ -520,6 +840,7 @@ class AppRepository {
     String? language,
     double? ttsSpeed,
     String? profileCode,
+    String? firstName,
   }) async {
     final db = await _dbHelper.database;
     final user = await findUserById(userId);
@@ -532,6 +853,7 @@ class AppRepository {
     if (language != null) settings['language'] = language;
     if (ttsSpeed != null) settings['tts_speed'] = ttsSpeed;
     if (profileCode != null) settings['profile_code'] = profileCode;
+    if (firstName != null) settings['first_name'] = firstName.trim();
     await db.update(
       'users',
       {'settings_json': jsonEncode(settings)},
@@ -614,15 +936,9 @@ class AppRepository {
   Future<void> seedLearnerData(int userId) async {
     final db = await _dbHelper.database;
     await dedupeBuiltinPhrases(userId);
+    await _purgeObsoleteBuiltinPhrases(userId);
 
-    final defaults = [
-      ('feelings', 'Feelings', 'feelings'),
-      ('food', 'Food', 'food'),
-      ('drinks', 'Drinks', 'drinks'),
-      ('activities', 'Activities', 'activities'),
-      ('animals', 'Animals', 'animals'),
-    ];
-    for (final (key, name, icon) in defaults) {
+    for (final (key, name, icon) in DefaultBuiltinContent.defaultCategories) {
       await db.insert('categories', {
         'user_id': userId,
         'category_key': key,
@@ -631,37 +947,60 @@ class AppRepository {
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
     }
 
-    if (await hasStarterPersonalData(userId)) return;
-
-    final builtinPhrases = [
-      ('I am happy', 'feelings', _builtinImageUrls['I am happy']!),
-      ('I feel sad', 'feelings', _builtinImageUrls['I feel sad']!),
-      ('I want pizza', 'food', _builtinImageUrls['I want pizza']!),
-      ('I want water', 'drinks', _builtinImageUrls['I want water']!),
-      ('I want to sleep', 'activities', _builtinImageUrls['I want to sleep']!),
-      ('I want to see a dog', 'animals', _builtinImageUrls['I want to see a dog']!),
-    ];
-    for (final (text, cat, img) in builtinPhrases) {
+    for (final entry in DefaultBuiltinContent.defaultPhrases) {
+      final text = entry.$1;
+      final cat = entry.$2;
+      final img = DefaultBuiltinContent.imagePathForEntry(entry);
       final existing = await db.query(
         'phrases',
-        columns: ['id'],
+        columns: ['id', 'image_path'],
         where:
             'user_id = ? AND phrase_text = ? AND category_key = ? AND is_builtin = 1',
         whereArgs: [userId, text, cat],
         limit: 1,
       );
-      if (existing.isNotEmpty) continue;
-      await db.insert(
-        'phrases',
-        {
-          'user_id': userId,
-          'phrase_text': text,
-          'category_key': cat,
-          'image_path': img,
-          'is_builtin': 1,
-          'is_active': 1,
-        },
-      );
+      if (existing.isEmpty) {
+        await db.insert(
+          'phrases',
+          {
+            'user_id': userId,
+            'phrase_text': text,
+            'category_key': cat,
+            'image_path': img,
+            'is_builtin': 1,
+            'is_active': 1,
+          },
+        );
+        continue;
+      }
+      if (img != null && existing.first['image_path'] != img) {
+        await db.update(
+          'phrases',
+          {'image_path': img},
+          where: 'id = ?',
+          whereArgs: [existing.first['id']],
+        );
+      }
+    }
+  }
+
+  Future<void> _purgeObsoleteBuiltinPhrases(int userId) async {
+    final db = await _dbHelper.database;
+    final allowed = {
+      for (final entry in DefaultBuiltinContent.defaultPhrases)
+        '${entry.$1}|${entry.$2}',
+    };
+    final rows = await db.query(
+      'phrases',
+      columns: ['id', 'phrase_text', 'category_key'],
+      where: 'user_id = ? AND is_builtin = 1',
+      whereArgs: [userId],
+    );
+    for (final row in rows) {
+      final key = '${row['phrase_text']}|${row['category_key']}';
+      if (!allowed.contains(key)) {
+        await db.delete('phrases', where: 'id = ?', whereArgs: [row['id']]);
+      }
     }
   }
 
@@ -765,6 +1104,7 @@ class AppRepository {
   }
 
   Future<List<PhraseModel>> getPhrases(int userId) async {
+    await warmPhraseImageCacheDirectory();
     final db = await _dbHelper.database;
     final rows = await db.query(
       'phrases',
@@ -772,7 +1112,31 @@ class AppRepository {
       whereArgs: [userId],
       orderBy: 'id DESC',
     );
-    return rows.map(PhraseModel.fromMap).toList();
+    final phrases = rows.map(PhraseModel.fromMap).toList();
+    await _cacheRemoteCustomPhraseImages(phrases);
+    return phrases;
+  }
+
+  Future<void> _cacheRemoteCustomPhraseImages(List<PhraseModel> phrases) async {
+    final db = await _dbHelper.database;
+    for (final phrase in phrases) {
+      if (phrase.isBuiltin || phrase.imagePath == null) continue;
+      if (!isRemotePhraseImagePath(phrase.imagePath)) continue;
+
+      final local = await cachePhraseImageLocally(phrase.imagePath);
+      if (local == null ||
+          local == phrase.imagePath ||
+          isRemotePhraseImagePath(local)) {
+        continue;
+      }
+
+      await db.update(
+        'phrases',
+        {'image_path': local},
+        where: 'id = ?',
+        whereArgs: [phrase.id],
+      );
+    }
   }
 
   Future<PhraseModel> addPhrase({
@@ -837,30 +1201,83 @@ class AppRepository {
   }
 
   Future<List<RemoteLearnerCustomPhrase>> getCustomPhrasesForCloudSync(
-    int learnerUserId,
-  ) async {
+    int learnerUserId, {
+    required String firebaseUid,
+  }) async {
     final db = await _dbHelper.database;
     final rows = await db.query(
       'phrases',
-      columns: ['phrase_text', 'category_key', 'created_at'],
+      columns: ['phrase_text', 'category_key', 'created_at', 'image_path'],
       where:
           'user_id = ? AND is_builtin = 0 AND is_active = 1 AND created_at IS NOT NULL',
       whereArgs: [learnerUserId],
       orderBy: 'created_at ASC',
     );
-    return rows
-        .map((row) {
-          final createdRaw = row['created_at'];
-          if (createdRaw is! int) return null;
-          return RemoteLearnerCustomPhrase(
-            phraseText: storedUserText(row['phrase_text'] as String),
-            categoryKey: normalizeCategoryKey(row['category_key'] as String),
-            createdAt: DateTime.fromMillisecondsSinceEpoch(createdRaw),
-          );
-        })
-        .whereType<RemoteLearnerCustomPhrase>()
-        .where((p) => p.phraseText.isNotEmpty && p.categoryKey.isNotEmpty)
-        .toList();
+    final deduped = <String, RemoteLearnerCustomPhrase>{};
+    for (final row in rows) {
+      final createdRaw = row['created_at'];
+      if (createdRaw is! int) continue;
+      final rawImage = row['image_path'] as String?;
+      final cloudImage = await resolveImagePathForCloudSync(
+        rawImage,
+        firebaseUid,
+      );
+      final phrase = RemoteLearnerCustomPhrase(
+        phraseText: storedUserText(row['phrase_text'] as String),
+        categoryKey: normalizeCategoryKey(row['category_key'] as String),
+        createdAt: DateTime.fromMillisecondsSinceEpoch(createdRaw),
+        imagePath: cloudImage,
+      );
+      if (phrase.phraseText.isEmpty || phrase.categoryKey.isEmpty) continue;
+      final key = customPhraseDedupeKey(phrase.phraseText, phrase.categoryKey);
+      final existing = deduped[key];
+      if (existing == null || phrase.createdAt.isBefore(existing.createdAt)) {
+        deduped[key] = phrase;
+      } else if (phrase.imagePath != null &&
+          phrase.imagePath!.trim().isNotEmpty &&
+          (existing.imagePath == null || existing.imagePath!.trim().isEmpty)) {
+        deduped[key] = RemoteLearnerCustomPhrase(
+          phraseText: existing.phraseText,
+          categoryKey: existing.categoryKey,
+          createdAt: existing.createdAt,
+          imagePath: phrase.imagePath,
+        );
+      }
+    }
+    return deduped.values.toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+  }
+
+  Future<void> dedupeCustomPhrases(int userId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'phrases',
+      where: 'user_id = ? AND is_builtin = 0 AND is_active = 1',
+      whereArgs: [userId],
+      orderBy: 'created_at ASC, id ASC',
+    );
+    final keepKeys = <String>{};
+    final deleteIds = <int>[];
+    for (final row in rows) {
+      final key = customPhraseDedupeKey(
+        row['phrase_text'] as String,
+        row['category_key'] as String,
+      );
+      final id = row['id'] as int;
+      if (keepKeys.contains(key)) {
+        deleteIds.add(id);
+      } else {
+        keepKeys.add(key);
+      }
+    }
+    for (final id in deleteIds) {
+      await db.update(
+        'phrases',
+        {'is_active': 0},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
   }
 
   Future<void> mergeRemoteLearnerCustomPhrases({
@@ -868,43 +1285,482 @@ class AppRepository {
     required List<RemoteLearnerCustomPhrase> phrases,
   }) async {
     if (phrases.isEmpty) return;
-    final db = await _dbHelper.database;
+    final deduped = <String, RemoteLearnerCustomPhrase>{};
     for (final remote in phrases) {
-      final text = remote.phraseText.trim();
+      final text = storedUserText(remote.phraseText);
       final categoryKey = normalizeCategoryKey(remote.categoryKey);
       if (text.isEmpty || categoryKey.isEmpty) continue;
       if (!isPersonalCategoryKey(categoryKey)) continue;
+      final key = customPhraseDedupeKey(text, categoryKey);
+      final existing = deduped[key];
+      if (existing == null || remote.createdAt.isBefore(existing.createdAt)) {
+        deduped[key] = RemoteLearnerCustomPhrase(
+          phraseText: text,
+          categoryKey: categoryKey,
+          createdAt: remote.createdAt,
+          imagePath: remote.imagePath,
+        );
+      }
+    }
+
+    final remoteKeys = deduped.keys.toSet();
+    final db = await _dbHelper.database;
+    final localRows = await db.query(
+      'phrases',
+      columns: ['id', 'phrase_text', 'category_key'],
+      where: 'user_id = ? AND is_builtin = 0 AND is_active = 1',
+      whereArgs: [learnerUserId],
+    );
+    for (final row in localRows) {
+      final categoryKey = normalizeCategoryKey(row['category_key'] as String);
+      if (!isPersonalCategoryKey(categoryKey)) continue;
+      final key = customPhraseDedupeKey(
+        row['phrase_text'] as String,
+        categoryKey,
+      );
+      if (!remoteKeys.contains(key)) {
+        await db.update(
+          'phrases',
+          {'is_active': 0},
+          where: 'id = ?',
+          whereArgs: [row['id']],
+        );
+      }
+    }
+
+    for (final remote in deduped.values) {
+      final text = remote.phraseText;
+      final categoryKey = remote.categoryKey;
       final createdAtMs = remote.createdAt.millisecondsSinceEpoch;
-      final existing = await db.query(
+      final existingRows = await db.query(
         'phrases',
         where:
-            'user_id = ? AND phrase_text = ? AND category_key = ? AND is_builtin = 0',
-        whereArgs: [learnerUserId, text, categoryKey],
-        limit: 1,
+            'user_id = ? AND is_builtin = 0 AND is_active = 1 AND category_key = ?',
+        whereArgs: [learnerUserId, categoryKey],
       );
-      if (existing.isNotEmpty) {
-        final currentCreated = existing.first['created_at'] as int?;
+      Map<String, Object?>? matched;
+      final lowerText = text.toLowerCase();
+      for (final row in existingRows) {
+        if (storedUserText(row['phrase_text'] as String).toLowerCase() ==
+            lowerText) {
+          matched = row;
+          break;
+        }
+      }
+      if (matched != null) {
+        final updates = <String, Object?>{};
+        final currentCreated = matched['created_at'] as int?;
         if (currentCreated == null || createdAtMs < currentCreated) {
+          updates['created_at'] = createdAtMs;
+        }
+        final remoteImage = await resolveStoredPhraseImagePath(remote.imagePath);
+        if (remoteImage != null && remoteImage.isNotEmpty) {
+          updates['image_path'] = remoteImage;
+        }
+        if (updates.isNotEmpty) {
           await db.update(
             'phrases',
-            {'created_at': createdAtMs},
+            updates,
             where: 'id = ?',
-            whereArgs: [existing.first['id']],
+            whereArgs: [matched['id']],
           );
         }
         continue;
       }
+      final remoteImage = await resolveStoredPhraseImagePath(remote.imagePath);
       await db.insert(
         'phrases',
         {
           'user_id': learnerUserId,
           'phrase_text': text,
           'category_key': categoryKey,
+          'image_path': remoteImage,
           'is_builtin': 0,
           'is_active': 1,
           'created_at': createdAtMs,
         },
         conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+    await dedupeCustomPhrases(learnerUserId);
+  }
+
+  static List<RemoteLearnerCustomPhrase> mergeCustomPhrasesForCloudExport({
+    required List<RemoteLearnerCustomPhrase> local,
+    required List<RemoteLearnerCustomPhrase> remote,
+  }) {
+    final deduped = <String, RemoteLearnerCustomPhrase>{};
+    for (final phrase in [...remote, ...local]) {
+      final text = storedUserText(phrase.phraseText);
+      final categoryKey = normalizeCategoryKey(phrase.categoryKey);
+      if (text.isEmpty || categoryKey.isEmpty) continue;
+      if (!isPersonalCategoryKey(categoryKey)) continue;
+      final key = customPhraseDedupeKey(text, categoryKey);
+      final existing = deduped[key];
+      if (existing == null || phrase.createdAt.isBefore(existing.createdAt)) {
+        deduped[key] = RemoteLearnerCustomPhrase(
+          phraseText: text,
+          categoryKey: categoryKey,
+          createdAt: phrase.createdAt,
+          imagePath: phrase.imagePath,
+        );
+      } else if (phrase.imagePath != null &&
+          phrase.imagePath!.trim().isNotEmpty) {
+        deduped[key] = RemoteLearnerCustomPhrase(
+          phraseText: text,
+          categoryKey: categoryKey,
+          createdAt: existing.createdAt,
+          imagePath: phrase.imagePath,
+        );
+      }
+    }
+    return deduped.values.toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+  }
+
+  static List<RemoteLearnerFavorite> mergeFavoritesForCloudExport({
+    required List<RemoteLearnerFavorite> local,
+    required List<RemoteLearnerFavorite> remote,
+  }) {
+    final deduped = <String, RemoteLearnerFavorite>{};
+    for (final favorite in [...remote, ...local]) {
+      final text = storedUserText(favorite.phraseText);
+      final categoryKey = normalizeCategoryKey(favorite.categoryKey);
+      if (text.isEmpty || categoryKey.isEmpty) continue;
+      final key = '${text.toLowerCase()}__$categoryKey';
+      final existing = deduped[key];
+      if (existing == null) {
+        deduped[key] = RemoteLearnerFavorite(
+          phraseText: text,
+          categoryKey: categoryKey,
+          phraseId: favorite.phraseId,
+          imagePath: favorite.imagePath,
+        );
+        continue;
+      }
+      final incomingImage = favorite.imagePath?.trim() ?? '';
+      final existingImage = existing.imagePath?.trim() ?? '';
+      if (incomingImage.isNotEmpty &&
+          (existingImage.isEmpty || incomingImage.startsWith('http'))) {
+        deduped[key] = RemoteLearnerFavorite(
+          phraseText: text,
+          categoryKey: categoryKey,
+          phraseId: favorite.phraseId ?? existing.phraseId,
+          imagePath: favorite.imagePath,
+        );
+      }
+    }
+    return deduped.values.toList();
+  }
+
+  Future<String?> _favoriteSourceImagePath(
+    int userId,
+    FavoriteModel favorite,
+  ) async {
+    final direct = favorite.imagePath?.trim();
+    if (direct != null && direct.isNotEmpty) return direct;
+
+    final db = await _dbHelper.database;
+    if (favorite.phraseId != null) {
+      final rows = await db.query(
+        'phrases',
+        columns: ['image_path'],
+        where: 'id = ? AND user_id = ? AND is_active = 1',
+        whereArgs: [favorite.phraseId, userId],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) {
+        final img = rows.first['image_path'] as String?;
+        if (img != null && img.trim().isNotEmpty) return img.trim();
+      }
+    }
+
+    final phraseRows = await db.query(
+      'phrases',
+      columns: ['phrase_text', 'image_path'],
+      where:
+          'user_id = ? AND is_active = 1 AND category_key = ? AND image_path IS NOT NULL',
+      whereArgs: [userId, favorite.categoryKey],
+    );
+    final target = storedUserText(favorite.phraseText).toLowerCase();
+    for (final row in phraseRows) {
+      if (storedUserText(row['phrase_text'] as String).toLowerCase() ==
+          target) {
+        final img = row['image_path'] as String?;
+        if (img != null && img.trim().isNotEmpty) return img.trim();
+      }
+    }
+    return null;
+  }
+
+  static List<RemoteLearnerSpeakHistory> mergeSpeakHistoryForCloudExport({
+    required List<RemoteLearnerSpeakHistory> local,
+    required List<RemoteLearnerSpeakHistory> remote,
+  }) {
+    const maxEntries = 500;
+    final deduped = <String, RemoteLearnerSpeakHistory>{};
+    for (final entry in [...remote, ...local]) {
+      final text = storedUserText(entry.phraseText);
+      final categoryKey = normalizeCategoryKey(entry.categoryKey);
+      if (text.isEmpty || categoryKey.isEmpty) continue;
+      final key =
+          '${text.toLowerCase()}|$categoryKey|${entry.createdAt.millisecondsSinceEpoch}';
+      deduped.putIfAbsent(key, () => entry);
+    }
+    final merged = deduped.values.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    if (merged.length > maxEntries) {
+      merged.removeRange(maxEntries, merged.length);
+    }
+    merged.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return merged;
+  }
+
+  static List<RemoteLearnerCategory> mergeCategoriesForCloudExport({
+    required List<RemoteLearnerCategory> local,
+    required List<RemoteLearnerCategory> remote,
+  }) {
+    final byKey = <String, RemoteLearnerCategory>{};
+    for (final category in remote) {
+      final key = category.key.trim();
+      if (key.isNotEmpty) byKey[key] = category;
+    }
+    for (final category in local) {
+      final key = category.key.trim();
+      if (key.isNotEmpty) byKey[key] = category;
+    }
+    return byKey.values.toList();
+  }
+
+  Future<List<RemoteLearnerFavorite>> getFavoritesForCloudSync(
+    int learnerUserId, {
+    required String firebaseUid,
+  }) async {
+    final favorites = await getFavorites(learnerUserId);
+    final deduped = <String, RemoteLearnerFavorite>{};
+    for (final favorite in favorites) {
+      final text = storedUserText(favorite.phraseText);
+      final categoryKey = normalizeCategoryKey(favorite.categoryKey);
+      if (text.isEmpty || categoryKey.isEmpty) continue;
+      final sourceImage = await _favoriteSourceImagePath(learnerUserId, favorite);
+      final cloudImage = await resolveFavoriteImageForCloudExport(
+        sourceImage,
+        firebaseUid,
+      );
+      final key = favorite.dedupeKey;
+      final existing = deduped[key];
+      if (existing == null) {
+        deduped[key] = RemoteLearnerFavorite(
+          phraseText: text,
+          categoryKey: categoryKey,
+          phraseId: favorite.phraseId,
+          imagePath: cloudImage,
+        );
+        continue;
+      }
+      final incomingImage = cloudImage?.trim() ?? '';
+      final existingImage = existing.imagePath?.trim() ?? '';
+      if (incomingImage.isNotEmpty && existingImage.isEmpty) {
+        deduped[key] = RemoteLearnerFavorite(
+          phraseText: text,
+          categoryKey: categoryKey,
+          phraseId: favorite.phraseId ?? existing.phraseId,
+          imagePath: cloudImage,
+        );
+      }
+    }
+    return deduped.values.toList();
+  }
+
+  Future<void> mergeRemoteLearnerFavorites({
+    required int learnerUserId,
+    required List<RemoteLearnerFavorite> favorites,
+  }) async {
+    if (favorites.isEmpty) return;
+    final deduped = <String, RemoteLearnerFavorite>{};
+    for (final remote in favorites) {
+      final text = storedUserText(remote.phraseText);
+      final categoryKey = normalizeCategoryKey(remote.categoryKey);
+      if (text.isEmpty || categoryKey.isEmpty) continue;
+      final key = '${text.toLowerCase()}__$categoryKey';
+      final existing = deduped[key];
+      final candidate = RemoteLearnerFavorite(
+        phraseText: text,
+        categoryKey: categoryKey,
+        phraseId: remote.phraseId,
+        imagePath: remote.imagePath,
+      );
+      if (existing == null) {
+        deduped[key] = candidate;
+        continue;
+      }
+      final incomingImage = remote.imagePath?.trim() ?? '';
+      final existingImage = existing.imagePath?.trim() ?? '';
+      if (incomingImage.isNotEmpty && existingImage.isEmpty) {
+        deduped[key] = candidate;
+      }
+    }
+
+    final remoteKeys = deduped.keys.toSet();
+    final localFavorites = await getFavorites(learnerUserId);
+    for (final local in localFavorites) {
+      if (!remoteKeys.contains(local.dedupeKey)) {
+        await removeFavorite(local.id);
+      }
+    }
+
+    for (final remote in deduped.values) {
+      final storedImage = await resolveFavoriteImageFromCloud(remote.imagePath);
+      final existing = await findFavorite(
+        learnerUserId,
+        remote.phraseText,
+        remote.categoryKey,
+      );
+      if (existing != null) {
+        if (storedImage != null && storedImage.isNotEmpty) {
+          final db = await _dbHelper.database;
+          await db.update(
+            'favorites',
+            {'image_path': storedImage},
+            where: 'id = ?',
+            whereArgs: [existing.id],
+          );
+        } else {
+          await _backfillFavoriteImageFromPhrase(
+            userId: learnerUserId,
+            favoriteId: existing.id,
+            phraseText: remote.phraseText,
+            categoryKey: remote.categoryKey,
+            phraseId: remote.phraseId,
+          );
+        }
+        continue;
+      }
+      await addFavorite(
+        userId: learnerUserId,
+        phraseText: remote.phraseText,
+        categoryKey: remote.categoryKey,
+        phraseId: remote.phraseId,
+        imagePath: storedImage,
+      );
+    }
+    await _backfillMissingFavoriteImages(learnerUserId);
+  }
+
+  Future<void> _backfillFavoriteImageFromPhrase({
+    required int userId,
+    required int favoriteId,
+    required String phraseText,
+    required String categoryKey,
+    int? phraseId,
+  }) async {
+    final source = await _favoriteSourceImagePath(
+      userId,
+      FavoriteModel(
+        id: favoriteId,
+        userId: userId,
+        phraseText: phraseText,
+        categoryKey: categoryKey,
+        phraseId: phraseId,
+      ),
+    );
+    if (source == null || source.trim().isEmpty) return;
+    final db = await _dbHelper.database;
+    await db.update(
+      'favorites',
+      {'image_path': source.trim()},
+      where: 'id = ?',
+      whereArgs: [favoriteId],
+    );
+  }
+
+  Future<void> _backfillMissingFavoriteImages(int userId) async {
+    final favorites = await getFavorites(userId);
+    for (final favorite in favorites) {
+      if (favorite.imagePath != null && favorite.imagePath!.trim().isNotEmpty) {
+        continue;
+      }
+      await _backfillFavoriteImageFromPhrase(
+        userId: userId,
+        favoriteId: favorite.id,
+        phraseText: favorite.phraseText,
+        categoryKey: favorite.categoryKey,
+        phraseId: favorite.phraseId,
+      );
+    }
+  }
+
+  Future<List<RemoteLearnerSpeakHistory>> getHistoryForCloudSync(
+    int learnerUserId,
+  ) async {
+    const maxEntries = 500;
+    final history = await getHistory(learnerUserId);
+    final deduped = <String, RemoteLearnerSpeakHistory>{};
+    for (final entry in history.take(maxEntries)) {
+      final text = storedUserText(entry.text);
+      final categoryKey = normalizeCategoryKey(entry.categoryKey);
+      if (text.isEmpty || categoryKey.isEmpty) continue;
+      final key =
+          '${text.toLowerCase()}|$categoryKey|${entry.createdAt.millisecondsSinceEpoch}';
+      deduped.putIfAbsent(
+        key,
+        () => RemoteLearnerSpeakHistory(
+          phraseText: text,
+          categoryKey: categoryKey,
+          createdAt: entry.createdAt,
+          className: entry.className,
+          lessonTitle: entry.lessonTitle,
+        ),
+      );
+    }
+    return deduped.values.toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+  }
+
+  Future<void> mergeRemoteLearnerSpeakHistory({
+    required int learnerUserId,
+    required List<RemoteLearnerSpeakHistory> history,
+  }) async {
+    if (history.isEmpty) return;
+    final db = await _dbHelper.database;
+    final deduped = <String, RemoteLearnerSpeakHistory>{};
+    for (final remote in history) {
+      final text = storedUserText(remote.phraseText);
+      final categoryKey = normalizeCategoryKey(remote.categoryKey);
+      if (text.isEmpty || categoryKey.isEmpty) continue;
+      final key =
+          '${text.toLowerCase()}|$categoryKey|${remote.createdAt.millisecondsSinceEpoch}';
+      deduped.putIfAbsent(key, () => remote);
+    }
+    for (final remote in deduped.values) {
+      final text = storedUserText(remote.phraseText);
+      if (text.isEmpty) continue;
+      final effectiveCategoryKey = resolveHistoryCategoryKey(
+        categoryKey: remote.categoryKey,
+        className: remote.className,
+        lessonTitle: remote.lessonTitle,
+      );
+      final createdAtMs = remote.createdAt.millisecondsSinceEpoch;
+      final existing = await db.query(
+        'history',
+        where:
+            'user_id = ? AND phrase_text = ? AND category_key = ? AND created_at = ?',
+        whereArgs: [
+          learnerUserId,
+          text,
+          effectiveCategoryKey,
+          createdAtMs,
+        ],
+        limit: 1,
+      );
+      if (existing.isNotEmpty) continue;
+      await addHistory(
+        userId: learnerUserId,
+        text: text,
+        categoryKey: remote.categoryKey,
+        className: remote.className,
+        lessonTitle: remote.lessonTitle,
+        createdAt: remote.createdAt,
       );
     }
   }
@@ -953,6 +1809,7 @@ class AppRepository {
   }
 
   Future<List<FavoriteModel>> getFavorites(int userId) async {
+    await warmPhraseImageCacheDirectory();
     final db = await _dbHelper.database;
     final rows = await db.query(
       'favorites',
@@ -960,7 +1817,25 @@ class AppRepository {
       whereArgs: [userId],
       orderBy: 'id DESC',
     );
-    return rows.map(FavoriteModel.fromMap).toList();
+    final favorites = rows.map(FavoriteModel.fromMap).toList();
+    for (final favorite in favorites) {
+      if (favorite.imagePath == null || !isRemotePhraseImagePath(favorite.imagePath)) {
+        continue;
+      }
+      final local = await cachePhraseImageLocally(favorite.imagePath);
+      if (local == null ||
+          local == favorite.imagePath ||
+          isRemotePhraseImagePath(local)) {
+        continue;
+      }
+      await db.update(
+        'favorites',
+        {'image_path': local},
+        where: 'id = ?',
+        whereArgs: [favorite.id],
+      );
+    }
+    return favorites;
   }
 
   Future<FavoriteModel?> findFavorite(int userId, String text, String categoryKey) async {
@@ -1007,6 +1882,14 @@ class AppRepository {
     await db.delete('favorites', where: 'id = ?', whereArgs: [favoriteId]);
   }
 
+  static String _historyDedupeKey({
+    required String phraseText,
+    required String categoryKey,
+    required int createdAtMs,
+  }) {
+    return '${storedUserText(phraseText).toLowerCase()}|$categoryKey|$createdAtMs';
+  }
+
   Future<List<HistoryModel>> getHistory(int userId) async {
     final db = await _dbHelper.database;
     final rows = await db.query(
@@ -1015,7 +1898,20 @@ class AppRepository {
       whereArgs: [userId],
       orderBy: 'created_at DESC',
     );
-    return rows.map(HistoryModel.fromMap).toList();
+    final seen = <String>{};
+    final deduped = <HistoryModel>[];
+    for (final row in rows) {
+      final item = HistoryModel.fromMap(row);
+      final key = _historyDedupeKey(
+        phraseText: item.text,
+        categoryKey: item.categoryKey,
+        createdAtMs: item.createdAt.millisecondsSinceEpoch,
+      );
+      if (seen.add(key)) {
+        deduped.add(item);
+      }
+    }
+    return deduped;
   }
 
   static String resolveHistoryCategoryKey({
@@ -1087,6 +1983,20 @@ class AppRepository {
       orderBy: 'created_at ASC',
     );
     return rows.map(HistoryModel.fromMap).toList();
+  }
+
+  Future<DateTime?> getLatestSyncedActivityTime(int userId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'history',
+      columns: ['created_at'],
+      where: 'user_id = ? AND remote_sync_key IS NOT NULL',
+      whereArgs: [userId],
+      orderBy: 'created_at DESC',
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return DateTime.fromMillisecondsSinceEpoch(rows.first['created_at'] as int);
   }
 
   Future<void> markHistoryCloudSynced({
@@ -1164,6 +2074,33 @@ class AppRepository {
         phraseText: text,
         categoryKey: effectiveCategoryKey,
       );
+      final existing = await db.query(
+        'history',
+        where:
+            'user_id = ? AND phrase_text = ? AND category_key = ? AND created_at = ?',
+        whereArgs: [
+          learnerUserId,
+          text,
+          effectiveCategoryKey,
+          createdAtMs,
+        ],
+        limit: 1,
+      );
+      if (existing.isNotEmpty) {
+        if (existing.first['remote_sync_key'] == null) {
+          batch.update(
+            'history',
+            {'remote_sync_key': syncKey},
+            where: 'id = ?',
+            whereArgs: [existing.first['id']],
+          );
+          pending++;
+        }
+        if (pending >= 200) {
+          await flush();
+        }
+        continue;
+      }
       final row = <String, Object?>{
         'user_id': learnerUserId,
         'phrase_text': text,
@@ -1564,6 +2501,19 @@ class AppRepository {
     ''', [className, lessonTitle]);
     if (rows.isEmpty) return null;
     return rows.first['phrase_count'] as int?;
+  }
+
+  Future<Set<String>> _lessonPhraseTextKeysForId(int lessonId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'lesson_phrases',
+      columns: ['phrase_text'],
+      where: 'lesson_id = ?',
+      whereArgs: [lessonId],
+    );
+    return rows
+        .map((row) => lessonPhraseTextKey(row['phrase_text'] as String))
+        .toSet();
   }
 
   static String generateClassCode() {
@@ -2200,6 +3150,7 @@ class AppRepository {
     required String lessonTitle,
     required DateTime rangeStart,
     required DateTime rangeEnd,
+    int? lessonId,
     List<RemoteLearnerActivity> cloudActivities = const [],
   }) async {
     final db = await _dbHelper.database;
@@ -2214,6 +3165,8 @@ class AppRepository {
       orderBy: 'created_at DESC',
     );
 
+    final lessonPhraseKeys =
+        lessonId != null ? await _lessonPhraseTextKeysForId(lessonId) : null;
     final practiced = <String>{};
     var totalInteractions = 0;
     DateTime? lastAccessed;
@@ -2246,9 +3199,13 @@ class AppRepository {
       if (lastAccessed == null || createdAt.isAfter(lastAccessed!)) {
         lastAccessed = createdAt;
       }
-      final stored = storedUserText(text);
-      if (!sameStoredText(stored, lessonStored)) {
-        practiced.add(stored);
+      final storedKey = lessonPhraseTextKey(text);
+      if (lessonPhraseKeys != null) {
+        if (lessonPhraseKeys.contains(storedKey)) {
+          practiced.add(storedKey);
+        }
+      } else if (!sameStoredText(storedUserText(text), lessonStored)) {
+        practiced.add(storedKey);
       }
     }
 
@@ -2274,10 +3231,12 @@ class AppRepository {
       );
     }
 
-    final totalPhrases = await _lessonPhraseCountForTitle(
-      className: className,
-      lessonTitle: lessonTitle,
-    );
+    final totalPhrases = lessonId != null
+        ? lessonPhraseKeys?.length
+        : await _lessonPhraseCountForTitle(
+            className: className,
+            lessonTitle: lessonTitle,
+          );
 
     return ChildLessonProgressEntry(
       className: className,
@@ -2329,10 +3288,46 @@ class AppRepository {
       WHERE ce.learner_user_id = ?
       ORDER BY ce.enrolled_at ASC
     ''', [learnerUserId]);
-    return rows.map(EnrolledClassModel.fromMap).toList();
+    final results = <EnrolledClassModel>[];
+    for (final row in rows) {
+      final teacherId = row['teacher_id'] as int;
+      final teacherName = await teacherDisplayNameForUserId(teacherId);
+      results.add(
+        EnrolledClassModel(
+          classId: row['class_id'] as int,
+          className: row['class_name'] as String,
+          classCode: row['class_code'] as String,
+          teacherId: teacherId,
+          teacherName: teacherName,
+          enrolledAt: DateTime.fromMillisecondsSinceEpoch(
+            row['enrolled_at'] as int,
+          ),
+        ),
+      );
+    }
+    return results;
+  }
+
+  Future<String> teacherDisplayNameForUserId(int teacherUserId) async {
+    final user = await findUserById(teacherUserId);
+    if (user == null) return 'Teacher';
+    final full = user.fullName.trim();
+    if (full.isNotEmpty && !isGenericAccountName(full) && !looksLikeEmail(full)) {
+      return full;
+    }
+    final settings = await getUserSettings(teacherUserId);
+    final fromSignup = welcomeFirstNameFrom(
+      settings: settings,
+      fullName: user.fullName,
+    );
+    if (fromSignup.isNotEmpty && !isGenericAccountName(fromSignup)) {
+      return fromSignup;
+    }
+    return fromSignup.isNotEmpty ? fromSignup : full;
   }
 
   Future<List<ParentNotification>> getParentNotifications(int parentUserId) async {
+    await dedupeParentNotifications(parentUserId);
     final db = await _dbHelper.database;
     final rows = await db.query(
       'parent_notifications',
@@ -2350,12 +3345,16 @@ class AppRepository {
     final db = await _dbHelper.database;
     final rows = await db.rawQuery('''
       SELECT
-        pn.id,
-        COALESCE(pn.class_id, tc.id) AS class_id,
+        MIN(pn.id) AS id,
+        COALESCE(pn.class_id, MAX(tc.id), 0) AS class_id,
         pn.child_name,
         pn.alert_type,
         pn.created_at,
-        COALESCE(NULLIF(TRIM(pn.class_name), ''), tc.class_name, '') AS class_name
+        COALESCE(
+          NULLIF(TRIM(MAX(pn.class_name)), ''),
+          MAX(tc.class_name),
+          ''
+        ) AS class_name
       FROM parent_notifications pn
       LEFT JOIN class_enrollments ce
         ON pn.teacher_user_id IS NULL
@@ -2367,7 +3366,13 @@ class AppRepository {
         )
       WHERE pn.teacher_user_id = ?
          OR (pn.teacher_user_id IS NULL AND tc.teacher_user_id = ?)
-      GROUP BY pn.id
+      GROUP BY
+        pn.learner_user_id,
+        pn.alert_type,
+        pn.created_at,
+        pn.child_name,
+        COALESCE(pn.class_id, tc.id),
+        COALESCE(pn.teacher_user_id, tc.teacher_user_id)
       ORDER BY pn.created_at DESC
       LIMIT ?
     ''', [teacherUserId, teacherUserId, limit]);
@@ -2535,6 +3540,56 @@ class AppRepository {
     return uid.trim();
   }
 
+  static String _parentNotificationDisplayKey({
+    int? learnerUserId,
+    required String alertType,
+    required String title,
+    required String body,
+  }) {
+    return '${learnerUserId ?? 0}|$alertType|${title.trim()}|${body.trim()}';
+  }
+
+  Future<void> dedupeParentNotifications(int parentUserId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'parent_notifications',
+      where: 'parent_user_id = ?',
+      whereArgs: [parentUserId],
+      orderBy: 'created_at DESC, id DESC',
+    );
+    final keepByDisplay = <String, Map<String, Object?>>{};
+    final deleteIds = <int>[];
+    for (final row in rows) {
+      final key = _parentNotificationDisplayKey(
+        learnerUserId: row['learner_user_id'] as int?,
+        alertType: row['alert_type'] as String,
+        title: row['title'] as String,
+        body: row['body'] as String,
+      );
+      final id = row['id'] as int;
+      final current = keepByDisplay[key];
+      if (current == null) {
+        keepByDisplay[key] = row;
+        continue;
+      }
+      final currentRemote = (current['remote_id'] as String?)?.trim() ?? '';
+      final rowRemote = (row['remote_id'] as String?)?.trim() ?? '';
+      if (currentRemote.isEmpty && rowRemote.isNotEmpty) {
+        deleteIds.add(current['id'] as int);
+        keepByDisplay[key] = row;
+      } else {
+        deleteIds.add(id);
+      }
+    }
+    for (final id in deleteIds) {
+      await db.delete(
+        'parent_notifications',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
+  }
+
   Future<void> upsertRemoteParentNotifications({
     required int parentUserId,
     required List<RemoteParentNotification> items,
@@ -2543,6 +3598,7 @@ class AppRepository {
     final db = await _dbHelper.database;
     for (final item in items) {
       if (item.parentUserId != parentUserId) continue;
+      final createdAtMs = item.createdAt.millisecondsSinceEpoch;
       final existing = await db.query(
         'parent_notifications',
         where: 'remote_id = ?',
@@ -2565,6 +3621,37 @@ class AppRepository {
         );
         continue;
       }
+
+      final contentMatches = await db.query(
+        'parent_notifications',
+        where:
+            'parent_user_id = ? AND alert_type = ? AND title = ? AND body = ? AND (remote_id IS NULL OR remote_id = \'\')',
+        whereArgs: [
+          parentUserId,
+          item.alertType,
+          item.title,
+          item.body,
+        ],
+        orderBy: 'created_at DESC',
+        limit: 1,
+      );
+      if (contentMatches.isNotEmpty) {
+        final wasRead = (contentMatches.first['is_read'] as int? ?? 0) == 1;
+        final keepRead = wasRead || item.isRead;
+        await db.update(
+          'parent_notifications',
+          {
+            'remote_id': item.remoteId,
+            'learner_user_id': item.learnerUserId,
+            'child_name': item.childName,
+            'is_read': keepRead ? 1 : 0,
+          },
+          where: 'id = ?',
+          whereArgs: [contentMatches.first['id']],
+        );
+        continue;
+      }
+
       await db.insert('parent_notifications', {
         'parent_user_id': parentUserId,
         'learner_user_id': item.learnerUserId,
@@ -2572,8 +3659,72 @@ class AppRepository {
         'alert_type': item.alertType,
         'title': item.title,
         'body': item.body,
-        'created_at': item.createdAt.millisecondsSinceEpoch,
+        'created_at': createdAtMs,
         'is_read': item.isRead ? 1 : 0,
+        'remote_id': item.remoteId,
+      });
+    }
+    await dedupeParentNotifications(parentUserId);
+  }
+
+  Future<void> mergeRemoteTeacherAlerts({
+    required int teacherUserId,
+    required List<RemoteTeacherAlert> items,
+  }) async {
+    if (items.isEmpty) return;
+    final db = await _dbHelper.database;
+    for (final item in items) {
+      if (item.teacherUserId != teacherUserId) continue;
+      final createdAtMs = item.createdAt.millisecondsSinceEpoch;
+      final existing = await db.query(
+        'parent_notifications',
+        where: 'remote_id = ?',
+        whereArgs: [item.remoteId],
+        limit: 1,
+      );
+      if (existing.isNotEmpty) continue;
+
+      final contentMatches = await db.query(
+        'parent_notifications',
+        where:
+            'teacher_user_id = ? AND learner_user_id = ? AND alert_type = ? AND title = ? AND body = ? AND created_at = ? AND (remote_id IS NULL OR remote_id = \'\')',
+        whereArgs: [
+          teacherUserId,
+          item.learnerUserId,
+          item.alertType,
+          item.title,
+          item.body,
+          createdAtMs,
+        ],
+        limit: 1,
+      );
+      if (contentMatches.isNotEmpty) {
+        await db.update(
+          'parent_notifications',
+          {
+            'remote_id': item.remoteId,
+            'class_id': item.classId,
+            'class_name': item.className,
+            'child_name': item.childName,
+          },
+          where: 'id = ?',
+          whereArgs: [contentMatches.first['id']],
+        );
+        continue;
+      }
+
+      await db.insert('parent_notifications', {
+        'parent_user_id': item.parentUserId > 0 ? item.parentUserId : 0,
+        'learner_user_id': item.learnerUserId,
+        'teacher_user_id': teacherUserId,
+        'class_id': item.classId,
+        'class_name': item.className,
+        'child_name': item.childName,
+        'alert_type': item.alertType,
+        'title': item.title,
+        'body': item.body,
+        'created_at': createdAtMs,
+        'is_read': 0,
         'remote_id': item.remoteId,
       });
     }
@@ -2766,6 +3917,19 @@ class AppRepository {
     return rows.first['class_id'] as int?;
   }
 
+  Future<String?> cloudPhraseKeyForLessonPhrase(int phraseId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'lesson_phrases',
+      columns: ['cloud_phrase_key'],
+      where: 'id = ?',
+      whereArgs: [phraseId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return (rows.first['cloud_phrase_key'] as String?)?.trim();
+  }
+
   Future<bool> _teacherOwnsLesson(int teacherUserId, int lessonId) async {
     final db = await _dbHelper.database;
     final rows = await db.rawQuery('''
@@ -2822,6 +3986,31 @@ class AppRepository {
     return null;
   }
 
+  static String? mergedPhraseImagePath({
+    String? existing,
+    String? remote,
+  }) {
+    final remoteTrimmed = remote?.trim();
+    if (remoteTrimmed == null || remoteTrimmed.isEmpty) return null;
+
+    final existingTrimmed = existing?.trim();
+    if (existingTrimmed != null && existingTrimmed.isNotEmpty) {
+      if (existingTrimmed == remoteTrimmed) {
+        return existingPhraseImagePath(existingTrimmed) ?? existingTrimmed;
+      }
+      // Teacher changed the image — prefer the new remote URL (or its cache).
+      if (isRemotePhraseImagePath(remoteTrimmed)) {
+        return existingPhraseImagePath(remoteTrimmed) ?? remoteTrimmed;
+      }
+      final existingUsable = existingPhraseImagePath(existingTrimmed);
+      if (existingUsable != null && !isRemotePhraseImagePath(existingUsable)) {
+        return existingUsable;
+      }
+    }
+
+    return existingPhraseImagePath(remoteTrimmed) ?? remoteTrimmed;
+  }
+
   Future<RemoteClassContent?> buildRemoteClassContent({
     required int teacherUserId,
     required int classId,
@@ -2854,14 +4043,20 @@ class AppRepository {
           whereArgs: [lesson.id],
         );
       }
-      final phraseRows = await db.query(
+      await dedupeLessonPhrases(lesson.id);
+      final dedupedPhraseRows = await db.query(
         'lesson_phrases',
         where: 'lesson_id = ?',
         whereArgs: [lesson.id],
         orderBy: 'sort_order ASC, id ASC',
       );
       final remotePhrases = <RemoteLessonPhraseContent>[];
-      for (final phraseRow in phraseRows) {
+      final exportedTextKeys = <String>{};
+      for (final phraseRow in dedupedPhraseRows) {
+        final text = storedUserText(phraseRow['phrase_text'] as String);
+        if (text.isEmpty) continue;
+        final textKey = lessonPhraseTextKey(text);
+        if (!exportedTextKeys.add(textKey)) continue;
         final phraseId = phraseRow['id'] as int;
         var phraseKey = phraseRow['cloud_phrase_key'] as String?;
         if (phraseKey == null || phraseKey.trim().isEmpty) {
@@ -2873,12 +4068,17 @@ class AppRepository {
             whereArgs: [phraseId],
           );
         }
+        final rawImage = phraseRow['image_path'] as String?;
+        final cloudImage = await resolveImagePathForCloudSync(
+          rawImage,
+          teacherFirebaseUid,
+        );
         remotePhrases.add(
           RemoteLessonPhraseContent(
             phraseKey: phraseKey,
-            text: phraseRow['phrase_text'] as String,
+            text: text,
             sortOrder: phraseRow['sort_order'] as int? ?? 0,
-            imagePath: imagePathForCloudSync(phraseRow['image_path'] as String?),
+            imagePath: cloudImage ?? imagePathForCloudSync(rawImage),
           ),
         );
       }
@@ -2901,13 +4101,37 @@ class AppRepository {
     );
   }
 
-  Future<void> mergeRemoteClassContent({
+  Future<bool> mergeRemoteClassContent({
     required int classId,
     required RemoteClassContent content,
+    Set<String> blockedPhraseKeys = const {},
+    bool pruneStalePhrases = true,
   }) async {
-    if (content.lessons.isEmpty) return;
+    if (content.lessons.isEmpty) return false;
     final db = await _dbHelper.database;
     final remoteLessonKeys = <String>{};
+    var changed = false;
+
+    final remoteClassName = storedUserText(content.className);
+    if (remoteClassName.isNotEmpty) {
+      final classRows = await db.query(
+        'teacher_classes',
+        where: 'id = ?',
+        whereArgs: [classId],
+        limit: 1,
+      );
+      if (classRows.isNotEmpty) {
+        final existingName =
+            storedUserText(classRows.first['class_name'] as String);
+        if (existingName != remoteClassName) {
+          await updateClassDisplayName(
+            classId: classId,
+            className: remoteClassName,
+          );
+          changed = true;
+        }
+      }
+    }
 
     for (final remoteLesson in content.lessons) {
       final lessonKey = remoteLesson.lessonKey.trim();
@@ -2923,28 +4147,84 @@ class AppRepository {
 
       int lessonId;
       if (existingLessonRows.isEmpty) {
-        lessonId = await db.insert('class_lessons', {
-          'class_id': classId,
-          'title': storedUserText(remoteLesson.title),
-          'created_at': remoteLesson.createdAt.millisecondsSinceEpoch,
-          'sort_order': remoteLesson.sortOrder,
-          'cloud_lesson_key': lessonKey,
-        });
+        Map<String, Object?>? legacyLesson;
+        final classLessonRows = await db.query(
+          'class_lessons',
+          where: 'class_id = ?',
+          whereArgs: [classId],
+        );
+        final remoteTitle = storedUserText(remoteLesson.title);
+        for (final row in classLessonRows) {
+          final localKey = (row['cloud_lesson_key'] as String?)?.trim() ?? '';
+          if (localKey == lessonKey) {
+            legacyLesson = row;
+            break;
+          }
+          if (localKey.isEmpty &&
+              storedUserText(row['title'] as String) == remoteTitle) {
+            legacyLesson = row;
+            break;
+          }
+        }
+        if (legacyLesson != null) {
+          lessonId = legacyLesson['id'] as int;
+          await db.update(
+            'class_lessons',
+            {
+              'title': remoteTitle,
+              'sort_order': remoteLesson.sortOrder,
+              'cloud_lesson_key': lessonKey,
+            },
+            where: 'id = ?',
+            whereArgs: [lessonId],
+          );
+          changed = true;
+        } else {
+          lessonId = await db.insert('class_lessons', {
+            'class_id': classId,
+            'title': remoteTitle,
+            'created_at': remoteLesson.createdAt.millisecondsSinceEpoch,
+            'sort_order': remoteLesson.sortOrder,
+            'cloud_lesson_key': lessonKey,
+          });
+          changed = true;
+        }
       } else {
         lessonId = existingLessonRows.first['id'] as int;
-        await db.update(
-          'class_lessons',
-          {
-            'title': storedUserText(remoteLesson.title),
-            'sort_order': remoteLesson.sortOrder,
-          },
-          where: 'id = ?',
-          whereArgs: [lessonId],
-        );
+        final existingTitle =
+            storedUserText(existingLessonRows.first['title'] as String);
+        final existingSort =
+            existingLessonRows.first['sort_order'] as int? ?? 0;
+        final remoteTitle = storedUserText(remoteLesson.title);
+        if (existingTitle != remoteTitle ||
+            existingSort != remoteLesson.sortOrder) {
+          await db.update(
+            'class_lessons',
+            {
+              'title': remoteTitle,
+              'sort_order': remoteLesson.sortOrder,
+            },
+            where: 'id = ?',
+            whereArgs: [lessonId],
+          );
+          changed = true;
+        }
       }
 
       final remotePhraseKeys = <String>{};
+      final remotePhraseTextKeys = <String>{};
+      final dedupedRemotePhrases = <String, RemoteLessonPhraseContent>{};
       for (final remotePhrase in remoteLesson.phrases) {
+        final stored = storedUserText(remotePhrase.text);
+        if (stored.isEmpty) continue;
+        final textKey = lessonPhraseTextKey(stored);
+        remotePhraseTextKeys.add(textKey);
+        dedupedRemotePhrases.putIfAbsent(
+          textKey,
+          () => remotePhrase,
+        );
+      }
+      for (final remotePhrase in dedupedRemotePhrases.values) {
         final phraseKey = remotePhrase.phraseKey.trim();
         if (phraseKey.isEmpty) continue;
         remotePhraseKeys.add(phraseKey);
@@ -2957,44 +4237,85 @@ class AppRepository {
           whereArgs: [lessonId, phraseKey],
           limit: 1,
         );
-        final imagePath = imagePathForCloudSync(remotePhrase.imagePath);
-        if (existingPhraseRows.isEmpty) {
-          await db.insert('lesson_phrases', {
-            'lesson_id': lessonId,
-            'phrase_text': stored,
-            'image_path': imagePath,
-            'sort_order': remotePhrase.sortOrder,
-            'created_at': DateTime.now().millisecondsSinceEpoch,
-            'cloud_phrase_key': phraseKey,
-          });
-        } else {
+        Map<String, Object?>? matchedRow =
+            existingPhraseRows.isNotEmpty ? existingPhraseRows.first : null;
+        if (matchedRow == null) {
+          final lessonPhraseRows = await db.query(
+            'lesson_phrases',
+            where: 'lesson_id = ?',
+            whereArgs: [lessonId],
+          );
+          final storedKey = lessonPhraseTextKey(stored);
+          for (final row in lessonPhraseRows) {
+            if (lessonPhraseTextKey(row['phrase_text'] as String) == storedKey) {
+              matchedRow = row;
+              break;
+            }
+          }
+        }
+        final storedImage = mergedPhraseImagePath(
+          existing: matchedRow?['image_path'] as String?,
+          remote: imagePathForCloudSync(remotePhrase.imagePath) ??
+              remotePhrase.imagePath,
+        );
+        if (matchedRow != null) {
+          final existingText =
+              storedUserText(matchedRow['phrase_text'] as String);
+          final existingSort = matchedRow['sort_order'] as int? ?? 0;
+          final existingImage = matchedRow['image_path'] as String?;
+          if (existingText == stored &&
+              existingSort == remotePhrase.sortOrder &&
+              (existingImage?.trim() ?? '') == (storedImage?.trim() ?? '')) {
+            continue;
+          }
           await db.update(
             'lesson_phrases',
             {
               'phrase_text': stored,
-              'image_path': imagePath,
+              'image_path': storedImage,
               'sort_order': remotePhrase.sortOrder,
+              'cloud_phrase_key': phraseKey,
             },
             where: 'id = ?',
-            whereArgs: [existingPhraseRows.first['id']],
+            whereArgs: [matchedRow['id']],
           );
+          changed = true;
+        } else {
+          if (blockedPhraseKeys.contains(phraseKey)) continue;
+          await db.insert('lesson_phrases', {
+            'lesson_id': lessonId,
+            'phrase_text': stored,
+            'image_path': storedImage,
+            'sort_order': remotePhrase.sortOrder,
+            'created_at': DateTime.now().millisecondsSinceEpoch,
+            'cloud_phrase_key': phraseKey,
+          });
+          changed = true;
         }
       }
 
-      final stalePhrases = await db.query(
+      await dedupeLessonPhrases(lessonId);
+
+      if (!pruneStalePhrases) continue;
+
+      final localPhrases = await db.query(
         'lesson_phrases',
-        where: 'lesson_id = ? AND cloud_phrase_key IS NOT NULL',
+        where: 'lesson_id = ?',
         whereArgs: [lessonId],
       );
-      for (final row in stalePhrases) {
+      for (final row in localPhrases) {
         final key = (row['cloud_phrase_key'] as String?)?.trim() ?? '';
-        if (key.isNotEmpty && !remotePhraseKeys.contains(key)) {
-          await db.delete(
-            'lesson_phrases',
-            where: 'id = ?',
-            whereArgs: [row['id']],
-          );
-        }
+        final textKey = lessonPhraseTextKey(row['phrase_text'] as String);
+        final stillRemote = (key.isNotEmpty && remotePhraseKeys.contains(key)) ||
+            remotePhraseTextKeys.contains(textKey);
+        if (stillRemote) continue;
+        if (key.isNotEmpty && blockedPhraseKeys.contains(key)) continue;
+        await db.delete(
+          'lesson_phrases',
+          where: 'id = ?',
+          whereArgs: [row['id']],
+        );
+        changed = true;
       }
     }
 
@@ -3017,8 +4338,10 @@ class AppRepository {
           where: 'id = ?',
           whereArgs: [staleLessonId],
         );
+        changed = true;
       }
     }
+    return changed;
   }
 
   Future<ClassLesson?> createClassLesson({
@@ -3112,6 +4435,30 @@ class AppRepository {
         .toList();
   }
 
+  Future<void> dedupeLessonPhrases(int lessonId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'lesson_phrases',
+      where: 'lesson_id = ?',
+      whereArgs: [lessonId],
+      orderBy: 'cloud_phrase_key IS NOT NULL DESC, sort_order ASC, id ASC',
+    );
+    final keepTextKeys = <String>{};
+    final deleteIds = <int>[];
+    for (final row in rows) {
+      final textKey = lessonPhraseTextKey(row['phrase_text'] as String);
+      if (textKey.isEmpty) continue;
+      if (keepTextKeys.contains(textKey)) {
+        deleteIds.add(row['id'] as int);
+      } else {
+        keepTextKeys.add(textKey);
+      }
+    }
+    for (final id in deleteIds) {
+      await db.delete('lesson_phrases', where: 'id = ?', whereArgs: [id]);
+    }
+  }
+
   Future<LessonPhrase?> addLessonPhrase({
     required int teacherUserId,
     required int lessonId,
@@ -3122,6 +4469,33 @@ class AppRepository {
     final trimmed = storedUserText(text);
     if (trimmed.isEmpty) return null;
     final db = await _dbHelper.database;
+    final existingRows = await db.query(
+      'lesson_phrases',
+      where: 'lesson_id = ?',
+      whereArgs: [lessonId],
+    );
+    final trimmedKey = lessonPhraseTextKey(trimmed);
+    for (final row in existingRows) {
+      if (lessonPhraseTextKey(row['phrase_text'] as String) == trimmedKey) {
+        final existingId = row['id'] as int;
+        var cloudKey = row['cloud_phrase_key'] as String?;
+        if (cloudKey == null || cloudKey.trim().isEmpty) {
+          cloudKey = existingId.toString();
+          await db.update(
+            'lesson_phrases',
+            {'cloud_phrase_key': cloudKey},
+            where: 'id = ?',
+            whereArgs: [existingId],
+          );
+        }
+        return LessonPhrase(
+          id: existingId,
+          lessonId: lessonId,
+          text: trimmed,
+          imagePath: row['image_path'] as String?,
+        );
+      }
+    }
     final now = DateTime.now().millisecondsSinceEpoch;
     final id = await db.insert('lesson_phrases', {
       'lesson_id': lessonId,

@@ -276,37 +276,39 @@ class _LinkedChildTile extends StatelessWidget {
                 ),
               ),
             ),
-            Flexible(
-              child: TextButton(
-                onPressed: onUnlink,
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.sm,
-                    vertical: AppSpacing.sm,
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextButton(
+                  onPressed: onUnlink,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                      vertical: AppSpacing.sm,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                child: Text(
-                  AppStrings.unlinkChild(lang),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: theme.bgAccent,
+                  child: Text(
+                    AppStrings.unlinkChild(lang),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: theme.bgAccent,
+                    ),
                   ),
                 ),
-              ),
-            ),
-            GestureDetector(
-              onTap: onOpen,
-              behavior: HitTestBehavior.opaque,
-              child: Icon(
-                Icons.chevron_right_rounded,
-                color: theme.textMain.withValues(alpha: 0.45),
-              ),
+                GestureDetector(
+                  onTap: onOpen,
+                  behavior: HitTestBehavior.opaque,
+                  child: Icon(
+                    Icons.chevron_right_rounded,
+                    color: theme.textMain.withValues(alpha: 0.45),
+                  ),
+                ),
+              ],
             ),
           ],
         ),

@@ -117,6 +117,14 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _clearComposer() {
+    _textController.clear();
+    _undoStack
+      ..clear()
+      ..add('');
+    setState(() => _attachedImagePath = null);
+  }
+
   Future<void> _pickImage() async {
     final picker = ImagePicker();
     final file = await picker.pickImage(source: ImageSource.gallery, maxWidth: 900);
@@ -148,7 +156,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final app = context.watch<AppState>();
     final theme = app.theme;
     final lang = app.language;
-    final userName = app.user?.fullName ?? AppStrings.defaultLearnerName(lang);
+    final userName = app.welcomeFirstName(lang);
     final denseGrid = AppSpacing.phraseGridIsDense(context);
     final highlightController = _textController;
     if (highlightController is HighlightingTextController) {
@@ -221,10 +229,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     color: theme.textMain,
                   ),
                 ),
-                TextButton.icon(
+                TextButton(
                   onPressed: _showAddCategoryDialog,
-                  icon: const Icon(Icons.add, size: 16),
-                  label: Text(
+                  child: Text(
                     AppStrings.addCategoryShort(lang),
                     style: GoogleFonts.poppins(
                       fontSize: 12,
@@ -311,7 +318,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           icon: const Icon(Icons.close_rounded, size: 22),
                           onPressed: () async {
                             await app.stopSpeech();
-                            _textController.clear();
+                            _clearComposer();
                           },
                         ),
                       ],
@@ -414,12 +421,11 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           FilledButton.icon(
                             onPressed: () async {
-                              await app.addPhrase(
-                                _textController.text,
-                                imagePath: _attachedImagePath,
-                              );
-                              _textController.clear();
-                              setState(() => _attachedImagePath = null);
+                              final text = _textController.text.trim();
+                              if (text.isEmpty) return;
+                              final image = _attachedImagePath;
+                              _clearComposer();
+                              await app.addPhrase(text, imagePath: image);
                             },
                             style: FilledButton.styleFrom(
                               backgroundColor: theme.bgAccent,

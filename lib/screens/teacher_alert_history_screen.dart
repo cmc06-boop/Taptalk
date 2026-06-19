@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
+import '../core/utils/live_refresh.dart';
 import '../data/models/teacher_recent_alert.dart';
 import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
@@ -23,24 +24,13 @@ class TeacherAlertHistoryScreen extends StatefulWidget {
 class _TeacherAlertHistoryScreenState extends State<TeacherAlertHistoryScreen> {
   List<TeacherRecentAlert> _alerts = [];
   bool _loading = false;
+  int _lastLiveRevision = 0;
   int _lastAlertsRevision = 0;
 
   @override
   void initState() {
     super.initState();
     _load();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final revision = context.read<AppState>().teacherAlertsRevision;
-    if (revision != _lastAlertsRevision) {
-      _lastAlertsRevision = revision;
-      if (revision > 0) {
-        unawaited(_load());
-      }
-    }
   }
 
   Future<void> _load({bool userRefresh = false}) async {
@@ -80,6 +70,15 @@ class _TeacherAlertHistoryScreenState extends State<TeacherAlertHistoryScreen> {
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
+    _lastLiveRevision = bindCombinedLiveRevision(
+      lastGlobalRevision: _lastLiveRevision,
+      lastClassRevision: _lastAlertsRevision,
+      globalRevision: app.liveDataRevision,
+      classRevision: app.teacherAlertsRevision,
+      reload: () => _load(),
+      isMounted: () => mounted,
+    );
+    _lastAlertsRevision = app.teacherAlertsRevision;
     final theme = app.theme;
     final lang = app.language;
     final grouped = _groupBySection(_alerts, lang);
@@ -178,7 +177,6 @@ class _TeacherAlertHistoryScreenState extends State<TeacherAlertHistoryScreen> {
                                         lang,
                                         alert.alertType,
                                       ),
-                                      className: app.localizedContent(alert.className),
                                     ),
                                   ),
                               ],

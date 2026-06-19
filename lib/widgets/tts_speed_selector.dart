@@ -23,9 +23,9 @@ class TtsSpeedSelector extends StatefulWidget {
 class _TtsSpeedSelectorState extends State<TtsSpeedSelector> {
   double? _liveSliderIndex;
 
-  void _applySpeed(AppState app, double index) {
+  void _applySpeed(AppState app, double index, {bool persist = true}) {
     final snapped = TtsSpeedOptions.valueAtIndex(index.round());
-    app.setTtsSpeed(snapped);
+    app.setTtsSpeed(snapped, persist: persist);
   }
 
   @override
@@ -52,10 +52,13 @@ class _TtsSpeedSelectorState extends State<TtsSpeedSelector> {
         min: 0,
         max: TtsSpeedOptions.sliderDivisions.toDouble(),
         divisions: TtsSpeedOptions.sliderDivisions,
-        onChanged: (index) => setState(() => _liveSliderIndex = index),
+        onChanged: (index) {
+          setState(() => _liveSliderIndex = index);
+          _applySpeed(app, index, persist: false);
+        },
         onChangeEnd: (index) {
           setState(() => _liveSliderIndex = null);
-          _applySpeed(app, index);
+          _applySpeed(app, index, persist: true);
         },
       ),
     );

@@ -22,11 +22,22 @@ class NotificationSyncService {
   StreamSubscription<List<RemoteClassEnrollment>>? _teacherEnrollmentSubscription;
   StreamSubscription<List<RemoteParentChildLink>>? _parentChildLinkSubscription;
   StreamSubscription<List<RemoteTeacherClass>>? _teacherClassSubscription;
+  StreamSubscription<List<RemoteTeacherAlert>>? _teacherAlertSubscription;
+  StreamSubscription<RemoteLearnerPersonalBoardSnapshot>? _personalBoardSubscription;
+  StreamSubscription<RemoteUserProfile>? _userProfileSubscription;
+  final Map<int, StreamSubscription<List<RemoteLearnerActivity>>>
+      _monitoredLearnerActivitySubscriptions = {};
+  final Map<int, StreamSubscription<RemoteClassContent?>>
+      _classContentSubscriptions = {};
+  final Map<int, int> _lastAppliedClassContentFingerprint = {};
   void Function()? _onParentNotificationsChanged;
   void Function()? _onLearnerEnrollmentsChanged;
   void Function(List<RemoteClassEnrollment>)? _onTeacherEnrollmentsChanged;
   void Function()? _onParentChildLinksChanged;
   void Function(List<RemoteTeacherClass>)? _onTeacherClassesChanged;
+  void Function()? _onTeacherAlertsChanged;
+  void Function(RemoteLearnerPersonalBoardSnapshot)? _onPersonalBoardChanged;
+  void Function(RemoteUserProfile)? _onUserProfileChanged;
 
   bool get isCloudAvailable => _cloud.isAvailable;
 
@@ -71,6 +82,12 @@ class NotificationSyncService {
       return result;
     }
 
+    final teacherFirebaseUid =
+        await _repository.getFirebaseUidForUser(teacherUserId);
+    if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) {
+      return result;
+    }
+
     final createdAt = DateTime.now();
     var cloudPublished = 0;
 
@@ -90,6 +107,7 @@ class NotificationSyncService {
             learnerUserId: learnerUserId,
             childName: learnerName,
             teacherUserId: teacherUserId,
+            teacherFirebaseUid: teacherFirebaseUid,
             teacherName: teacherName,
             classId: classId,
             className: className,
@@ -123,6 +141,7 @@ class NotificationSyncService {
                 learnerUserId: learnerUserId,
                 childName: learnerName,
                 teacherUserId: teacherUserId,
+                teacherFirebaseUid: teacherFirebaseUid,
                 teacherName: teacherName,
                 classId: classId,
                 className: className,
@@ -218,6 +237,7 @@ class NotificationSyncService {
     required int learnerUserId,
     required String learnerName,
     required String learnerFirebaseUid,
+    String? teacherName,
   }) async {
     if (!_cloud.isAvailable) return;
     await _cloud.upsertClassEnrollment(
@@ -230,6 +250,7 @@ class NotificationSyncService {
         learnerName: learnerName,
         learnerFirebaseUid: learnerFirebaseUid,
         enrolledAt: DateTime.now(),
+        teacherName: teacherName,
       ),
     );
   }
@@ -278,6 +299,7 @@ class NotificationSyncService {
     required String teacherFirebaseUid,
     required int teacherUserId,
     required DateTime createdAt,
+    String? teacherName,
   }) async {
     if (!_cloud.isAvailable || teacherFirebaseUid.trim().isEmpty) return;
     await _cloud.upsertTeacherClass(
@@ -287,6 +309,7 @@ class NotificationSyncService {
         teacherFirebaseUid: teacherFirebaseUid,
         teacherUserId: teacherUserId,
         createdAt: createdAt,
+        teacherName: teacherName,
       ),
     );
   }
@@ -351,6 +374,44 @@ class NotificationSyncService {
     }
   }
 
+  Future<void> startMonitoredLearnerActivitySync({
+    required int learnerUserId,
+    required String learnerFirebaseUid,
+    required Future<void> Function(List<RemoteLearnerActivity> activities)
+        onChanged,
+  }) async {
+    await stopMonitoredLearnerActivitySync(learnerUserId);
+    await _cloud.initialize();
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return;
+
+    _monitoredLearnerActivitySubscriptions[learnerUserId] = _cloud
+        .watchLearnerActivities(learnerFirebaseUid)
+        .listen(
+      (activities) async {
+        if (activities.isEmpty) return;
+        try {
+          await onChanged(activities);
+        } catch (e, st) {
+          debugPrint('Monitored learner activity handler failed: $e\n$st');
+        }
+      },
+      onError: (Object e, StackTrace st) {
+        debugPrint('Monitored learner activity sync error: $e\n$st');
+      },
+    );
+  }
+
+  Future<void> stopMonitoredLearnerActivitySync(int learnerUserId) async {
+    await _monitoredLearnerActivitySubscriptions.remove(learnerUserId)?.cancel();
+  }
+
+  Future<void> stopAllMonitoredLearnerActivitySync() async {
+    for (final sub in _monitoredLearnerActivitySubscriptions.values) {
+      await sub.cancel();
+    }
+    _monitoredLearnerActivitySubscriptions.clear();
+  }
+
   Future<RemoteTeacherClass?> getTeacherClassByCodeFromCloud(
     String classCode,
   ) async {
@@ -358,12 +419,14 @@ class NotificationSyncService {
     return _cloud.getTeacherClassByCode(classCode);
   }
 
-  Future<void> syncClassContent(RemoteClassContent content) async {
-    if (!_cloud.isAvailable || content.classCode.trim().isEmpty) return;
+  Future<bool> syncClassContent(RemoteClassContent content) async {
+    if (!_cloud.isAvailable || content.classCode.trim().isEmpty) return false;
     try {
       await _cloud.upsertClassContent(content);
+      return true;
     } catch (e, st) {
       debugPrint('syncClassContent failed: $e\n$st');
+      return false;
     }
   }
 
@@ -375,6 +438,78 @@ class NotificationSyncService {
       debugPrint('getClassContentFromCloud failed: $e\n$st');
       return null;
     }
+  }
+
+  Future<void> startClassContentSync({
+    required int classId,
+    required String classCode,
+    required Future<void> Function(RemoteClassContent? content) onChanged,
+  }) async {
+    await stopClassContentSync(classId);
+    await _cloud.initialize();
+    if (!_cloud.isAvailable || classCode.trim().isEmpty) return;
+
+    _lastAppliedClassContentFingerprint.remove(classId);
+    _classContentSubscriptions[classId] = _cloud
+        .watchClassContentByCode(classCode)
+        .listen(
+      (content) async {
+        if (content == null) return;
+        final fingerprint = _classContentFingerprint(content);
+        if (_lastAppliedClassContentFingerprint[classId] == fingerprint) {
+          return;
+        }
+        _lastAppliedClassContentFingerprint[classId] = fingerprint;
+        try {
+          await onChanged(content);
+        } catch (e, st) {
+          debugPrint('Class content handler failed: $e\n$st');
+        }
+      },
+      onError: (Object e, StackTrace st) {
+        debugPrint('Class content sync error: $e\n$st');
+      },
+    );
+  }
+
+  int _classContentFingerprint(RemoteClassContent content) {
+    var hash = Object.hash(
+      content.updatedAt.millisecondsSinceEpoch,
+      content.className,
+      content.lessons.length,
+    );
+    for (final lesson in content.lessons) {
+      hash = Object.hash(
+        hash,
+        lesson.lessonKey,
+        lesson.title,
+        lesson.sortOrder,
+        lesson.phrases.length,
+      );
+      for (final phrase in lesson.phrases) {
+        hash = Object.hash(
+          hash,
+          phrase.phraseKey,
+          phrase.text,
+          phrase.sortOrder,
+          phrase.imagePath,
+        );
+      }
+    }
+    return hash;
+  }
+
+  Future<void> stopClassContentSync(int classId) async {
+    await _classContentSubscriptions.remove(classId)?.cancel();
+    _lastAppliedClassContentFingerprint.remove(classId);
+  }
+
+  Future<void> stopAllClassContentSync() async {
+    for (final sub in _classContentSubscriptions.values) {
+      await sub.cancel();
+    }
+    _classContentSubscriptions.clear();
+    _lastAppliedClassContentFingerprint.clear();
   }
 
   Future<RemoteLearnerProfile?> findLearnerProfileByCodeFromCloud(
@@ -422,7 +557,12 @@ class NotificationSyncService {
     final normalizedUid = firebaseUid.trim();
     final normalizedEmail = email.trim().toLowerCase();
     final existing = await getUserProfileFromCloud(normalizedUid);
-    if (existing != null) return existing;
+    if (existing != null) {
+      final hasName = existing.fullName.trim().isNotEmpty &&
+          !AppRepository.isGenericAccountName(existing.fullName);
+      final hasFirst = (existing.firstName?.trim().isNotEmpty ?? false);
+      if (hasName || hasFirst) return existing;
+    }
 
     if (_cloud.isAvailable) {
       final teacherClasses =
@@ -431,7 +571,7 @@ class NotificationSyncService {
         return RemoteUserProfile(
           firebaseUid: normalizedUid,
           email: normalizedEmail,
-          fullName: normalizedEmail.split('@').first,
+          fullName: '',
           role: 'teacher',
         );
       }
@@ -442,7 +582,7 @@ class NotificationSyncService {
         return RemoteUserProfile(
           firebaseUid: normalizedUid,
           email: normalizedEmail,
-          fullName: normalizedEmail.split('@').first,
+          fullName: '',
           role: 'parent',
         );
       }
@@ -451,7 +591,7 @@ class NotificationSyncService {
     return RemoteUserProfile(
       firebaseUid: normalizedUid,
       email: normalizedEmail,
-      fullName: normalizedEmail.split('@').first,
+      fullName: '',
       role: 'learner',
     );
   }
@@ -523,6 +663,60 @@ class NotificationSyncService {
       return await _cloud.getLearnerCustomPhrases(learnerFirebaseUid);
     } catch (e, st) {
       debugPrint('getLearnerCustomPhrasesFromCloud failed: $e\n$st');
+      return const [];
+    }
+  }
+
+  Future<void> syncLearnerFavorites({
+    required String learnerFirebaseUid,
+    required List<RemoteLearnerFavorite> favorites,
+  }) async {
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return;
+    try {
+      await _cloud.upsertLearnerFavorites(
+        learnerFirebaseUid: learnerFirebaseUid,
+        favorites: favorites,
+      );
+    } catch (e, st) {
+      debugPrint('syncLearnerFavorites failed: $e\n$st');
+    }
+  }
+
+  Future<List<RemoteLearnerFavorite>> getLearnerFavoritesFromCloud(
+    String learnerFirebaseUid,
+  ) async {
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return const [];
+    try {
+      return await _cloud.getLearnerFavorites(learnerFirebaseUid);
+    } catch (e, st) {
+      debugPrint('getLearnerFavoritesFromCloud failed: $e\n$st');
+      return const [];
+    }
+  }
+
+  Future<void> syncLearnerSpeakHistory({
+    required String learnerFirebaseUid,
+    required List<RemoteLearnerSpeakHistory> history,
+  }) async {
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return;
+    try {
+      await _cloud.upsertLearnerSpeakHistory(
+        learnerFirebaseUid: learnerFirebaseUid,
+        history: history,
+      );
+    } catch (e, st) {
+      debugPrint('syncLearnerSpeakHistory failed: $e\n$st');
+    }
+  }
+
+  Future<List<RemoteLearnerSpeakHistory>> getLearnerSpeakHistoryFromCloud(
+    String learnerFirebaseUid,
+  ) async {
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return const [];
+    try {
+      return await _cloud.getLearnerSpeakHistory(learnerFirebaseUid);
+    } catch (e, st) {
+      debugPrint('getLearnerSpeakHistoryFromCloud failed: $e\n$st');
       return const [];
     }
   }
@@ -678,6 +872,74 @@ class NotificationSyncService {
     _onTeacherClassesChanged = null;
   }
 
+  Future<void> syncTeacherAlertsFromCloud({
+    required int teacherUserId,
+    required String teacherFirebaseUid,
+  }) async {
+    if (!_cloud.isAvailable ||
+        teacherUserId <= 0 ||
+        teacherFirebaseUid.trim().isEmpty) {
+      return;
+    }
+    try {
+      final remote = await _cloud.getTeacherAlerts(
+        teacherUserId: teacherUserId,
+        teacherFirebaseUid: teacherFirebaseUid,
+      );
+      await _repository.mergeRemoteTeacherAlerts(
+        teacherUserId: teacherUserId,
+        items: remote,
+      );
+    } catch (e, st) {
+      debugPrint('Teacher alerts cloud pull failed: $e\n$st');
+    }
+  }
+
+  Future<void> startTeacherAlertSync({
+    required int teacherUserId,
+    required String teacherFirebaseUid,
+    required void Function() onChanged,
+  }) async {
+    await stopTeacherAlertSync();
+    _onTeacherAlertsChanged = onChanged;
+    await _cloud.initialize();
+    if (!_cloud.isAvailable ||
+        teacherUserId <= 0 ||
+        teacherFirebaseUid.trim().isEmpty) {
+      return;
+    }
+
+    await syncTeacherAlertsFromCloud(
+      teacherUserId: teacherUserId,
+      teacherFirebaseUid: teacherFirebaseUid,
+    );
+    _onTeacherAlertsChanged?.call();
+
+    _teacherAlertSubscription = _cloud
+        .watchTeacherAlerts(
+          teacherUserId: teacherUserId,
+          teacherFirebaseUid: teacherFirebaseUid,
+        )
+        .listen(
+      (remoteItems) async {
+        await _repository.mergeRemoteTeacherAlerts(
+          teacherUserId: teacherUserId,
+          items: remoteItems,
+        );
+        _onTeacherAlertsChanged?.call();
+      },
+      onError: (Object e, StackTrace st) {
+        debugPrint('Teacher alert sync error: $e\n$st');
+      },
+    );
+  }
+
+  Future<void> stopTeacherAlertSync() async {
+    await _teacherAlertSubscription?.cancel();
+    _teacherAlertSubscription = null;
+    _onTeacherAlertsChanged = null;
+  }
+
   Future<void> startParentChildLinkSync({
     required String parentFirebaseUid,
     required void Function() onChanged,
@@ -703,10 +965,75 @@ class NotificationSyncService {
     _onParentChildLinksChanged = null;
   }
 
+  Future<void> startPersonalBoardSync({
+    required String learnerFirebaseUid,
+    required void Function(RemoteLearnerPersonalBoardSnapshot snapshot) onChanged,
+  }) async {
+    await stopPersonalBoardSync();
+    _onPersonalBoardChanged = onChanged;
+    await _cloud.initialize();
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) {
+      debugPrint(
+        'Personal board sync unavailable '
+        '(cloud=${_cloud.isAvailable}, uid=${learnerFirebaseUid.isNotEmpty}).',
+      );
+      return;
+    }
+
+    _personalBoardSubscription = _cloud
+        .watchLearnerPersonalBoard(learnerFirebaseUid)
+        .listen(
+      (snapshot) => _onPersonalBoardChanged?.call(snapshot),
+      onError: (Object e, StackTrace st) {
+        debugPrint('Personal board sync error: $e\n$st');
+      },
+    );
+  }
+
+  Future<void> stopPersonalBoardSync() async {
+    await _personalBoardSubscription?.cancel();
+    _personalBoardSubscription = null;
+    _onPersonalBoardChanged = null;
+  }
+
+  Future<void> startUserProfileSync({
+    required String firebaseUid,
+    required void Function(RemoteUserProfile profile) onChanged,
+  }) async {
+    await stopUserProfileSync();
+    _onUserProfileChanged = onChanged;
+    await _cloud.initialize();
+    if (!_cloud.isAvailable || firebaseUid.trim().isEmpty) {
+      debugPrint(
+        'User profile sync unavailable '
+        '(cloud=${_cloud.isAvailable}, uid=${firebaseUid.isNotEmpty}).',
+      );
+      return;
+    }
+
+    _userProfileSubscription = _cloud.watchUserProfile(firebaseUid).listen(
+      (profile) => _onUserProfileChanged?.call(profile),
+      onError: (Object e, StackTrace st) {
+        debugPrint('User profile sync error: $e\n$st');
+      },
+    );
+  }
+
+  Future<void> stopUserProfileSync() async {
+    await _userProfileSubscription?.cancel();
+    _userProfileSubscription = null;
+    _onUserProfileChanged = null;
+  }
+
   Future<void> stopMonitoringSync() async {
     await stopLearnerEnrollmentSync();
     await stopTeacherMonitoringSync();
+    await stopTeacherAlertSync();
     await stopParentChildLinkSync();
+    await stopPersonalBoardSync();
+    await stopUserProfileSync();
+    await stopAllMonitoredLearnerActivitySync();
+    await stopAllClassContentSync();
   }
 
   Future<void> dispose() async {

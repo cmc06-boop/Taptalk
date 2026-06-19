@@ -78,13 +78,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return AppRepository.normalizeEmergencyContacts(raw);
   }
 
-  bool _hasChanges(AppState app) {
-    final nameChanged = _nameController.text.trim() != _savedName.trim();
-    if (!(app.user?.isLearner ?? false)) return nameChanged;
-    return nameChanged ||
-        _draftEmergencyContacts.join('|') != _savedEmergencyContacts.join('|');
-  }
-
   bool _canSave(AppState app) {
     final hasName = _nameController.text.trim().isNotEmpty;
     final hasEmail = (app.user?.email ?? '').trim().isNotEmpty;
@@ -233,9 +226,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ),
                     ),
-                    if (_editing && _hasChanges(app))
+                    if (_editing)
                       TextButton(
-                        onPressed: _cancelEdits,
+                        onPressed: _saving ? null : _cancelEdits,
                         style: TextButton.styleFrom(
                           backgroundColor: Colors.white,
                           foregroundColor: theme.textMain,
@@ -413,33 +406,86 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ],
                 const SizedBox(height: AppSpacing.lg),
-                FilledButton(
-                  onPressed: _canSave(app) ? () => _save(app, lang) : null,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: theme.bgAccent,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size.fromHeight(48),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                    ),
-                  ),
-                  child: _saving
-                      ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
+                if (_editing)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: _saving ? null : _cancelEdits,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: theme.textMain,
+                            minimumSize: const Size.fromHeight(48),
+                            side: BorderSide(
+                              color: theme.textMain.withValues(alpha: 0.25),
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(AppSpacing.radiusMd),
+                            ),
                           ),
-                        )
-                      : Text(
-                          AppStrings.saveChanges(lang),
-                          style: GoogleFonts.poppins(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
+                          child: Text(
+                            AppStrings.cancel(lang),
+                            style: GoogleFonts.poppins(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
-                ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed:
+                              _canSave(app) ? () => _save(app, lang) : null,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: theme.bgAccent,
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size.fromHeight(48),
+                            shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(AppSpacing.radiusMd),
+                            ),
+                          ),
+                          child: _saving
+                              ? const SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : Text(
+                                  AppStrings.saveChanges(lang),
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ],
+                  )
+                else
+                  FilledButton(
+                    onPressed: null,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: theme.bgAccent,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(48),
+                      shape: RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.circular(AppSpacing.radiusMd),
+                      ),
+                    ),
+                    child: Text(
+                      AppStrings.saveChanges(lang),
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),

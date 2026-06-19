@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
+import '../core/utils/live_refresh.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/utils/speak_feedback.dart';
 import '../data/models/lesson_phrase.dart';
@@ -17,11 +20,15 @@ class LearnerLessonScreen extends StatefulWidget {
   const LearnerLessonScreen({
     super.key,
     required this.lessonId,
+    required this.classId,
+    required this.classCode,
     required this.lessonTitle,
     required this.className,
   });
 
   final int lessonId;
+  final int classId;
+  final String classCode;
   final String lessonTitle;
   final String className;
 
@@ -31,24 +38,41 @@ class LearnerLessonScreen extends StatefulWidget {
 
 class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
   List<LessonPhrase> _phrases = [];
-  bool _loading = false;
+  int _lastContentRevision = 0;
+  AppState? _app;
+
+  bool _samePhrases(List<LessonPhrase> a, List<LessonPhrase> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id ||
+          a[i].text != b[i].text ||
+          a[i].imagePath != b[i].imagePath) {
+        return false;
+      }
+    }
+    return true;
+  }
 
   @override
   void initState() {
     super.initState();
-    _load();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      _app = context.read<AppState>();
+      unawaited(_app!.startLiveClassContentSync(
+        classId: widget.classId,
+        classCode: widget.classCode,
+      ));
+      await _load();
+    });
   }
 
   Future<void> _load() async {
-    if (_phrases.isEmpty) setState(() => _loading = true);
     final phrases = await context
         .read<AppState>()
-        .getEnrolledLessonPhrases(widget.lessonId);
+        .getEnrolledLessonPhrases(widget.lessonId, cloudSyncInBackground: true);
     if (!mounted) return;
-    setState(() {
-      _phrases = phrases;
-      _loading = false;
-    });
+    if (_samePhrases(_phrases, phrases)) return;
+    setState(() => _phrases = phrases);
   }
 
   PhraseModel _asPhraseModel(LessonPhrase phrase) {
@@ -64,6 +88,13 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
+    final revision = app.classContentRevision(widget.classId);
+    _lastContentRevision = bindClassContentRevision(
+      lastClassRevision: _lastContentRevision,
+      classRevision: revision,
+      reload: _load,
+      isMounted: () => mounted,
+    );
     final theme = app.theme;
     final lang = app.language;
     final denseGrid = AppSpacing.phraseGridIsDense(context);
@@ -131,12 +162,7 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
               ),
             ),
           ),
-          if (_loading)
-            const Padding(
-              padding: EdgeInsets.all(AppSpacing.xxl),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (_phrases.isEmpty)
+          if (_phrases.isEmpty)
             Padding(
               padding: const EdgeInsets.all(AppSpacing.xxl),
               child: Center(
@@ -162,7 +188,7 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
                   final phrase = _asPhraseModel(lessonPhrase);
                   final displayText = app.localizedPhraseText(phrase);
                   return PhraseCard(
-                    key: ValueKey('lesson_${phrase.id}_${lang.name}_${app.languageRevision}'),
+                    key: ValueKey('lesson_${phrase.id}_${phrase.imagePath ?? ''}'),
                     phrase: phrase,
                     displayText: displayText,
                     dense: denseGrid,

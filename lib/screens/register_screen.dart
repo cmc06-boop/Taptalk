@@ -22,7 +22,8 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _name = TextEditingController();
+  final _firstName = TextEditingController();
+  final _lastName = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _confirmPassword = TextEditingController();
@@ -47,7 +48,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   void dispose() {
     _emailCheckDebounce?.cancel();
     _email.removeListener(_scheduleEmailAvailabilityCheck);
-    _name.dispose();
+    _firstName.dispose();
+    _lastName.dispose();
     _email.dispose();
     _password.dispose();
     _confirmPassword.dispose();
@@ -114,7 +116,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
     });
     try {
       final err = await app.register(
-            fullName: _name.text,
+            fullName:
+                '${_firstName.text.trim()} ${_lastName.text.trim()}'.trim(),
+            firstName: _firstName.text.trim(),
             email: _email.text,
             password: _password.text,
             role: _role,
@@ -259,19 +263,47 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               ),
                             ],
                             SizedBox(height: sectionGap),
-                            _field(
-                              AppStrings.fullName(lang),
-                              _name,
-                              textInputAction: TextInputAction.next,
-                              validator: (value) {
-                                if (value == null || value.trim().isEmpty) {
-                                  return AppStrings.fillAllFields(lang);
-                                }
-                                if (!AuthValidation.isValidFullName(value)) {
-                                  return AppStrings.invalidFullName(lang);
-                                }
-                                return null;
-                              },
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: _field(
+                                    AppStrings.firstName(lang),
+                                    _firstName,
+                                    textInputAction: TextInputAction.next,
+                                    validator: (value) {
+                                      if (value == null ||
+                                          value.trim().isEmpty) {
+                                        return AppStrings.fillAllFields(lang);
+                                      }
+                                      if (!AuthValidation.isValidFullName(
+                                          value)) {
+                                        return AppStrings.invalidFullName(lang);
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(width: AppSpacing.sm),
+                                Expanded(
+                                  child: _field(
+                                    AppStrings.lastName(lang),
+                                    _lastName,
+                                    textInputAction: TextInputAction.next,
+                                    validator: (value) {
+                                      if (value == null ||
+                                          value.trim().isEmpty) {
+                                        return AppStrings.fillAllFields(lang);
+                                      }
+                                      if (!AuthValidation.isValidFullName(
+                                          value)) {
+                                        return AppStrings.invalidFullName(lang);
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                ),
+                              ],
                             ),
                             SizedBox(height: fieldGap),
                             _field(

@@ -6,6 +6,8 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
+import '../core/constants/monitoring_constants.dart';
+import '../core/utils/live_refresh.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../core/utils/vocabulary_growth_calculator.dart';
@@ -45,23 +47,87 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
   List<PhraseUsageStat> _stats = [];
   List<CategoryModel> _childCategories = [];
   ChildSessionSummary _sessionSummary = ChildSessionSummary.empty;
-  VocabularyGrowthSummary _vocabularyGrowth = VocabularyGrowthSummary.empty;
+  VocabularyGrowthPanelData _vocabularyPanel = VocabularyGrowthPanelData.empty;
   bool _refreshing = false;
   int _reloadNonce = 0;
+  int _vocabReloadNonce = 0;
+  int _lastMonitoringRevision = 0;
+  int _lastLiveRevision = 0;
+  int _parentLessonRefreshSignal = 0;
+  Timer? _monitoringPollTimer;
+  AppState? _app;
   bool _monthPickerExpanded = false;
   DateTime? _trackingSince;
+
+  bool get _isParentMonitoring => widget.currentRoute == AppRoute.myChild;
+
+  int get _parentLessonReloadNonce {
+    final month = _period == ChildUsagePeriod.month
+        ? _resolvedSelectedMonth(_monthOptions(_trackingSince))
+        : null;
+    return Object.hash(
+      _period,
+      month?.year,
+      month?.month,
+      _parentLessonRefreshSignal,
+    );
+  }
+
+  List<PhraseUsageStat> _mergeDuplicatePhraseStats(List<PhraseUsageStat> stats) {
+    final merged = <String, PhraseUsageStat>{};
+    for (final stat in stats) {
+      final key =
+          '${AppRepository.normalizeCategoryKey(stat.categoryKey)}|${stat.text.trim().toLowerCase()}';
+      final existing = merged[key];
+      if (existing == null) {
+        merged[key] = stat;
+      } else {
+        merged[key] = PhraseUsageStat(
+          text: stat.text,
+          categoryKey: stat.categoryKey,
+          count: existing.count + stat.count,
+        );
+      }
+    }
+    return merged.values.toList()
+      ..sort((a, b) {
+        final byCount = b.count.compareTo(a.count);
+        if (byCount != 0) return byCount;
+        return a.text.compareTo(b.text);
+      });
+  }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _loadLocalStats(syncCloud: false);
+      _app = context.read<AppState>();
+      unawaited(_app!.startLiveChildMonitoringSync(widget.learner.learnerId));
+      await Future.wait([
+        _loadLocalStats(syncCloud: _isParentMonitoring),
+        _loadVocabularyGrowth(syncCloud: _isParentMonitoring),
+      ]);
       if (!mounted) return;
-      unawaited(_refreshFromCloud());
+      if (!_isParentMonitoring) {
+        unawaited(_refreshFromCloud());
+      }
+      _monitoringPollTimer = Timer.periodic(
+        MonitoringConstants.monitoringPollInterval,
+        (_) => unawaited(
+          _reloadMonitoringSections(syncCloud: _isParentMonitoring),
+        ),
+      );
     });
   }
 
-  Future<void> _loadLocalStats({bool syncCloud = true}) async {
+  @override
+  void dispose() {
+    _monitoringPollTimer?.cancel();
+    unawaited(_app?.stopLiveChildMonitoringSync(widget.learner.learnerId));
+    super.dispose();
+  }
+
+  Future<void> _loadLocalStats({bool syncCloud = false}) async {
     final app = context.read<AppState>();
     try {
       final trackingSince = await app.getLearnerMonitoringSince(
@@ -83,21 +149,17 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
           month: month,
           syncCloud: syncCloud,
         ),
-        app.getChildVocabularyGrowth(
-          learnerUserId: widget.learner.learnerId,
-          period: _period,
-          month: month,
-          linkedAt: trackingSince,
-        ),
         app.getCategoriesForMonitoring(widget.learner.learnerId),
       ]);
       if (!mounted) return;
+      final rawStats = results[0] as List<PhraseUsageStat>;
       setState(() {
         _trackingSince = trackingSince;
-        _stats = results[0] as List<PhraseUsageStat>;
+        _stats = _isParentMonitoring
+            ? _mergeDuplicatePhraseStats(rawStats)
+            : rawStats;
         _sessionSummary = results[1] as ChildSessionSummary;
-        _vocabularyGrowth = results[2] as VocabularyGrowthSummary;
-        _childCategories = results[3] as List<CategoryModel>;
+        _childCategories = results[2] as List<CategoryModel>;
         _reloadNonce++;
       });
     } catch (e, st) {
@@ -105,18 +167,66 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
     }
   }
 
+  Future<void> _loadVocabularyGrowth({bool syncCloud = true}) async {
+    final app = context.read<AppState>();
+    try {
+      final trackingSince = await app.getLearnerMonitoringSince(
+        widget.learner.learnerId,
+      );
+      final month = _period == ChildUsagePeriod.month
+          ? _resolvedSelectedMonth(_monthOptions(trackingSince))
+          : null;
+      final panel = await app.getChildVocabularyGrowth(
+        learnerUserId: widget.learner.learnerId,
+        period: _period,
+        month: month,
+        linkedAt: trackingSince,
+        syncCloud: syncCloud,
+      );
+      if (!mounted) return;
+      setState(() {
+        _trackingSince = trackingSince;
+        _vocabularyPanel = panel;
+        _vocabReloadNonce++;
+      });
+    } catch (e, st) {
+      debugPrint('Vocabulary growth load failed: $e\n$st');
+    }
+  }
+
+  Future<void> _reloadMonitoringSections({bool syncCloud = false}) async {
+    if (syncCloud) {
+      unawaited(_app?.startLiveChildMonitoringSync(widget.learner.learnerId));
+    }
+    await Future.wait([
+      _loadLocalStats(syncCloud: syncCloud),
+      _loadVocabularyGrowth(syncCloud: syncCloud),
+    ]);
+  }
+
   Future<void> _refreshFromCloud() async {
     if (_refreshing) return;
     setState(() => _refreshing = true);
     try {
-      await context
-          .read<AppState>()
-          .refreshChildMonitoringData(widget.learner.learnerId);
-      await _loadLocalStats(syncCloud: false);
+      await context.read<AppState>().refreshChildMonitoringData(
+            widget.learner.learnerId,
+            full: true,
+          );
+      await Future.wait([
+        _loadLocalStats(syncCloud: _isParentMonitoring),
+        _loadVocabularyGrowth(syncCloud: _isParentMonitoring),
+      ]);
     } catch (e, st) {
       debugPrint('Monitoring cloud refresh failed: $e\n$st');
     } finally {
-      if (mounted) setState(() => _refreshing = false);
+      if (mounted) {
+        setState(() {
+          _refreshing = false;
+          if (_isParentMonitoring) {
+            _parentLessonRefreshSignal++;
+          }
+        });
+      }
     }
   }
 
@@ -165,16 +275,16 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
     }
   }
 
-  int get _periodPhraseTaps =>
-      _stats.fold<int>(0, (sum, stat) => sum + stat.count);
+  int get _periodPhraseTaps => _isParentMonitoring
+      ? _stats.fold<int>(0, (sum, stat) => sum + stat.count)
+      : _vocabularyPanel.phraseTaps;
 
-  int get _periodPhrasesUsed {
-    final seen = <String>{};
-    for (final stat in _stats) {
-      seen.add('${stat.categoryKey}|${stat.text}');
-    }
-    return seen.length;
-  }
+  int get _periodPhrasesUsed => _isParentMonitoring
+      ? _stats
+          .map((s) => '${s.categoryKey}|${s.text.trim().toLowerCase()}')
+          .toSet()
+          .length
+      : _vocabularyPanel.phrasesUsed;
 
   /// For Me usage per category (defaults + custom) from speak history.
   List<CategoryVocabularySlice> get _categoryUsageSlices =>
@@ -186,7 +296,8 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
       _period = period;
       _monthPickerExpanded = false;
     });
-    _loadLocalStats();
+    _loadLocalStats(syncCloud: _isParentMonitoring);
+    _loadVocabularyGrowth(syncCloud: _isParentMonitoring);
   }
 
   void _selectMonth(DateTime month) {
@@ -194,7 +305,8 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
       _selectedMonth = month;
       _monthPickerExpanded = false;
     });
-    _loadLocalStats();
+    _loadLocalStats(syncCloud: _isParentMonitoring);
+    _loadVocabularyGrowth(syncCloud: _isParentMonitoring);
   }
 
   String _categoryLabel(AppState app, String categoryKey) {
@@ -481,6 +593,18 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
+    final revision = app.childMonitoringRevision(widget.learner.learnerId);
+    _lastLiveRevision = bindCombinedLiveRevision(
+      lastGlobalRevision: _lastLiveRevision,
+      lastClassRevision: _lastMonitoringRevision,
+      globalRevision: app.liveDataRevision,
+      classRevision: revision,
+      reload: () async {
+        await _reloadMonitoringSections(syncCloud: _isParentMonitoring);
+      },
+      isMounted: () => mounted,
+    );
+    _lastMonitoringRevision = revision;
     final theme = app.theme;
     final lang = app.language;
     final monthOptions = _monthOptions(_trackingSince);
@@ -554,9 +678,9 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
               ),
               child: VocabularyGrowthSection(
                       key: ValueKey(
-                        'vocab_${_period.name}_$_reloadNonce',
+                        'vocab_${_period.name}_$_vocabReloadNonce',
                       ),
-                      summary: _vocabularyGrowth,
+                      summary: _vocabularyPanel.summary,
                       theme: theme,
                       lang: lang,
                       phrasesUsed: _periodPhrasesUsed,
@@ -622,18 +746,38 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                 borderRadius: BorderRadius.circular(_cardRadius),
                 border: Border.all(color: const Color(0xFFE9EEF2)),
               ),
-              child: LessonProgressSection(
-                learnerUserId: widget.learner.learnerId,
-                period: _period,
-                month: _period == ChildUsagePeriod.month
-                    ? _resolvedSelectedMonth(_monthOptions(_trackingSince))
-                    : null,
-                reloadNonce: _reloadNonce,
-                syncCloudOnReload: true,
-                theme: theme,
-                lang: lang,
-                labelForContent: app.localizedContent,
-              ),
+              child: _isParentMonitoring
+                  ? _ParentLessonProgressPanel(
+                      key: ValueKey(
+                        'parent_lesson_${widget.learner.learnerId}',
+                      ),
+                      learnerUserId: widget.learner.learnerId,
+                      period: _period,
+                      month: _period == ChildUsagePeriod.month
+                          ? _resolvedSelectedMonth(
+                              _monthOptions(_trackingSince),
+                            )
+                          : null,
+                      reloadNonce: _parentLessonReloadNonce,
+                      theme: theme,
+                      lang: lang,
+                      labelForContent: app.localizedContent,
+                    )
+                  : LessonProgressSection(
+                      key: ValueKey('lesson_${_period.name}_$_reloadNonce'),
+                      learnerUserId: widget.learner.learnerId,
+                      period: _period,
+                      month: _period == ChildUsagePeriod.month
+                          ? _resolvedSelectedMonth(
+                              _monthOptions(_trackingSince),
+                            )
+                          : null,
+                      reloadNonce: _reloadNonce,
+                      syncCloudOnReload: false,
+                      theme: theme,
+                      lang: lang,
+                      labelForContent: app.localizedContent,
+                    ),
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
@@ -730,6 +874,83 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
         ],
         ),
       ),
+    );
+  }
+}
+
+/// Parent-only wrapper: syncs cloud once, then keeps a stable lesson progress
+/// widget that only silently refreshes progress (no class/lesson reset flicker).
+class _ParentLessonProgressPanel extends StatefulWidget {
+  const _ParentLessonProgressPanel({
+    super.key,
+    required this.learnerUserId,
+    required this.period,
+    required this.month,
+    required this.reloadNonce,
+    required this.theme,
+    required this.lang,
+    required this.labelForContent,
+  });
+
+  final int learnerUserId;
+  final ChildUsagePeriod period;
+  final DateTime? month;
+  final int reloadNonce;
+  final TapTalkThemeToken theme;
+  final AppLanguage lang;
+  final String Function(String text) labelForContent;
+
+  @override
+  State<_ParentLessonProgressPanel> createState() =>
+      _ParentLessonProgressPanelState();
+}
+
+class _ParentLessonProgressPanelState extends State<_ParentLessonProgressPanel> {
+  bool _cloudReady = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_primeCloud());
+  }
+
+  Future<void> _primeCloud() async {
+    try {
+      await context.read<AppState>().refreshChildMonitoringData(
+            widget.learnerUserId,
+            full: true,
+          );
+    } catch (e, st) {
+      debugPrint('Parent lesson progress cloud prime failed: $e\n$st');
+    }
+    if (!mounted) return;
+    setState(() => _cloudReady = true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_cloudReady) {
+      return const SizedBox(
+        height: 120,
+        child: Center(
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(strokeWidth: 2.5),
+          ),
+        ),
+      );
+    }
+
+    return LessonProgressSection(
+      learnerUserId: widget.learnerUserId,
+      period: widget.period,
+      month: widget.month,
+      reloadNonce: widget.reloadNonce,
+      syncCloudOnReload: false,
+      theme: widget.theme,
+      lang: widget.lang,
+      labelForContent: widget.labelForContent,
     );
   }
 }

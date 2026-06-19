@@ -14,7 +14,6 @@ class TeacherAlertCard extends StatelessWidget {
     required this.studentName,
     required this.timeLabel,
     required this.description,
-    required this.className,
     this.onTap,
   });
 
@@ -23,7 +22,6 @@ class TeacherAlertCard extends StatelessWidget {
   final String studentName;
   final String timeLabel;
   final String description;
-  final String className;
   final VoidCallback? onTap;
 
   @override
@@ -91,17 +89,6 @@ class TeacherAlertCard extends StatelessWidget {
                         fontWeight: FontWeight.w500,
                         color: theme.textMain.withValues(alpha: 0.72),
                         height: 1.35,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      className,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: theme.textMain.withValues(alpha: 0.52),
                       ),
                     ),
                   ],

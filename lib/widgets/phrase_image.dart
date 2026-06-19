@@ -4,9 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../core/theme/theme_tokens.dart';
+import '../core/utils/phrase_image_storage.dart';
 
 /// Displays a phrase image from network URL, asset, or local file path.
-class PhraseImage extends StatelessWidget {
+class PhraseImage extends StatefulWidget {
   const PhraseImage({
     super.key,
     required this.imagePath,
@@ -21,26 +22,109 @@ class PhraseImage extends StatelessWidget {
   final bool fill;
 
   @override
+  State<PhraseImage> createState() => _PhraseImageState();
+}
+
+class _PhraseImageState extends State<PhraseImage> {
+  String? _resolvedPath;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolvedPath = _syncResolvedPath();
+    _resolvePath();
+  }
+
+  @override
+  void didUpdateWidget(covariant PhraseImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imagePath != widget.imagePath) {
+      _resolvedPath = _syncResolvedPath();
+      _resolvePath();
+    }
+  }
+
+  String? _syncResolvedPath() {
+    return existingPhraseImagePath(widget.imagePath);
+  }
+
+  Future<void> _resolvePath() async {
+    final raw = widget.imagePath?.trim();
+    if (raw == null || raw.isEmpty) {
+      if (mounted && _resolvedPath != null) {
+        setState(() => _resolvedPath = null);
+      }
+      return;
+    }
+
+    final immediate = existingPhraseImagePath(raw);
+    if (immediate != null) {
+      if (mounted && _resolvedPath != immediate) {
+        setState(() => _resolvedPath = immediate);
+      }
+      return;
+    }
+
+    await warmPhraseImageCacheDirectory();
+    final cached = cachedPhraseImagePathSync(raw);
+    if (cached != null) {
+      if (mounted && _resolvedPath != cached) {
+        setState(() => _resolvedPath = cached);
+      }
+      return;
+    }
+
+    if (isRemotePhraseImagePath(raw)) {
+      final local = await cachePhraseImageLocally(raw);
+      if (!mounted) return;
+      if (local != null && local != raw && _resolvedPath != local) {
+        setState(() => _resolvedPath = local);
+      } else if (_resolvedPath == null) {
+        setState(() => _resolvedPath = local ?? raw);
+      }
+      return;
+    }
+
+    if (mounted && _resolvedPath != raw) {
+      setState(() => _resolvedPath = raw);
+    }
+  }
+
+  void _cacheAfterNetworkLoad(String raw) {
+    if (!isRemotePhraseImagePath(raw)) return;
+    cachePhraseImageLocally(raw).then((local) {
+      if (!mounted || local == null || local == raw) return;
+      if (_resolvedPath == local) return;
+      if (_resolvedPath != null && !isRemotePhraseImagePath(_resolvedPath!)) {
+        return;
+      }
+      setState(() => _resolvedPath = local);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (fill) {
+    if (widget.fill) {
       return SizedBox.expand(child: _buildImage());
     }
     return AspectRatio(
-      aspectRatio: aspectRatio,
+      aspectRatio: widget.aspectRatio,
       child: _buildImage(),
     );
   }
 
   Widget _buildImage() {
-    final path = imagePath?.trim();
-    if (path == null || path.isEmpty) return _placeholder();
+    final raw = widget.imagePath?.trim();
+    if (raw == null || raw.isEmpty) return _placeholder();
 
+    final path = _resolvedPath ?? existingPhraseImagePath(raw) ?? raw;
     final lower = path.toLowerCase();
     if (lower.startsWith('assets/')) {
       return Image.asset(
         path,
         fit: BoxFit.cover,
         width: double.infinity,
+        gaplessPlayback: true,
         errorBuilder: (_, _, _) => _placeholder(),
       );
     }
@@ -52,10 +136,22 @@ class PhraseImage extends StatelessWidget {
         path,
         fit: BoxFit.cover,
         width: double.infinity,
+        gaplessPlayback: true,
         headers: const {'User-Agent': 'TapTalk/1.0'},
         loadingBuilder: (context, child, progress) {
           if (progress == null) return child;
-          return _loading();
+          return _resolvedPath != null && !isRemotePhraseImagePath(_resolvedPath!)
+              ? child
+              : _placeholder();
+        },
+        frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+          if (frame != null) {
+            _cacheAfterNetworkLoad(raw);
+          }
+          if (wasSynchronouslyLoaded || frame != null) return child;
+          return _resolvedPath != null && !isRemotePhraseImagePath(_resolvedPath!)
+              ? child
+              : _placeholder();
         },
         errorBuilder: (_, _, _) => _placeholder(),
       );
@@ -68,28 +164,13 @@ class PhraseImage extends StatelessWidget {
           file,
           fit: BoxFit.cover,
           width: double.infinity,
+          gaplessPlayback: true,
           errorBuilder: (_, _, _) => _placeholder(),
         );
       }
     }
 
     return _placeholder();
-  }
-
-  Widget _loading() {
-    return ColoredBox(
-      color: Colors.white,
-      child: Center(
-        child: SizedBox(
-          width: 28,
-          height: 28,
-          child: CircularProgressIndicator(
-            strokeWidth: 2.5,
-            color: theme.bgAccent,
-          ),
-        ),
-      ),
-    );
   }
 
   Widget _placeholder() {
@@ -99,7 +180,7 @@ class PhraseImage extends StatelessWidget {
         child: Icon(
           Icons.image_outlined,
           size: 40,
-          color: theme.textMain.withValues(alpha: 0.35),
+          color: widget.theme.textMain.withValues(alpha: 0.35),
         ),
       ),
     );

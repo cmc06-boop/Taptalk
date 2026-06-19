@@ -20,10 +20,30 @@ class TeacherMyClassesScreen extends StatefulWidget {
 }
 
 class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
-  Future<void> _refresh({bool forceCloud = false}) =>
-      context.read<AppState>().refreshTeacherClasses(
-            cloudSyncInBackground: !forceCloud,
-          );
+  final Map<int, int> _stableStudentCounts = {};
+
+  int _displayStudentCount(AppState app, int classId, {bool force = false}) {
+    final current = app.teacherClassStudentCount(classId);
+    if (force) {
+      _stableStudentCounts[classId] = current;
+      return current;
+    }
+    final cached = _stableStudentCounts[classId];
+    if (current == 0 && cached != null && cached > 0) {
+      return cached;
+    }
+    _stableStudentCounts[classId] = current;
+    return current;
+  }
+
+  Future<void> _refresh({bool forceCloud = false}) async {
+    if (forceCloud) {
+      _stableStudentCounts.clear();
+    }
+    await context.read<AppState>().refreshTeacherClasses(
+          cloudSyncInBackground: !forceCloud,
+        );
+  }
 
   Future<void> _showCreateDialog() async {
     final lang = context.read<AppState>().language;
@@ -120,7 +140,12 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final app = context.read<AppState>();
+      if (app.teacherClasses.isEmpty) {
+        await _refresh();
+      }
+    });
   }
 
   @override
@@ -205,7 +230,7 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
                       title: teacherClass.name,
                       badge: teacherClass.code,
                       subtitle: AppStrings.studentsInClass(
-                        app.teacherClassStudentCount(teacherClass.id),
+                        _displayStudentCount(app, teacherClass.id),
                         lang,
                       ),
                       icon: Icons.menu_book_rounded,

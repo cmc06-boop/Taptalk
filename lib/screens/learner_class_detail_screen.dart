@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
+import '../core/utils/live_refresh.dart';
 import '../core/theme/theme_tokens.dart';
 import '../data/models/class_lesson.dart';
 import '../data/models/enrolled_class_model.dart';
@@ -28,37 +31,46 @@ class LearnerClassDetailScreen extends StatefulWidget {
 
 class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
   List<ClassLesson> _lessons = [];
-  bool _loading = false;
+  int _lastContentRevision = 0;
+  AppState? _app;
+
+  bool _sameLessons(List<ClassLesson> a, List<ClassLesson> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id ||
+          a[i].title != b[i].title ||
+          a[i].phraseCount != b[i].phraseCount) {
+        return false;
+      }
+    }
+    return true;
+  }
 
   @override
   void initState() {
     super.initState();
-    _load();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      _app = context.read<AppState>();
+      unawaited(_app!.startLiveClassContentSync(
+        classId: widget.enrolledClass.classId,
+        classCode: widget.enrolledClass.classCode,
+      ));
+      await _load();
+    });
   }
 
   Future<void> _load({bool userRefresh = false}) async {
-    if (userRefresh || _lessons.isEmpty) setState(() => _loading = true);
     final app = context.read<AppState>();
     try {
-      final cached = await app.getEnrolledClassLessons(
+      final lessons = await app.getEnrolledClassLessons(
         widget.enrolledClass.classId,
-        cloudSyncInBackground: true,
+        cloudSyncInBackground: !userRefresh,
       );
       if (!mounted) return;
-      setState(() {
-        _lessons = cached;
-        _loading = false;
-      });
-
-      final synced = await app.getEnrolledClassLessons(
-        widget.enrolledClass.classId,
-        cloudSyncInBackground: false,
-      );
-      if (!mounted) return;
-      setState(() => _lessons = synced);
+      if (_sameLessons(_lessons, lessons)) return;
+      setState(() => _lessons = lessons);
     } catch (e, st) {
       debugPrint('Learner class detail load failed: $e\n$st');
-      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -68,6 +80,8 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
           MaterialPageRoute<void>(
             builder: (_) => LearnerLessonScreen(
               lessonId: lesson.id,
+              classId: widget.enrolledClass.classId,
+              classCode: widget.enrolledClass.classCode,
               lessonTitle: lesson.title,
               className: widget.enrolledClass.className,
             ),
@@ -80,6 +94,13 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
+    final revision = app.classContentRevision(widget.enrolledClass.classId);
+    _lastContentRevision = bindClassContentRevision(
+      lastClassRevision: _lastContentRevision,
+      classRevision: revision,
+      reload: _load,
+      isMounted: () => mounted,
+    );
     final theme = app.theme;
     final lang = app.language;
     final enrolled = widget.enrolledClass;
@@ -116,9 +137,7 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
             ),
           ),
           const SizedBox(height: AppSpacing.md),
-          if (_loading)
-            const Center(child: CircularProgressIndicator())
-          else if (_lessons.isEmpty)
+          if (_lessons.isEmpty)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(AppSpacing.xxl),

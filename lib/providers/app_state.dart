@@ -105,8 +105,10 @@ class AppState extends ChangeNotifier {
   int _resumeWordIndex = 0;
   int _speechResumeCharOffset = 0;
   int _speechHighlightOffset = 0;
+  bool _interruptingForSpeed = false;
   List<String> _emergencyContacts = [];
   String _profileCode = '';
+  String _welcomeFirstName = '';
 
   List<CategoryModel> _categories = [];
   List<PhraseModel> _phrases = [];
@@ -121,8 +123,22 @@ class AppState extends ChangeNotifier {
   final Map<int, int> _teacherClassStudentCounts = {};
   final Set<String> _deletedClassCodes = {};
   int _teacherAlertsRevision = 0;
+  int _liveDataRevision = 0;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   bool _monitoringSyncInFlight = false;
+  final Map<int, int> _childMonitoringRevision = {};
+  final Map<int, int> _classContentRevision = {};
+  final Map<int, DateTime> _classLocalEditAt = {};
+  final Map<int, DateTime> _lastOwnClassPushUpdatedAt = {};
+  final Map<int, int> _lastAppliedRemoteClassContentMs = {};
+  final Map<int, Map<String, DateTime>> _recentDeletedPhraseKeys = {};
+  final Map<int, Future<void>> _classContentMergeChain = {};
+  Future<void> _personalBoardMergeChain = Future<void>.value();
+  final Set<int> _liveClassContentIds = {};
+  final Map<int, bool> _classContentPushInFlight = {};
+  final Map<int, bool> _classContentPushPending = {};
+  Timer? _pendingActivitySyncTimer;
+  final Set<int> _liveMonitoredLearnerIds = {};
 
   bool get loading => _loading;
   UserModel? get user => _user;
@@ -148,6 +164,14 @@ class AppState extends ChangeNotifier {
   }
 
   List<String> get emergencyContacts => List.unmodifiable(_emergencyContacts);
+
+  /// First name from sign-up (For Me welcome). Never uses email.
+  String welcomeFirstName(AppLanguage lang) {
+    final name = _welcomeFirstName.trim();
+    if (name.isNotEmpty) return name;
+    return AppStrings.defaultLearnerName(lang);
+  }
+
   int? get _personalBoardUserId => _user?.id;
 
   /// For Me board: defaults + only this signed-in user's custom entries.
@@ -185,6 +209,13 @@ class AppState extends ChangeNotifier {
       _teacherClasses;
   int get teacherStudentCount => _teacherStudentCount;
   int get teacherAlertsRevision => _teacherAlertsRevision;
+
+  int get liveDataRevision => _liveDataRevision;
+
+  int childMonitoringRevision(int learnerUserId) =>
+      _childMonitoringRevision[learnerUserId] ?? 0;
+
+  int classContentRevision(int classId) => _classContentRevision[classId] ?? 0;
   int teacherClassStudentCount(int classId) =>
       _teacherClassStudentCounts[classId] ?? 0;
   int? get selectedChildId => _selectedChildId;
@@ -245,6 +276,7 @@ class AppState extends ChangeNotifier {
     tts.onComplete = () {
       if (!_isActiveSpeakGeneration()) return;
       if (_speechPaused) return;
+      if (_interruptingForSpeed) return;
       _stopReadAlongFallback();
       _isSpeaking = false;
       _spokenWordStart = -1;
@@ -254,6 +286,7 @@ class AppState extends ChangeNotifier {
     tts.onError = (_) {
       if (!_isActiveSpeakGeneration()) return;
       if (_speechPaused) return;
+      if (_interruptingForSpeed) return;
       _stopReadAlongFallback();
       _isSpeaking = false;
       _spokenWordStart = -1;
@@ -276,6 +309,58 @@ class AppState extends ChangeNotifier {
       if (offset == end && i + 1 < ranges.length) return i + 1;
     }
     return ranges.isEmpty ? 0 : ranges.length - 1;
+  }
+
+  int _currentSpeechCharOffset() {
+    final text = _speakingText;
+    if (text.isEmpty) return 0;
+    if (_spokenWordStart >= 0) {
+      return _spokenWordStart.clamp(0, text.length);
+    }
+    if (_speechHighlightOffset > 0) {
+      return _speechHighlightOffset.clamp(0, text.length);
+    }
+    final ranges = _wordRanges(text);
+    if (_readAlongWordIndex > 0 && _readAlongWordIndex < ranges.length) {
+      return ranges[_readAlongWordIndex].$1;
+    }
+    return 0;
+  }
+
+  Future<bool> _speakUntilDone({
+    required int gen,
+    required String fullText,
+  }) async {
+    while (true) {
+      if (gen != _ttsGeneration || !_isSpeaking || _speechPaused) {
+        return false;
+      }
+
+      var offset = _currentSpeechCharOffset();
+      if (_speechHighlightOffset > offset) {
+        offset = _speechHighlightOffset;
+      }
+
+      final remaining =
+          fullText.substring(offset.clamp(0, fullText.length)).trimLeft();
+      if (remaining.isEmpty) return true;
+
+      final resumeAt = fullText.indexOf(remaining, offset);
+      _speechHighlightOffset = resumeAt >= 0 ? resumeAt : offset;
+      _spokenWordStart = -1;
+      _spokenWordEnd = -1;
+      _startReadAlongFallback(
+        fromWordIndex: _wordIndexAtOffset(fullText, _speechHighlightOffset),
+      );
+      notifyListeners();
+
+      final ok = await tts.speak(remaining, rate: _ttsSpeed, lang: _language);
+      if (gen != _ttsGeneration) return false;
+      if (ok) return true;
+
+      if (_isSpeaking && !_speechPaused) continue;
+      return false;
+    }
   }
 
   void _startReadAlongFallback({int? fromWordIndex}) {
@@ -320,6 +405,7 @@ class AppState extends ChangeNotifier {
     _resumeWordIndex = 0;
     _speechResumeCharOffset = 0;
     _speechHighlightOffset = 0;
+    _readAlongWordIndex = 0;
     _speakingText = '';
     _spokenWordStart = -1;
     _spokenWordEnd = -1;
@@ -374,6 +460,18 @@ class AppState extends ChangeNotifier {
       unawaited(tts.init());
       // Auth (sign up / log in) needs Firebase even when no user is logged in yet.
       await FirebaseService.instance.initialize();
+      if (_user != null &&
+          (_user!.isLearner || _user!.isParent || _user!.isTeacher) &&
+          !await NetworkStatus.isOffline()) {
+        try {
+          await _restoreAccountFromCloud();
+          await _refreshPersonalBoard();
+          await _applyCrossDevicePreferencesFromAccount();
+          notifyListeners();
+        } catch (e, st) {
+          debugPrint('Background account restore failed: $e\n$st');
+        }
+      }
       await _activateMonitoringSync();
     } catch (e, st) {
       debugPrint('TapTalk cloud init failed: $e\n$st');
@@ -399,6 +497,18 @@ class AppState extends ChangeNotifier {
     if (needsMonitoringSync) {
       await _syncPendingLearnerActivityToCloud();
       await _startLearnerEnrollmentSync();
+      _startPendingActivitySyncTimer();
+    }
+
+    if (_user!.isOnlineAccount &&
+        _hasPersonalBoardRole() &&
+        CloudScope.syncMonitoring) {
+      await _syncFirebaseSessionAfterRestore();
+      await _startPersonalBoardSync();
+    }
+
+    if (_user!.isOnlineAccount) {
+      await _startUserProfileSync();
     }
 
     if (!needsFullCloud) return;
@@ -410,12 +520,18 @@ class AppState extends ChangeNotifier {
     if (_user!.isParent || _user!.isTeacher) {
       if (_user!.isTeacher) {
         await _syncTeacherClassesFromCloud();
+        await _syncTeacherAlertsFromCloud();
         await _startTeacherMonitoringSync();
+        await _startTeacherAlertSync();
       }
       if (_user!.isParent) {
         await _startParentChildLinkSync();
       }
       unawaited(_prefetchMonitoredLearnerCaches());
+      unawaited(_reconcileClassContentLiveSync());
+    }
+    if (_user!.isLearner && CloudScope.syncMonitoring) {
+      unawaited(_reconcileClassContentLiveSync());
     }
   }
 
@@ -431,9 +547,115 @@ class AppState extends ChangeNotifier {
           // Never push before pull here — teacher may have deleted the class.
           await _syncEnrolledClassesFromCloud();
           _enrolledClasses = await _repo.getEnrolledClasses(_user!.id);
-          notifyListeners();
+          unawaited(_reconcileClassContentLiveSync());
+          _bumpLiveDataRevision();
         } catch (e, st) {
           debugPrint('Learner enrollment live sync failed: $e\n$st');
+        }
+      },
+    );
+  }
+
+  Future<void> _startUserProfileSync() async {
+    if (_user == null || !_user!.isOnlineAccount) return;
+    final uid = await _resolveAccountFirebaseUid();
+    if (uid == null || uid.isEmpty) return;
+    await _notificationSync.startUserProfileSync(
+      firebaseUid: uid,
+      onChanged: (profile) async {
+        if (_user == null) return;
+        try {
+          await _applyLiveUserProfileFromCloud(profile);
+        } catch (e, st) {
+          debugPrint('User profile live sync failed: $e\n$st');
+        }
+      },
+    );
+  }
+
+  Future<void> _applyLiveUserProfileFromCloud(RemoteUserProfile profile) async {
+    if (_user == null) return;
+    final previousLanguage = _language;
+
+    final updated = await _repo.applyRemoteUserProfile(
+      userId: _user!.id,
+      profile: profile,
+    );
+    if (updated == null) return;
+
+    _user = updated;
+    final settings = await _repo.getUserSettings(_user!.id);
+    _welcomeFirstName = AppRepository.welcomeFirstNameFrom(
+      settings: settings,
+      fullName: _user!.fullName,
+    );
+    if (profile.language?.trim().isNotEmpty ?? false) {
+      _applyLanguageCode(profile.language!.trim());
+    } else {
+      _applyLanguageFromSettings(settings);
+    }
+    _applyThemeFromUser(fallbackThemeKey: profile.themeKey);
+    _ttsSpeed = TtsSpeedOptions.snap(
+      (settings['tts_speed'] as num?)?.toDouble() ??
+          TtsSpeedOptions.defaultSpeed,
+    );
+    await _markLanguageOnboardingDoneIfRestored();
+    await _syncLanguagePref();
+    await _syncTtsSpeedPref();
+
+    if (_language != previousLanguage) {
+      _languageRevision++;
+    }
+    notifyListeners();
+  }
+
+  Future<void> _startPersonalBoardSync() async {
+    if (_user == null ||
+        !_hasPersonalBoardRole() ||
+        !CloudScope.syncMonitoring) {
+      return;
+    }
+    final uid = await _resolveAccountFirebaseUid();
+    if (uid == null || uid.isEmpty) return;
+    await _notificationSync.startPersonalBoardSync(
+      learnerFirebaseUid: uid,
+      onChanged: (snapshot) async {
+        if (_user == null) return;
+        final task = _personalBoardMergeChain.then((_) async {
+          if (_user == null) return;
+          if (snapshot.categories.isNotEmpty) {
+            await _repo.mergeRemoteLearnerCategories(
+              learnerUserId: _user!.id,
+              remoteCategories: snapshot.categories,
+            );
+          }
+          if (snapshot.customPhrases.isNotEmpty) {
+            await _repo.mergeRemoteLearnerCustomPhrases(
+              learnerUserId: _user!.id,
+              phrases: snapshot.customPhrases,
+            );
+            await _repo.dedupeCustomPhrases(_user!.id);
+          }
+          if (snapshot.favorites.isNotEmpty) {
+            await _repo.mergeRemoteLearnerFavorites(
+              learnerUserId: _user!.id,
+              favorites: snapshot.favorites,
+            );
+          }
+          if (snapshot.speakHistory.isNotEmpty) {
+            await _repo.mergeRemoteLearnerSpeakHistory(
+              learnerUserId: _user!.id,
+              history: snapshot.speakHistory,
+            );
+          }
+          await _refreshPersonalBoard();
+          _bumpLiveDataRevision();
+        });
+        _personalBoardMergeChain = task;
+        try {
+          await task;
+        } catch (e, st) {
+          debugPrint('Personal board live sync failed: $e\n$st');
         }
       },
     );
@@ -450,7 +672,7 @@ class AppState extends ChangeNotifier {
         try {
           await _syncLinkedChildrenFromCloud();
           _linkedChildren = await _repo.getLinkedChildren(_user!.id);
-          notifyListeners();
+          _bumpLiveDataRevision();
         } catch (e, st) {
           debugPrint('Parent child link live sync failed: $e\n$st');
         }
@@ -472,7 +694,7 @@ class AppState extends ChangeNotifier {
             enrollments: enrollments,
           );
           await _refreshTeacherClassCounts();
-          notifyListeners();
+          _bumpLiveDataRevision();
         } catch (e, st) {
           debugPrint('Teacher enrollment live sync failed: $e\n$st');
         }
@@ -496,10 +718,42 @@ class AppState extends ChangeNotifier {
           );
           await _loadTeacherClasses();
           await _refreshTeacherClassCounts();
-          notifyListeners();
+          unawaited(_reconcileClassContentLiveSync());
+          _bumpLiveDataRevision();
         } catch (e, st) {
           debugPrint('Teacher class live sync failed: $e\n$st');
         }
+      },
+    );
+  }
+
+  Future<void> _syncTeacherAlertsFromCloud() async {
+    if (_user == null || !_user!.isTeacher || !CloudScope.notifications) return;
+    await FirebaseService.instance.initialize();
+    await _notificationSync.initialize();
+    if (!_notificationSync.isCloudAvailable) return;
+    final teacherFirebaseUid = await _resolveAccountFirebaseUid();
+    if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) return;
+    await _notificationSync.syncTeacherAlertsFromCloud(
+      teacherUserId: _user!.id,
+      teacherFirebaseUid: teacherFirebaseUid,
+    );
+  }
+
+  Future<void> _startTeacherAlertSync() async {
+    if (_user == null || !_user!.isTeacher || !CloudScope.notifications) return;
+    await FirebaseService.instance.initialize();
+    await _notificationSync.initialize();
+    if (!_notificationSync.isCloudAvailable) return;
+    final teacherFirebaseUid = await _resolveAccountFirebaseUid();
+    if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) return;
+    await _notificationSync.startTeacherAlertSync(
+      teacherUserId: _user!.id,
+      teacherFirebaseUid: teacherFirebaseUid,
+      onChanged: () {
+        if (_user == null || !_user!.isTeacher) return;
+        _teacherAlertsRevision++;
+        notifyListeners();
       },
     );
   }
@@ -535,17 +789,6 @@ class AppState extends ChangeNotifier {
 
   String _ttsSpeedPrefKey(int userId) => 'tts_speed_$userId';
 
-  Future<bool> _isCategoryOnboardingDone(int userId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final key = _categoryOnboardingKey(userId);
-    if (!prefs.containsKey(key)) {
-      // Existing users before category onboarding — skip the extra step.
-      await prefs.setBool(key, true);
-      return true;
-    }
-    return prefs.getBool(key) ?? false;
-  }
-
   Future<void> _setCategoryOnboardingDone(int userId, bool done) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_categoryOnboardingKey(userId), done);
@@ -563,7 +806,15 @@ class AppState extends ChangeNotifier {
 
   Future<void> _routeUserAfterOnboardingChecks() async {
     if (_user == null) return;
-    final languageDone = await _isLanguageOnboardingDone(_user!.id);
+    final settings = await _repo.getUserSettings(_user!.id);
+    final hasAccountLanguage = settings['language'] is String &&
+        (settings['language'] as String).trim().isNotEmpty;
+
+    var languageDone = await _isLanguageOnboardingDone(_user!.id);
+    if (!languageDone && hasAccountLanguage) {
+      await _setLanguageOnboardingDone(_user!.id, true);
+      languageDone = true;
+    }
     if (!languageDone) {
       _route = AppRoute.chooseLanguage;
       return;
@@ -574,8 +825,7 @@ class AppState extends ChangeNotifier {
         return;
       }
       await _ensureStarterData();
-      final categoryDone = await _isCategoryOnboardingDone(_user!.id);
-      _route = categoryDone ? AppRoute.home : AppRoute.chooseCategory;
+      _route = AppRoute.chooseCategory;
     } else if (_user!.isParent) {
       _route = AppRoute.home;
     } else if (_user!.isTeacher) {
@@ -614,11 +864,22 @@ class AppState extends ChangeNotifier {
       await _repo.dedupeBuiltinPhrases(userId);
     }
     final settings = await _repo.getUserSettings(_user!.id);
+    _welcomeFirstName = AppRepository.welcomeFirstNameFrom(
+      settings: settings,
+      fullName: _user!.fullName,
+    );
     _ttsSpeed = TtsSpeedOptions.snap(
       (settings['tts_speed'] as num?)?.toDouble() ?? TtsSpeedOptions.defaultSpeed,
     );
     _applyLanguageFromSettings(settings);
-    await _restoreLanguagePref();
+    final settingsLanguage = settings['language'];
+    final hasSettingsLanguage = settingsLanguage is String &&
+        settingsLanguage.trim().isNotEmpty;
+    if (!hasSettingsLanguage) {
+      await _restoreLanguagePref();
+    } else {
+      await _setLanguageOnboardingDone(_user!.id, true);
+    }
     await _syncLanguagePref();
     await _syncTtsSpeedPref();
     final contacts = settings['emergency_contacts'];
@@ -640,6 +901,15 @@ class AppState extends ChangeNotifier {
     } else {
       _profileCode = '';
       _enrolledClasses = [];
+      if (_hasPersonalBoardRole() && CloudScope.syncMonitoring) {
+        if (cloudSyncInBackground) {
+          unawaited(_syncAccountPersonalDataToCloud());
+        } else {
+          await _pullPersonalBoardFromCloud();
+          await _refreshPersonalBoard();
+          await _syncAccountPersonalDataToCloud();
+        }
+      }
     }
 
     _categories = (await _repo.getCategories(userId))
@@ -665,8 +935,12 @@ class AppState extends ChangeNotifier {
     if (_user == null || !_user!.isLearner) return;
     try {
       if (CloudScope.syncMonitoring) {
+        await _pullPersonalBoardFromCloud();
+        await _refreshPersonalBoard();
         await _syncLearnerCategoriesToCloud();
         await _syncLearnerCustomPhrasesToCloud();
+        await _syncLearnerFavoritesToCloud();
+        await _syncLearnerSpeakHistoryToCloud();
         await _syncPendingLearnerActivityToCloud();
         await _resyncLearnerEnrollmentsToCloud();
         final learnerFirebaseUid = await _learnerFirebaseUidForSync();
@@ -690,6 +964,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> _syncUserProfileToCloud() async {
     if (_user == null) return;
+    if (AppRepository.isStubEmail(_user!.email)) return;
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
     if (!_notificationSync.isCloudAvailable) return;
@@ -703,6 +978,11 @@ class AppState extends ChangeNotifier {
           ? _profileCode
           : await _repo.ensureLearnerProfileCode(_user!.id);
     }
+    final settings = await _repo.getUserSettings(_user!.id);
+    final signupFirstName = (settings['first_name'] as String?)?.trim();
+    final themeKey = _user!.themeKey?.trim();
+    final resolvedThemeKey =
+        themeKey != null && themeKey.isNotEmpty ? themeKey : _theme.key;
 
     await _notificationSync.syncUserProfile(
       RemoteUserProfile(
@@ -710,8 +990,11 @@ class AppState extends ChangeNotifier {
         email: _user!.email,
         fullName: _user!.fullName,
         role: _user!.role,
-        themeKey: _user!.themeKey,
+        firstName: signupFirstName?.isNotEmpty == true ? signupFirstName : null,
+        themeKey: resolvedThemeKey,
         profileCode: profileCode,
+        language: AppStrings.langCode(_language),
+        ttsSpeed: _ttsSpeed,
       ),
     );
 
@@ -724,6 +1007,212 @@ class AppState extends ChangeNotifier {
         profileCode: profileCode,
       );
     }
+  }
+
+  bool _hasPersonalBoardRole() {
+    if (_user == null) return false;
+    return _user!.isLearner || _user!.isParent || _user!.isTeacher;
+  }
+
+  RemoteUserProfile _mergeCloudAccountPreferences({
+    required RemoteUserProfile profile,
+    RemoteUserProfile? cloudSource,
+  }) {
+    if (cloudSource == null) return profile;
+    final cloudTheme = cloudSource.themeKey?.trim();
+    final cloudLanguage = cloudSource.language?.trim();
+    return RemoteUserProfile(
+      firebaseUid: profile.firebaseUid,
+      email: profile.email,
+      fullName: profile.fullName,
+      role: profile.role,
+      firstName: profile.firstName ?? cloudSource.firstName,
+      themeKey: cloudTheme != null && cloudTheme.isNotEmpty
+          ? cloudTheme
+          : profile.themeKey,
+      profileCode: profile.profileCode ?? cloudSource.profileCode,
+      language: cloudLanguage != null && cloudLanguage.isNotEmpty
+          ? cloudLanguage
+          : profile.language,
+      ttsSpeed: cloudSource.ttsSpeed ?? profile.ttsSpeed,
+    );
+  }
+
+  Future<void> _markLanguageOnboardingDoneIfRestored() async {
+    if (_user == null) return;
+    final settings = await _repo.getUserSettings(_user!.id);
+    final raw = settings['language'];
+    if (raw is String && raw.trim().isNotEmpty) {
+      await _setLanguageOnboardingDone(_user!.id, true);
+    }
+  }
+
+  Future<void> _applyCrossDevicePreferencesFromAccount() async {
+    if (_user == null) return;
+    final refreshed = await _repo.findUserById(_user!.id);
+    if (refreshed != null) {
+      _user = refreshed;
+    }
+    final settings = await _repo.getUserSettings(_user!.id);
+    _applyLanguageFromSettings(settings);
+    _applyThemeFromUser();
+    await _markLanguageOnboardingDoneIfRestored();
+    await _syncLanguagePref();
+    await _syncTtsSpeedPref();
+  }
+
+  void _applyThemeFromUser({String? fallbackThemeKey}) {
+    final key = _user?.themeKey?.trim() ?? fallbackThemeKey?.trim();
+    if (key != null && key.isNotEmpty) {
+      _theme = TapTalkThemes.byKey(key);
+    } else if (_user?.needsTheme == true) {
+      _theme = TapTalkThemes.appDefault;
+    }
+  }
+
+  Future<void> _restoreUserProfileFromCloud() async {
+    if (_user == null) return;
+    if (await NetworkStatus.isOffline()) return;
+    await FirebaseService.instance.initialize();
+    await _notificationSync.initialize();
+    if (!_notificationSync.isCloudAvailable) return;
+
+    final uid = await _resolveAccountFirebaseUid();
+    if (uid == null || uid.isEmpty) return;
+
+    try {
+      final cloudSnapshot = await _notificationSync.getUserProfileFromCloud(uid);
+      var profile = cloudSnapshot;
+      if (profile != null &&
+          AppRepository.isGenericAccountName(profile.fullName)) {
+        profile = null;
+      }
+      profile ??= await _notificationSync.resolveUserProfileForLogin(
+        firebaseUid: uid,
+        email: _user!.email.contains('@taptalk.stub')
+            ? (FirebaseService.instance.auth?.currentUser?.email ??
+                _user!.email)
+            : _user!.email,
+      );
+      profile = _mergeCloudAccountPreferences(
+        profile: profile,
+        cloudSource: cloudSnapshot,
+      );
+      final updated = await _repo.applyRemoteUserProfile(
+        userId: _user!.id,
+        profile: profile,
+      );
+      if (updated != null) {
+        _user = updated;
+        final settings = await _repo.getUserSettings(_user!.id);
+        _welcomeFirstName = AppRepository.welcomeFirstNameFrom(
+          settings: settings,
+          fullName: _user!.fullName,
+        );
+        if (profile.language?.trim().isNotEmpty ?? false) {
+          _applyLanguageCode(profile.language!.trim());
+        } else {
+          _applyLanguageFromSettings(settings);
+        }
+        _applyThemeFromUser(fallbackThemeKey: cloudSnapshot?.themeKey);
+        _ttsSpeed = TtsSpeedOptions.snap(
+          (settings['tts_speed'] as num?)?.toDouble() ??
+              TtsSpeedOptions.defaultSpeed,
+        );
+        await _markLanguageOnboardingDoneIfRestored();
+        await _syncLanguagePref();
+        await _syncTtsSpeedPref();
+      }
+    } catch (e, st) {
+      debugPrint('Restore user profile from cloud failed: $e\n$st');
+    }
+  }
+
+  Future<void> _pullPersonalBoardFromCloud() async {
+    if (!_hasPersonalBoardRole()) return;
+    if (!CloudScope.syncMonitoring) return;
+    if (await NetworkStatus.isOffline()) return;
+    await FirebaseService.instance.initialize();
+    await _notificationSync.initialize();
+    if (!_notificationSync.isCloudAvailable) return;
+    if (!await _ensureCloudAuthSession()) return;
+
+    final uid = await _resolveAccountFirebaseUid();
+    if (uid == null || uid.isEmpty) return;
+
+    try {
+      final remote =
+          await _notificationSync.getLearnerCategoriesFromCloud(uid);
+      if (remote.isNotEmpty) {
+        await _repo.mergeRemoteLearnerCategories(
+          learnerUserId: _user!.id,
+          remoteCategories: remote,
+        );
+      }
+      await _pullLearnerCustomPhrasesFromCloud(_user!.id);
+      await _pullLearnerFavoritesFromCloud(_user!.id);
+      await _pullLearnerSpeakHistoryFromCloud(_user!.id);
+      await _repo.dedupeCustomPhrases(_user!.id);
+    } catch (e, st) {
+      debugPrint('Pull personal board from cloud failed: $e\n$st');
+    }
+  }
+
+  Future<void> _restoreAccountFromCloud() async {
+    if (_user == null) return;
+    if (await NetworkStatus.isOffline()) return;
+    await FirebaseService.instance.initialize();
+    final authUid = await FirebaseService.instance.waitForAuthUid(
+      timeout: const Duration(seconds: 12),
+    );
+    if (authUid == null || authUid.isEmpty) {
+      debugPrint('Account cloud restore skipped: Firebase auth not ready');
+      return;
+    }
+    if (_user!.firebaseUid == null || _user!.firebaseUid!.isEmpty) {
+      await _repo.linkFirebaseUid(_user!.id, authUid);
+      _user = _user!.copyWith(firebaseUid: authUid);
+    }
+    await _restoreUserProfileFromCloud();
+    await _pullPersonalBoardFromCloud();
+    await _refreshPersonalBoard();
+  }
+
+  Future<String?> _personalBoardCloudUid() async {
+    if (_user == null || !_hasPersonalBoardRole()) return null;
+    if (!CloudScope.syncMonitoring) return null;
+    if (await NetworkStatus.isOffline()) return null;
+    await FirebaseService.instance.initialize();
+    await _notificationSync.initialize();
+    if (!_notificationSync.isCloudAvailable) return null;
+    if (!await _ensureCloudAuthSession()) return null;
+    return _resolveAccountFirebaseUid();
+  }
+
+  void _syncAccountPersonalDataInBackground() {
+    unawaited(() async {
+      await _syncAccountPersonalDataToCloud();
+      await _refreshPersonalBoard();
+      notifyListeners();
+    }());
+  }
+
+  Future<void> _syncAccountPersonalDataToCloud() async {
+    if (_user == null || !_hasPersonalBoardRole()) return;
+    if (!CloudScope.syncMonitoring) return;
+    try {
+      await _syncUserProfileToCloud();
+      await _syncPersonalBoardToCloud();
+    } catch (e, st) {
+      debugPrint('Account personal data cloud sync failed: $e\n$st');
+    }
+  }
+
+  Future<void> _syncPersonalBoardToCloud() async {
+    await _syncLearnerCategoriesToCloud();
+    await _syncLearnerCustomPhrasesToCloud();
+    await _syncLearnerFavoritesToCloud();
+    await _syncLearnerSpeakHistoryToCloud();
   }
 
   Future<void> _refreshPersonalBoard() async {
@@ -754,13 +1243,6 @@ class AppState extends ChangeNotifier {
         (!_user!.isParent && !_user!.isLearner && !_user!.isTeacher)) {
       return;
     }
-    await _repo.dedupeBuiltinPhrases(_user!.id);
-    if (await _repo.hasStarterPersonalData(_user!.id)) {
-      if (_categories.isEmpty) {
-        await _refreshLearnerCollections();
-      }
-      return;
-    }
     await _repo.seedLearnerData(_user!.id);
     await _refreshLearnerCollections();
   }
@@ -773,7 +1255,9 @@ class AppState extends ChangeNotifier {
     }
     if (_route == route) return;
     _route = route;
-    if (_isPersonalBoardRoute(route) && _user != null) {
+    if (route == AppRoute.favorites && _user != null) {
+      await refreshFavoritesFromCloud();
+    } else if (_isPersonalBoardRoute(route) && _user != null) {
       await _refreshPersonalBoard();
     }
     notifyListeners();
@@ -839,19 +1323,33 @@ class AppState extends ChangeNotifier {
           _user!.id,
           language: lang == AppLanguage.filipino ? 'Filipino' : 'English',
         );
+        unawaited(_syncUserProfileToCloud());
       }
     } catch (e, st) {
       debugPrint('setLanguage persist failed: $e\n$st');
     }
   }
 
-  Future<void> setTtsSpeed(double speed) async {
-    _ttsSpeed = TtsSpeedOptions.snap(speed);
+  Future<void> setTtsSpeed(double speed, {bool persist = true}) async {
+    final snapped = TtsSpeedOptions.snap(speed);
+    final changed = snapped != _ttsSpeed;
+    _ttsSpeed = snapped;
+
+    if (changed && _isSpeaking && !_speechPaused && _isActiveSpeakGeneration()) {
+      _interruptingForSpeed = true;
+      unawaited(
+        tts.stop().whenComplete(() => _interruptingForSpeed = false),
+      );
+    }
+
+    notifyListeners();
+
+    if (!persist) return;
     await _syncTtsSpeedPref();
     if (_user != null) {
       await _repo.updateUserSettings(_user!.id, ttsSpeed: _ttsSpeed);
+      _syncAccountPersonalDataInBackground();
     }
-    notifyListeners();
   }
 
   Future<void> setTheme(String themeKey) async {
@@ -859,6 +1357,7 @@ class AppState extends ChangeNotifier {
     if (_user != null) {
       await _repo.updateUserTheme(_user!.id, themeKey);
       _user = _user!.copyWith(themeKey: themeKey);
+      unawaited(_syncUserProfileToCloud());
     }
     notifyListeners();
   }
@@ -913,51 +1412,20 @@ class AppState extends ChangeNotifier {
     final offline = await NetworkStatus.isOffline();
 
     var user = await _repo.findUserByEmail(normalizedEmail);
-    if (user == null) {
-      if (offline || !FirebaseService.instance.isAvailable) {
+
+    if (offline || !FirebaseService.instance.isAvailable) {
+      if (user == null) {
         return AppStrings.loginNeedsInternet(_language);
       }
-      // Account may exist only in Firebase (registered on another device).
-      if (FirebaseService.instance.isAvailable) {
-        final uid = await FirebaseService.instance.signIn(
-          email: normalizedEmail,
-          password: password,
-        );
-        if (uid != null) {
-          final cloudProfile =
-              await _notificationSync.resolveUserProfileForLogin(
-            firebaseUid: uid,
-            email: normalizedEmail,
-          );
-          user = await _repo.provisionLocalUserFromCloud(
-            email: normalizedEmail,
-            password: password,
-            firebaseUid: uid,
-            profile: cloudProfile,
-          );
-        }
-      }
-      if (user == null) {
-        return AppStrings.emailNotRegistered(_language);
-      }
-    }
-
-    if (FirebaseService.instance.isAvailable) {
+      final ok = await _repo.verifyLogin(normalizedEmail, password);
+      if (!ok) return AppStrings.wrongPassword(_language);
+    } else {
       final uid = await FirebaseService.instance.signIn(
         email: normalizedEmail,
         password: password,
       );
-      if (uid != null) {
-        if (user.firebaseUid != uid) {
-          await _repo.linkFirebaseUid(user.id, uid);
-          user = user.copyWith(firebaseUid: uid);
-        }
-        final hashed = AppRepository.hashPassword(password);
-        if (user.passwordHash != hashed) {
-          await _repo.updatePasswordHash(user.id, password);
-          user = user.copyWith(passwordHash: hashed);
-        }
-      } else {
+      if (uid == null) {
+        if (user == null) return AppStrings.emailNotRegistered(_language);
         final ok = await _repo.verifyLogin(normalizedEmail, password);
         if (!ok) return AppStrings.wrongPassword(_language);
         unawaited(
@@ -967,17 +1435,31 @@ class AppState extends ChangeNotifier {
             password: password,
           ),
         );
-      }
-    } else {
-      final ok = await _repo.verifyLogin(normalizedEmail, password);
-      if (!ok) return AppStrings.wrongPassword(_language);
-      unawaited(
-        _linkFirebaseAccountIfAvailable(
-          user: user,
+      } else {
+        await _notificationSync.initialize();
+        var cloudProfile =
+            await _notificationSync.getUserProfileFromCloud(uid);
+        final cloudSnapshot = cloudProfile;
+        if (cloudProfile != null &&
+            AppRepository.isGenericAccountName(cloudProfile.fullName)) {
+          cloudProfile = null;
+        }
+        cloudProfile ??= await _notificationSync.resolveUserProfileForLogin(
+          firebaseUid: uid,
+          email: normalizedEmail,
+        );
+        cloudProfile = _mergeCloudAccountPreferences(
+          profile: cloudProfile,
+          cloudSource: cloudSnapshot,
+        );
+        user = await _repo.finalizeCloudLoginUser(
+          userByEmail: user,
           email: normalizedEmail,
           password: password,
-        ),
-      );
+          firebaseUid: uid,
+          profile: cloudProfile,
+        );
+      }
     }
 
     _user = user;
@@ -985,22 +1467,27 @@ class AppState extends ChangeNotifier {
 
     _resetAccountSession();
 
-    unawaited(_syncUserProfileToCloud());
+    if (!offline && FirebaseService.instance.isAvailable) {
+      try {
+        await _notificationSync.initialize();
+        await _restoreAccountFromCloud();
+        await _refreshPersonalBoard();
+      } catch (e, st) {
+        debugPrint('Account restore from cloud failed: $e\n$st');
+      }
+    }
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('user_id', _user!.id);
+    await _applyCrossDevicePreferencesFromAccount();
+
     if (_user!.isLearner || _user!.isParent || _user!.isTeacher) {
-      if (_user!.needsTheme) {
-        _theme = TapTalkThemes.appDefault;
-      } else {
-        _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
-      }
       await _routeUserAfterOnboardingChecks();
     } else {
       _route = AppRoute.login;
+      notifyListeners();
       return AppStrings.parentTeacherComingSoon(_language);
     }
-
     notifyListeners();
 
     try {
@@ -1008,25 +1495,31 @@ class AppState extends ChangeNotifier {
         await _loadLearnerData(cloudSyncInBackground: false);
         await _ensureStarterData();
       } else if (_user!.isParent) {
-        await _loadLearnerData(cloudSyncInBackground: true);
+        await _loadLearnerData(cloudSyncInBackground: false);
         await _ensureStarterData();
         await _loadLinkedChildren(syncCloudInBackground: true);
         await _notificationSync.initialize();
         await _syncFirebaseSessionAfterRestore();
         await _syncCloudDataAfterFirebaseReady();
       } else if (_user!.isTeacher) {
-        await _loadLearnerData(cloudSyncInBackground: true);
+        await _loadLearnerData(cloudSyncInBackground: false);
         await _ensureStarterData();
-        await refreshTeacherClasses(cloudSyncInBackground: true);
+        await refreshTeacherClasses(cloudSyncInBackground: false);
         await _notificationSync.initialize();
         await _syncFirebaseSessionAfterRestore();
       }
+      if (!offline && FirebaseService.instance.isAvailable) {
+        await _pullPersonalBoardFromCloud();
+        await _refreshPersonalBoard();
+        await _syncAccountPersonalDataToCloud();
+      }
+      await _applyCrossDevicePreferencesFromAccount();
       unawaited(_activateMonitoringSync());
-      notifyListeners();
     } catch (e, st) {
       debugPrint('Post-login data load failed (session is saved): $e\n$st');
     }
 
+    notifyListeners();
     return null;
   }
 
@@ -1042,6 +1535,7 @@ class AppState extends ChangeNotifier {
 
   Future<String?> register({
     required String fullName,
+    required String firstName,
     required String email,
     required String password,
     required String role,
@@ -1049,6 +1543,7 @@ class AppState extends ChangeNotifier {
     try {
       return await _registerImpl(
         fullName: fullName,
+        firstName: firstName,
         email: email,
         password: password,
         role: role,
@@ -1061,6 +1556,7 @@ class AppState extends ChangeNotifier {
 
   Future<String?> _registerImpl({
     required String fullName,
+    required String firstName,
     required String email,
     required String password,
     required String role,
@@ -1107,6 +1603,7 @@ class AppState extends ChangeNotifier {
     try {
       _user = await _repo.registerUser(
         fullName: fullName,
+        firstName: firstName,
         email: normalizedEmail,
         password: password,
         role: role,
@@ -1124,6 +1621,7 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('user_id', _user!.id);
     _resetAccountSession();
+    _welcomeFirstName = firstName.trim();
     if (role == 'learner') {
       _theme = TapTalkThemes.appDefault;
       await _setLanguageOnboardingDone(_user!.id, false);
@@ -1242,6 +1740,20 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    _pendingActivitySyncTimer?.cancel();
+    _pendingActivitySyncTimer = null;
+    _liveMonitoredLearnerIds.clear();
+    _childMonitoringRevision.clear();
+    _classContentRevision.clear();
+    _classLocalEditAt.clear();
+    _lastOwnClassPushUpdatedAt.clear();
+    _lastAppliedRemoteClassContentMs.clear();
+    _recentDeletedPhraseKeys.clear();
+    _classContentMergeChain.clear();
+    _classContentPushInFlight.clear();
+    _classContentPushPending.clear();
+    _liveClassContentIds.clear();
+    _liveDataRevision = 0;
     await _connectivitySubscription?.cancel();
     _connectivitySubscription = null;
     await _notificationSync.stopParentSync();
@@ -1296,7 +1808,7 @@ class AppState extends ChangeNotifier {
     if (_user == null) return AppStrings.notSignedIn(_language);
     try {
       final cat = await _repo.addCategory(_user!.id, name);
-      if (_user!.isLearner) {
+      if (_user!.isLearner || _user!.isParent || _user!.isTeacher) {
         unawaited(_syncLearnerCategoriesToCloud());
       }
       _selectedCategoryKey = cat.key;
@@ -1318,11 +1830,11 @@ class AppState extends ChangeNotifier {
       categoryKey: _selectedCategoryKey,
       imagePath: savedImagePath,
     );
-    if (_user!.isLearner) {
-      unawaited(_syncLearnerCustomPhrasesToCloud());
-    }
     await _refreshPersonalBoard();
     notifyListeners();
+    if (_user!.isLearner || _user!.isParent || _user!.isTeacher) {
+      unawaited(_pushLearnerCustomPhrasesToCloud());
+    }
     return null;
   }
 
@@ -1330,12 +1842,13 @@ class AppState extends ChangeNotifier {
     if (_user == null || phrase.userId != _user!.id) return;
     if (!phrase.isBuiltin) {
       await _repo.deletePhrase(_user!.id, phrase.id);
-      if (_user!.isLearner) {
-        unawaited(_syncLearnerCustomPhrasesToCloud());
-      }
     }
     await _refreshPersonalBoard();
     notifyListeners();
+    if (!phrase.isBuiltin &&
+        (_user!.isLearner || _user!.isParent || _user!.isTeacher)) {
+      unawaited(_pushLearnerCustomPhrasesToCloud());
+    }
   }
 
   Future<bool> updatePhrase(
@@ -1359,6 +1872,9 @@ class AppState extends ChangeNotifier {
     );
     await _refreshPersonalBoard();
     notifyListeners();
+    if (ok && (_user!.isLearner || _user!.isParent || _user!.isTeacher)) {
+      unawaited(_pushLearnerCustomPhrasesToCloud());
+    }
     return ok;
   }
 
@@ -1390,6 +1906,16 @@ class AppState extends ChangeNotifier {
       );
     }
     _favorites = await _repo.getFavorites(_user!.id);
+    notifyListeners();
+    unawaited(_pushLearnerFavoritesToCloud());
+  }
+
+  Future<void> refreshFavoritesFromCloud() async {
+    if (_user == null || !_hasPersonalBoardRole()) return;
+    await _pullLearnerFavoritesFromCloud(_user!.id);
+    _favorites = (await _repo.getFavorites(_user!.id))
+        .where((f) => f.userId == _user!.id)
+        .toList();
     notifyListeners();
   }
 
@@ -1432,6 +1958,7 @@ class AppState extends ChangeNotifier {
           lessonTitle: lessonTitle,
         ),
       );
+      unawaited(_syncLearnerSpeakHistoryToCloud());
     }
   }
 
@@ -1559,21 +2086,282 @@ class AppState extends ChangeNotifier {
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
 
+    if (_user!.isOnlineAccount &&
+        _hasPersonalBoardRole() &&
+        CloudScope.syncMonitoring) {
+      await _startPersonalBoardSync();
+    }
+    if (_user!.isOnlineAccount) {
+      await _startUserProfileSync();
+    }
+
     if (_user!.isLearner && CloudScope.syncMonitoring) {
       await _syncLearnerCloudData();
       await refreshEnrolledClasses(cloudSyncInBackground: false);
+      await _startLearnerEnrollmentSync();
+      await _reconcileClassContentLiveSync();
       return;
     }
     if (_user!.isParent || _user!.isTeacher) {
       await _syncFirebaseSessionAfterRestore();
       if (_user!.isParent) {
         await refreshLinkedChildren(cloudSyncInBackground: false);
+        await _startParentNotificationSync();
+        await _startParentChildLinkSync();
       }
       if (_user!.isTeacher) {
         await refreshTeacherClasses(cloudSyncInBackground: false);
+        await _syncTeacherAlertsFromCloud();
+        await _startTeacherMonitoringSync();
+        await _startTeacherAlertSync();
       }
       await _prefetchMonitoredLearnerCaches();
+      await _reconcileClassContentLiveSync();
     }
+  }
+
+  void _bumpLiveDataRevision() {
+    _liveDataRevision++;
+    notifyListeners();
+  }
+
+  void _markClassLocallyEdited(int classId) {
+    _classLocalEditAt[classId] = DateTime.now();
+  }
+
+  void _notifyClassContentChanged(int classId) {
+    _classContentRevision[classId] = (_classContentRevision[classId] ?? 0) + 1;
+    notifyListeners();
+  }
+
+  Future<void> _publishClassContentChange(int classId) async {
+    _notifyClassContentChanged(classId);
+    await _drainClassContentPush(classId);
+  }
+
+  void _enqueueClassContentPush(int classId) {
+    if (_classContentPushInFlight[classId] == true) {
+      _classContentPushPending[classId] = true;
+      return;
+    }
+    unawaited(_drainClassContentPush(classId));
+  }
+
+  Future<void> _drainClassContentPush(int classId) async {
+    _classContentPushInFlight[classId] = true;
+    try {
+      while (true) {
+        _classContentPushPending[classId] = false;
+        var ok = false;
+        for (var attempt = 0; attempt < 3 && !ok; attempt++) {
+          if (attempt > 0) {
+            await Future<void>.delayed(Duration(milliseconds: 400 * attempt));
+          }
+          ok = await _pushClassContentToCloud(classId);
+        }
+        if (_classContentPushPending[classId] != true) break;
+      }
+    } finally {
+      _classContentPushInFlight[classId] = false;
+    }
+  }
+
+  bool _shouldApplyRemoteClassContent(int classId, DateTime remoteUpdatedAt) {
+    if (_user == null || !_user!.isTeacher) return true;
+    if (_classContentPushInFlight[classId] == true ||
+        _classContentPushPending[classId] == true) {
+      return false;
+    }
+    final localEditAt = _classLocalEditAt[classId];
+    if (localEditAt != null &&
+        !remoteUpdatedAt.isAfter(localEditAt)) {
+      return false;
+    }
+    final lastPush = _lastOwnClassPushUpdatedAt[classId];
+    if (lastPush != null && remoteUpdatedAt.isBefore(lastPush)) {
+      return false;
+    }
+    return true;
+  }
+
+  Set<String> _blockedPhraseKeysForClass(int classId) {
+    final map = _recentDeletedPhraseKeys[classId];
+    if (map == null || map.isEmpty) return const {};
+    final cutoff = DateTime.now().subtract(const Duration(minutes: 2));
+    map.removeWhere((_, deletedAt) => deletedAt.isBefore(cutoff));
+    if (map.isEmpty) {
+      _recentDeletedPhraseKeys.remove(classId);
+      return const {};
+    }
+    return map.keys.toSet();
+  }
+
+  void _markLessonPhraseDeleted(int classId, String? phraseKey) {
+    final key = phraseKey?.trim() ?? '';
+    if (key.isEmpty) return;
+    _recentDeletedPhraseKeys.putIfAbsent(classId, () => {})[key] =
+        DateTime.now();
+  }
+
+  bool _shouldSkipOwnClassContentEcho(int classId, DateTime remoteUpdatedAt) {
+    if (_user == null || !_user!.isTeacher) return false;
+    final own = _lastOwnClassPushUpdatedAt[classId];
+    if (own == null) return false;
+    return remoteUpdatedAt.difference(own).inMilliseconds.abs() <= 1500;
+  }
+
+  Future<void> _applyRemoteClassContent(
+    int classId,
+    RemoteClassContent content,
+  ) async {
+    if (content.lessons.isEmpty) return;
+    if (!_shouldApplyRemoteClassContent(classId, content.updatedAt)) return;
+    if (_shouldSkipOwnClassContentEcho(classId, content.updatedAt)) return;
+
+    final previous = _classContentMergeChain[classId] ?? Future<void>.value();
+    final task = previous.then((_) async {
+      return _repo.mergeRemoteClassContent(
+        classId: classId,
+        content: content,
+        blockedPhraseKeys: _blockedPhraseKeysForClass(classId),
+        pruneStalePhrases: _user?.isTeacher != true,
+      );
+    });
+    _classContentMergeChain[classId] = task.then((_) {});
+    try {
+      final changed = await task;
+      if (changed) {
+        _classContentRevision[classId] =
+            (_classContentRevision[classId] ?? 0) + 1;
+        if (_user?.isLearner == true) {
+          await _loadEnrolledClasses();
+        }
+        notifyListeners();
+      }
+    } catch (e, st) {
+      debugPrint('Apply remote class content failed: $e\n$st');
+    }
+  }
+
+  Future<void> _reconcileClassContentLiveSync() async {
+    if (_user == null || !CloudScope.syncMonitoring) return;
+    final desiredClassIds = <int>{};
+    if (_user!.isLearner) {
+      final classes = await _repo.getEnrolledClasses(_user!.id);
+      for (final enrolled in classes) {
+        desiredClassIds.add(enrolled.classId);
+        await startLiveClassContentSync(
+          classId: enrolled.classId,
+          classCode: enrolled.classCode,
+        );
+      }
+    } else if (_user!.isTeacher) {
+      final classes = await _repo.getTeacherClasses(_user!.id);
+      for (final teacherClass in classes) {
+        desiredClassIds.add(teacherClass.id);
+        await startLiveClassContentSync(
+          classId: teacherClass.id,
+          classCode: teacherClass.code,
+        );
+      }
+    } else {
+      return;
+    }
+    final staleIds = _liveClassContentIds
+        .where((id) => !desiredClassIds.contains(id))
+        .toList();
+    for (final classId in staleIds) {
+      await stopLiveClassContentSync(classId);
+    }
+  }
+
+  Future<void> stopLiveClassContentSync(int classId) async {
+    _liveClassContentIds.remove(classId);
+    await _notificationSync.stopClassContentSync(classId);
+  }
+
+  /// Real-time Firestore listener for lesson phrase updates on enrolled classes.
+  Future<void> startLiveClassContentSync({
+    required int classId,
+    required String classCode,
+  }) async {
+    if (_user == null || (!_user!.isLearner && !_user!.isTeacher)) return;
+    if (!CloudScope.syncMonitoring) return;
+    if (!_liveClassContentIds.add(classId)) return;
+
+    await FirebaseService.instance.initialize();
+    await _notificationSync.initialize();
+    if (!_notificationSync.isCloudAvailable) {
+      _liveClassContentIds.remove(classId);
+      return;
+    }
+
+    final normalized = AppRepository.normalizeClassCode(classCode);
+    if (!AppRepository.isValidClassCodeFormat(normalized)) {
+      _liveClassContentIds.remove(classId);
+      return;
+    }
+
+    await _notificationSync.startClassContentSync(
+      classId: classId,
+      classCode: normalized,
+      onChanged: (content) async {
+        if (content == null) return;
+        await _applyRemoteClassContent(classId, content);
+      },
+    );
+  }
+
+  void _bumpChildMonitoringRevision(int learnerUserId) {
+    _childMonitoringRevision[learnerUserId] =
+        (_childMonitoringRevision[learnerUserId] ?? 0) + 1;
+    _bumpLiveDataRevision();
+  }
+
+  void _startPendingActivitySyncTimer() {
+    _pendingActivitySyncTimer?.cancel();
+    if (_user == null || !_user!.isLearner || !CloudScope.syncMonitoring) return;
+    _pendingActivitySyncTimer = Timer.periodic(
+      MonitoringConstants.pendingActivitySyncInterval,
+      (_) => unawaited(_syncPendingLearnerActivityToCloud()),
+    );
+  }
+
+  /// Real-time Firestore listener while a parent/teacher views learner monitoring.
+  Future<void> startLiveChildMonitoringSync(int learnerUserId) async {
+    if (_user == null || (!_user!.isParent && !_user!.isTeacher)) return;
+    if (!CloudScope.syncMonitoring) return;
+    if (!_liveMonitoredLearnerIds.add(learnerUserId)) return;
+
+    await FirebaseService.instance.initialize();
+    await _notificationSync.initialize();
+    if (!_notificationSync.isCloudAvailable) {
+      _liveMonitoredLearnerIds.remove(learnerUserId);
+      return;
+    }
+
+    final uid = await _resolveLearnerFirebaseUid(learnerUserId);
+    if (uid == null || uid.isEmpty) {
+      _liveMonitoredLearnerIds.remove(learnerUserId);
+      return;
+    }
+
+    await _notificationSync.startMonitoredLearnerActivitySync(
+      learnerUserId: learnerUserId,
+      learnerFirebaseUid: uid,
+      onChanged: (activities) async {
+        await _repo.mergeRemoteLearnerActivities(
+          learnerUserId: learnerUserId,
+          activities: activities,
+        );
+        _bumpChildMonitoringRevision(learnerUserId);
+      },
+    );
+  }
+
+  Future<void> stopLiveChildMonitoringSync(int learnerUserId) async {
+    _liveMonitoredLearnerIds.remove(learnerUserId);
+    await _notificationSync.stopMonitoredLearnerActivitySync(learnerUserId);
   }
 
   Future<void> _prefetchMonitoredLearnerCaches() async {
@@ -1585,24 +2373,37 @@ class AppState extends ChangeNotifier {
       if (_linkedChildren.isEmpty) {
         await _loadLinkedChildren(syncCloudInBackground: false);
       }
-      for (final child in _linkedChildren) {
-        await refreshChildMonitoringData(child.learnerId);
+      final learnerIds = _linkedChildren.map((c) => c.learnerId).toList();
+      if (learnerIds.isNotEmpty) {
+        await Future.wait(
+          learnerIds.map((id) => refreshChildMonitoringData(id)),
+        );
       }
       return;
     }
     if (_user!.isTeacher) {
       await _syncTeacherClassesFromCloud();
       final students = await _repo.getTeacherClassStudents(_user!.id);
+      final learnerIds = <int>[];
       final seen = <int>{};
       for (final student in students) {
-        if (!seen.add(student.learnerId)) continue;
-        await refreshChildMonitoringData(student.learnerId);
+        if (seen.add(student.learnerId)) {
+          learnerIds.add(student.learnerId);
+        }
+      }
+      if (learnerIds.isNotEmpty) {
+        await Future.wait(
+          learnerIds.map((id) => refreshChildMonitoringData(id)),
+        );
       }
     }
   }
 
   /// Pulls cloud learner activity into local SQLite for offline parent/teacher views.
-  Future<void> _pullLearnerMonitoringCacheFromCloud(int learnerUserId) async {
+  Future<void> _pullLearnerMonitoringCacheFromCloud(
+    int learnerUserId, {
+    bool incremental = false,
+  }) async {
     if (!CloudScope.syncMonitoring) return;
     if (await NetworkStatus.isOffline()) return;
     await FirebaseService.instance.initialize();
@@ -1619,20 +2420,32 @@ class AppState extends ChangeNotifier {
       return;
     }
     try {
+      final latestLocal = await _repo.getLatestSyncedActivityTime(learnerUserId);
+      final rangeStart = incremental
+          ? (latestLocal?.subtract(const Duration(minutes: 2)) ??
+              MonitoringConstants.cloudActivityPullRangeStart())
+          : MonitoringConstants.cloudActivityPullRangeStart();
+      final timeout = incremental
+          ? MonitoringConstants.monitoringIncrementalPullTimeout
+          : MonitoringConstants.monitoringPullTimeout;
       final activities = await _notificationSync
           .getLearnerActivitiesFromCloud(
             learnerFirebaseUid: learnerFirebaseUid,
-            rangeStart: MonitoringConstants.cloudActivityPullRangeStart(),
+            rangeStart: rangeStart,
             rangeEnd: MonitoringConstants.cloudActivityPullRangeEnd(),
           )
-          .timeout(const Duration(seconds: 30));
+          .timeout(timeout);
       debugPrint(
-        'Pulled ${activities.length} learner activities for user $learnerUserId',
+        'Pulled ${activities.length} learner activities for user $learnerUserId'
+        '${incremental ? ' (incremental)' : ''}',
       );
       await _repo.mergeRemoteLearnerActivities(
         learnerUserId: learnerUserId,
         activities: activities,
       );
+      if (activities.isNotEmpty) {
+        _bumpChildMonitoringRevision(learnerUserId);
+      }
     } catch (e, st) {
       debugPrint('Pull learner monitoring cache failed: $e\n$st');
     }
@@ -1659,7 +2472,18 @@ class AppState extends ChangeNotifier {
       return;
     }
     if (syncCloudInBackground) {
-      unawaited(_syncLinkedChildrenFromCloud());
+      unawaited(() async {
+        await _syncLinkedChildrenFromCloud();
+        if (_user == null || !_user!.isParent) return;
+        _linkedChildren = await _repo.getLinkedChildren(_user!.id);
+        if (_linkedChildren.isEmpty) {
+          _selectedChildId = null;
+        } else if (_selectedChildId == null ||
+            !_linkedChildren.any((c) => c.learnerId == _selectedChildId)) {
+          _selectedChildId = _linkedChildren.first.learnerId;
+        }
+        _bumpLiveDataRevision();
+      }());
     } else {
       await _syncLinkedChildrenFromCloud();
     }
@@ -1728,6 +2552,16 @@ class AppState extends ChangeNotifier {
         parentUserId: _user!.id,
         links: links,
       );
+      if (links.isNotEmpty) {
+        final remoteUids = links
+            .map((l) => l.learnerFirebaseUid.trim())
+            .where((uid) => uid.isNotEmpty)
+            .toSet();
+        await _repo.pruneStaleParentChildLinks(
+          parentUserId: _user!.id,
+          remoteLearnerFirebaseUids: remoteUids,
+        );
+      }
       for (final link in links) {
         final uid = link.learnerFirebaseUid.trim();
         if (uid.isEmpty) continue;
@@ -1786,7 +2620,7 @@ class AppState extends ChangeNotifier {
       parentFirebaseUid: firebaseUid,
       onChanged: () async {
         await _loadNotifications();
-        notifyListeners();
+        _bumpLiveDataRevision();
       },
     );
   }
@@ -1877,9 +2711,9 @@ class AppState extends ChangeNotifier {
   Future<void> refreshLinkedChildren({bool cloudSyncInBackground = true}) async {
     await _loadLinkedChildren(syncCloudInBackground: cloudSyncInBackground);
     if (!cloudSyncInBackground) {
-      for (final child in _linkedChildren) {
-        await refreshChildMonitoringData(child.learnerId);
-      }
+      await Future.wait(
+        _linkedChildren.map((c) => refreshChildMonitoringData(c.learnerId)),
+      );
     }
     notifyListeners();
   }
@@ -1964,6 +2798,7 @@ class AppState extends ChangeNotifier {
           teacherFirebaseUid: teacherFirebaseUid,
           teacherUserId: _user!.id,
           createdAt: DateTime.now(),
+          teacherName: _teacherNameForCloudSync(),
         );
       }
 
@@ -1993,13 +2828,13 @@ class AppState extends ChangeNotifier {
         enrollments: enrollments,
       );
 
-      // Merge cloud lessons into local, then re-push so all devices stay in sync.
+      // Push local edits first so a pull never overwrites unsynced lesson phrases.
       for (final teacherClass in localClasses) {
+        await _pushClassContentToCloud(teacherClass.id);
         await _syncClassLessonsFromCloud(
           classId: teacherClass.id,
           classCode: teacherClass.code,
         );
-        await _pushClassContentToCloud(teacherClass.id);
       }
     } catch (e, st) {
       debugPrint('Teacher class cloud sync failed: $e\n$st');
@@ -2022,11 +2857,74 @@ class AppState extends ChangeNotifier {
       teacherFirebaseUid: teacherFirebaseUid,
       teacherUserId: _user!.id,
       createdAt: DateTime.now(),
+      teacherName: _teacherNameForCloudSync(),
+    );
+  }
+
+  String _teacherNameForCloudSync() {
+    final full = _user?.fullName.trim() ?? '';
+    if (full.isNotEmpty && !AppRepository.isGenericAccountName(full)) {
+      return full;
+    }
+    final fromSignup = _welcomeFirstName.trim();
+    if (fromSignup.isNotEmpty) return fromSignup;
+    return full;
+  }
+
+  Future<String> _resolveCloudTeacherDisplayName({
+    RemoteTeacherClass? remoteClass,
+    String? enrollmentTeacherName,
+  }) async {
+    for (final candidate in [
+      remoteClass?.teacherName,
+      enrollmentTeacherName,
+    ]) {
+      final trimmed = candidate?.trim() ?? '';
+      if (trimmed.isNotEmpty && !AppRepository.isGenericAccountName(trimmed)) {
+        return trimmed;
+      }
+    }
+
+    final uid = remoteClass?.teacherFirebaseUid.trim() ?? '';
+    if (uid.isEmpty || !_notificationSync.isCloudAvailable) return '';
+
+    try {
+      final profile = await _notificationSync
+          .getUserProfileFromCloud(uid)
+          .timeout(const Duration(seconds: 8));
+      if (profile == null) return '';
+      final resolved = AppRepository.resolveLoginFullName(
+        profile: profile,
+        existingName: null,
+      );
+      if (resolved.isNotEmpty && !AppRepository.isGenericAccountName(resolved)) {
+        return resolved;
+      }
+    } catch (e, st) {
+      debugPrint('Resolve cloud teacher display name failed: $e\n$st');
+    }
+    return '';
+  }
+
+  Future<void> _applyCloudTeacherDisplayName({
+    required int teacherUserId,
+    RemoteTeacherClass? remoteClass,
+    String? enrollmentTeacherName,
+  }) async {
+    final name = await _resolveCloudTeacherDisplayName(
+      remoteClass: remoteClass,
+      enrollmentTeacherName: enrollmentTeacherName,
+    );
+    if (name.isEmpty) return;
+    await _repo.applyTeacherNameIfKnown(
+      teacherUserId: teacherUserId,
+      teacherName: name,
     );
   }
 
   Future<List<TeacherRecentAlert>> getTeacherRecentAlerts({int limit = 4}) async {
     if (_user == null || !_user!.isTeacher) return [];
+    await _syncTeacherAlertsFromCloud();
     return _repo.getRecentAlertsForTeacher(
       teacherUserId: _user!.id,
       limit: limit,
@@ -2035,6 +2933,7 @@ class AppState extends ChangeNotifier {
 
   Future<List<TeacherRecentAlert>> getTeacherAlertHistory({int limit = 100}) async {
     if (_user == null || !_user!.isTeacher) return [];
+    await _syncTeacherAlertsFromCloud();
     return _repo.getRecentAlertsForTeacher(
       teacherUserId: _user!.id,
       limit: limit,
@@ -2185,7 +3084,9 @@ class AppState extends ChangeNotifier {
       _deletedClassCodes.add(AppRepository.normalizeClassCode(classCode));
       await _notificationSync.removeTeacherClass(classCode: classCode);
     }
+    await stopLiveClassContentSync(classId);
     await refreshTeacherClasses();
+    unawaited(_reconcileClassContentLiveSync());
     return null;
   }
 
@@ -2206,6 +3107,7 @@ class AppState extends ChangeNotifier {
           className: trimmed,
         );
         await _resyncClassEnrollmentsToCloud(classId: classId);
+        await _publishClassContentChange(classId);
       }
     }
     await refreshTeacherClasses();
@@ -2243,6 +3145,7 @@ class AppState extends ChangeNotifier {
         learnerUserId: student.learnerId,
         learnerName: student.fullName,
         learnerFirebaseUid: learnerFirebaseUid,
+        teacherName: _teacherNameForCloudSync(),
       );
     }
   }
@@ -2264,7 +3167,7 @@ class AppState extends ChangeNotifier {
       classId: classId,
     );
     if (cloudSyncInBackground) {
-      unawaited(_pushClassContentToCloud(classId));
+      _enqueueClassContentPush(classId);
     } else {
       await _pushClassContentToCloud(classId);
     }
@@ -2329,7 +3232,7 @@ class AppState extends ChangeNotifier {
       unawaited(_syncTeacherClassLessonsFromCloudAndReload(classId, classCode));
       return lessons;
     }
-    await _syncClassLessonsFromCloud(classId: classId, classCode: classCode);
+    await _pushClassContentToCloud(classId);
     return _repo.getClassLessons(
       teacherUserId: _user!.id,
       classId: classId,
@@ -2341,6 +3244,13 @@ class AppState extends ChangeNotifier {
     String classCode,
   ) async {
     try {
+      _enqueueClassContentPush(classId);
+      if (_classLocalEditAt[classId] != null ||
+          _classContentPushInFlight[classId] == true ||
+          _classContentPushPending[classId] == true) {
+        notifyListeners();
+        return;
+      }
       await _syncClassLessonsFromCloud(
         classId: classId,
         classCode: classCode,
@@ -2361,10 +3271,12 @@ class AppState extends ChangeNotifier {
       final classRow = await _repo.findClassById(classId);
       final classCode = (classRow?['class_code'] as String?) ?? '';
       if (classCode.isNotEmpty && cloudSyncInBackground) {
-        unawaited(_syncClassLessonsFromCloud(
-          classId: classId,
-          classCode: classCode,
-        ));
+        if (!_liveClassContentIds.contains(classId)) {
+          unawaited(_syncClassLessonsFromCloud(
+            classId: classId,
+            classCode: classCode,
+          ));
+        }
       } else if (classCode.isNotEmpty) {
         await _syncClassLessonsFromCloud(
           classId: classId,
@@ -2380,13 +3292,14 @@ class AppState extends ChangeNotifier {
 
   Future<ClassLesson?> createClassLesson(int classId, String title) async {
     if (_user == null || !_user!.isTeacher) return null;
+    _markClassLocallyEdited(classId);
     final lesson = await _repo.createClassLesson(
       teacherUserId: _user!.id,
       classId: classId,
       title: title.trim(),
     );
     if (lesson != null) {
-      await _pushClassContentToCloud(classId);
+      await _publishClassContentChange(classId);
     }
     return lesson;
   }
@@ -2394,13 +3307,14 @@ class AppState extends ChangeNotifier {
   Future<bool> updateClassLesson(int lessonId, String title) async {
     if (_user == null || !_user!.isTeacher) return false;
     final classId = await _repo.classIdForLesson(lessonId);
+    if (classId != null) _markClassLocallyEdited(classId);
     final updated = await _repo.updateClassLesson(
       teacherUserId: _user!.id,
       lessonId: lessonId,
       title: title.trim(),
     );
     if (updated && classId != null) {
-      await _pushClassContentToCloud(classId);
+      await _publishClassContentChange(classId);
     }
     return updated;
   }
@@ -2408,12 +3322,13 @@ class AppState extends ChangeNotifier {
   Future<bool> deleteClassLesson(int lessonId) async {
     if (_user == null || !_user!.isTeacher) return false;
     final classId = await _repo.classIdForLesson(lessonId);
+    if (classId != null) _markClassLocallyEdited(classId);
     final deleted = await _repo.deleteClassLesson(
       teacherUserId: _user!.id,
       lessonId: lessonId,
     );
     if (deleted && classId != null) {
-      await _pushClassContentToCloud(classId);
+      await _publishClassContentChange(classId);
     }
     return deleted;
   }
@@ -2432,8 +3347,9 @@ class AppState extends ChangeNotifier {
     String? imagePath,
   }) async {
     if (_user == null || text.trim().isEmpty) return null;
-    final saved = await persistPhraseImageIfNeeded(imagePath);
     final classId = await _repo.classIdForLesson(lessonId);
+    if (classId != null) _markClassLocallyEdited(classId);
+    final saved = await persistPhraseImageIfNeeded(imagePath);
     final phrase = await _repo.addLessonPhrase(
       teacherUserId: _user!.id,
       lessonId: lessonId,
@@ -2441,7 +3357,7 @@ class AppState extends ChangeNotifier {
       imagePath: saved,
     );
     if (phrase != null && classId != null) {
-      await _pushClassContentToCloud(classId);
+      await _publishClassContentChange(classId);
     }
     return phrase == null ? AppStrings.unableAddPhrase(_language) : null;
   }
@@ -2449,12 +3365,17 @@ class AppState extends ChangeNotifier {
   Future<void> deleteLessonPhrase(int phraseId) async {
     if (_user == null || !_user!.isTeacher) return;
     final classId = await _repo.classIdForLessonPhrase(phraseId);
+    final phraseKey = await _repo.cloudPhraseKeyForLessonPhrase(phraseId);
+    if (classId != null) {
+      _markClassLocallyEdited(classId);
+      _markLessonPhraseDeleted(classId, phraseKey);
+    }
     await _repo.deleteLessonPhrase(
       teacherUserId: _user!.id,
       phraseId: phraseId,
     );
     if (classId != null) {
-      await _pushClassContentToCloud(classId);
+      await _publishClassContentChange(classId);
     }
   }
 
@@ -2465,9 +3386,10 @@ class AppState extends ChangeNotifier {
     required bool clearImage,
   }) async {
     if (_user == null || !_user!.isTeacher) return false;
+    final classId = await _repo.classIdForLessonPhrase(phraseId);
+    if (classId != null) _markClassLocallyEdited(classId);
     final savedImage =
         clearImage ? null : await persistPhraseImageIfNeeded(imagePath);
-    final classId = await _repo.classIdForLessonPhrase(phraseId);
     final updated = await _repo.updateLessonPhrase(
       teacherUserId: _user!.id,
       phraseId: phraseId,
@@ -2475,18 +3397,19 @@ class AppState extends ChangeNotifier {
       imagePath: savedImage,
     );
     if (updated && classId != null) {
-      await _pushClassContentToCloud(classId);
+      await _publishClassContentChange(classId);
     }
     return updated;
   }
 
-  Future<void> _pushClassContentToCloud(int classId) async {
-    if (!CloudScope.syncMonitoring) return;
-    if (_user == null || !_user!.isTeacher || !_notificationSync.isCloudAvailable) {
-      return;
-    }
+  Future<bool> _pushClassContentToCloud(int classId) async {
+    if (!CloudScope.syncMonitoring) return false;
+    if (_user == null || !_user!.isTeacher) return false;
+    await FirebaseService.instance.initialize();
+    await _notificationSync.initialize();
+    if (!_notificationSync.isCloudAvailable) return false;
     final classRow = await _repo.findClassById(classId);
-    if (classRow == null) return;
+    if (classRow == null) return false;
     final classCode = (classRow['class_code'] as String?) ?? '';
     final className = (classRow['class_name'] as String?) ?? '';
     final teacherFirebaseUid =
@@ -2497,7 +3420,7 @@ class AppState extends ChangeNotifier {
         className.isEmpty ||
         teacherFirebaseUid == null ||
         teacherFirebaseUid.isEmpty) {
-      return;
+      return false;
     }
     try {
       final content = await _repo.buildRemoteClassContent(
@@ -2507,17 +3430,22 @@ class AppState extends ChangeNotifier {
         className: className,
         teacherFirebaseUid: teacherFirebaseUid,
       );
-      if (content == null) return;
+      if (content == null) return false;
       // Never overwrite cloud lessons with an empty local copy.
       if (content.lessons.isEmpty) {
         final existing = await _notificationSync
             .getClassContentFromCloud(classCode)
-            .timeout(const Duration(seconds: 8));
-        if (existing != null && existing.lessons.isNotEmpty) return;
+            .timeout(const Duration(seconds: 3));
+        if (existing != null && existing.lessons.isNotEmpty) return false;
       }
-      await _notificationSync.syncClassContent(content);
+      final synced = await _notificationSync.syncClassContent(content);
+      if (!synced) return false;
+      _lastOwnClassPushUpdatedAt[classId] = content.updatedAt;
+      _classLocalEditAt.remove(classId);
+      return true;
     } catch (e, st) {
       debugPrint('Push class content to cloud failed: $e\n$st');
+      return false;
     }
   }
 
@@ -2526,13 +3454,15 @@ class AppState extends ChangeNotifier {
     required String classCode,
   }) async {
     if (!CloudScope.syncMonitoring) return;
+    await FirebaseService.instance.initialize();
+    await _notificationSync.initialize();
     if (!_notificationSync.isCloudAvailable) return;
     final normalized = AppRepository.normalizeClassCode(classCode);
     if (!AppRepository.isValidClassCodeFormat(normalized)) return;
     try {
       final remote = await _notificationSync
           .getClassContentFromCloud(normalized)
-          .timeout(const Duration(seconds: 12));
+          .timeout(const Duration(seconds: 5));
       if (remote == null) {
         debugPrint('No cloud content for class $normalized');
         return;
@@ -2541,7 +3471,7 @@ class AppState extends ChangeNotifier {
         debugPrint('Cloud class $normalized has no lessons yet');
         return;
       }
-      await _repo.mergeRemoteClassContent(classId: classId, content: remote);
+      await _applyRemoteClassContent(classId, remote);
     } catch (e, st) {
       debugPrint('Sync class lessons from cloud failed: $e\n$st');
     }
@@ -2638,6 +3568,7 @@ class AppState extends ChangeNotifier {
           learnerUserId: student.learnerId,
           learnerName: student.fullName,
           learnerFirebaseUid: learnerFirebaseUid,
+          teacherName: _teacherNameForCloudSync(),
         );
       }
     } catch (e, st) {
@@ -2651,6 +3582,7 @@ class AppState extends ChangeNotifier {
     required int classId,
     required String className,
     required ParentAlertType alertType,
+    String? customMessage,
   }) async {
     if (_user == null || !_user!.isTeacher) {
       return TeacherAlertDeliveryResult(
@@ -2659,19 +3591,35 @@ class AppState extends ChangeNotifier {
       );
     }
 
-    final title = AppStrings.teacherAlertTitle(
-      _language,
-      _user!.fullName,
-      learnerName,
-      alertType,
-    );
-    final body = AppStrings.teacherAlertBody(
-      _language,
-      _user!.fullName,
-      className,
-      learnerName,
-      alertType,
-    );
+    final trimmedCustom = customMessage?.trim();
+    final isCustom =
+        trimmedCustom != null && trimmedCustom.isNotEmpty;
+    final teacherName = _user!.fullName;
+
+    final title = isCustom
+        ? AppStrings.teacherCustomAlertTitle(
+            _language,
+            teacherName,
+            learnerName,
+          )
+        : AppStrings.teacherAlertTitle(
+            _language,
+            teacherName,
+            learnerName,
+            alertType,
+          );
+    final body = isCustom
+        ? AppStrings.teacherCustomAlertBody(
+            _language,
+            teacherName,
+            trimmedCustom,
+          )
+        : AppStrings.teacherAlertBody(
+            _language,
+            teacherName,
+            learnerName,
+            alertType,
+          );
 
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
@@ -2717,8 +3665,18 @@ class AppState extends ChangeNotifier {
       'Teacher alert SMS: ${contacts.length} emergency contact(s) for '
       'learner $learnerUserId (uid=${learnerFirebaseUid ?? "none"})',
     );
-    // Keep SMS short (single-part) for reliable delivery on budget Android phones.
-    final smsText = '[TapTalk] $title ($className)';
+    final smsText = isCustom
+        ? AppStrings.teacherCustomAlertSms(
+            teacherName,
+            learnerName,
+            trimmedCustom,
+          )
+        : AppStrings.teacherAlertSms(
+            _language,
+            teacherName,
+            learnerName,
+            alertType,
+          );
 
     if (contacts.isEmpty) {
       return TeacherAlertDeliveryResult(
@@ -2764,7 +3722,31 @@ class AppState extends ChangeNotifier {
     // Pushing blindly would re-create enrollments the teacher already deleted.
     await _resyncLearnerEnrollmentsToCloud();
     await _syncEnrolledClassesFromCloud();
+    await _refreshEnrolledClassTeacherNamesFromCloud();
     _enrolledClasses = await _repo.getEnrolledClasses(_user!.id);
+  }
+
+  Future<void> _refreshEnrolledClassTeacherNamesFromCloud() async {
+    if (_user == null || !_user!.isLearner) return;
+    if (!CloudScope.syncMonitoring || !_notificationSync.isCloudAvailable) return;
+    if (await NetworkStatus.isOffline()) return;
+
+    final classes = await _repo.getEnrolledClasses(_user!.id);
+    for (final enrolled in classes) {
+      final code = AppRepository.normalizeClassCode(enrolled.classCode);
+      if (!AppRepository.isValidClassCodeFormat(code)) continue;
+      try {
+        final remote = await _notificationSync
+            .getTeacherClassByCodeFromCloud(code)
+            .timeout(const Duration(seconds: 8));
+        await _applyCloudTeacherDisplayName(
+          teacherUserId: enrolled.teacherId,
+          remoteClass: remote,
+        );
+      } catch (e, st) {
+        debugPrint('Refresh enrolled class teacher name failed: $e\n$st');
+      }
+    }
   }
 
   /// Pulls cloud enrollment records for this learner and imports any missing
@@ -2800,8 +3782,9 @@ class AppState extends ChangeNotifier {
       remoteClassCodes.add(code);
 
       var classRow = await _repo.findClassByCode(code);
+      RemoteTeacherClass? remoteClass;
       if (classRow == null) {
-        final remoteClass = await _notificationSync
+        remoteClass = await _notificationSync
             .getTeacherClassByCodeFromCloud(code)
             .timeout(const Duration(seconds: 8));
         if (remoteClass != null) {
@@ -2810,6 +3793,22 @@ class AppState extends ChangeNotifier {
         }
       }
       if (classRow == null) continue;
+
+      final teacherId = classRow['teacher_user_id'] as int?;
+      if (teacherId != null) {
+        try {
+          remoteClass ??= await _notificationSync
+              .getTeacherClassByCodeFromCloud(code)
+              .timeout(const Duration(seconds: 8));
+          await _applyCloudTeacherDisplayName(
+            teacherUserId: teacherId,
+            remoteClass: remoteClass,
+            enrollmentTeacherName: enrollment.teacherName,
+          );
+        } catch (e, st) {
+          debugPrint('Apply cloud teacher name failed: $e\n$st');
+        }
+      }
 
       final classId = classRow['id'] as int;
       final enrollmentName = enrollment.className.trim();
@@ -2837,10 +3836,12 @@ class AppState extends ChangeNotifier {
       await _syncClassLessonsFromCloud(classId: classId, classCode: code);
     }
 
-    await _repo.pruneStaleEnrollmentsForLearner(
-      learnerUserId: learnerUserId,
-      remoteClassCodes: remoteClassCodes,
-    );
+    if (remoteClassCodes.isNotEmpty) {
+      await _repo.pruneStaleEnrollmentsForLearner(
+        learnerUserId: learnerUserId,
+        remoteClassCodes: remoteClassCodes,
+      );
+    }
     await _pruneEnrollmentsForDeletedCloudClasses(learnerUserId);
   }
 
@@ -2890,6 +3891,8 @@ class AppState extends ChangeNotifier {
           ? remoteClass.teacherFirebaseUid.trim()
           : await _repo.getFirebaseUidForUser(enrolled.teacherId);
       if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) continue;
+      final teacherName =
+          await _repo.teacherDisplayNameForUserId(enrolled.teacherId);
       await _notificationSync.syncClassEnrollment(
         classId: enrolled.classId,
         classCode: code,
@@ -2898,6 +3901,9 @@ class AppState extends ChangeNotifier {
         learnerUserId: _user!.id,
         learnerName: _user!.fullName,
         learnerFirebaseUid: learnerFirebaseUid,
+        teacherName: AppRepository.isGenericAccountName(teacherName)
+            ? null
+            : teacherName,
       );
     }
   }
@@ -2912,23 +3918,43 @@ class AppState extends ChangeNotifier {
     }
     var classRow = await _repo.findClassByCode(normalized);
     String? teacherFirebaseUidFromRemote;
+    RemoteTeacherClass? remoteClass;
     if (classRow == null) {
       if (!_notificationSync.isCloudAvailable) {
         return AppStrings.classNotFound(_language);
       }
       try {
-        final remote = await _notificationSync
+        remoteClass = await _notificationSync
             .getTeacherClassByCodeFromCloud(normalized)
             .timeout(const Duration(seconds: 12));
-        if (remote != null) {
-          teacherFirebaseUidFromRemote = remote.teacherFirebaseUid;
-          classRow = await _repo.importRemoteTeacherClassForEnrollment(remote);
+        if (remoteClass != null) {
+          teacherFirebaseUidFromRemote = remoteClass.teacherFirebaseUid;
+          classRow = await _repo.importRemoteTeacherClassForEnrollment(remoteClass);
         }
       } catch (e, st) {
         debugPrint('Cloud class code lookup failed: $e\n$st');
       }
       if (classRow == null) {
         return AppStrings.classNotFound(_language);
+      }
+    }
+    if (_notificationSync.isCloudAvailable) {
+      try {
+        remoteClass ??= await _notificationSync
+            .getTeacherClassByCodeFromCloud(normalized)
+            .timeout(const Duration(seconds: 12));
+        if (remoteClass != null) {
+          teacherFirebaseUidFromRemote ??= remoteClass.teacherFirebaseUid;
+          final teacherId = classRow['teacher_user_id'] as int?;
+          if (teacherId != null) {
+            await _applyCloudTeacherDisplayName(
+              teacherUserId: teacherId,
+              remoteClass: remoteClass,
+            );
+          }
+        }
+      } catch (e, st) {
+        debugPrint('Cloud class teacher name refresh failed: $e\n$st');
       }
     }
     final classId = classRow['id'] as int;
@@ -2954,6 +3980,21 @@ class AppState extends ChangeNotifier {
         learnerFirebaseUid.isNotEmpty &&
         teacherFirebaseUid != null &&
         teacherFirebaseUid.isNotEmpty) {
+      String? enrollmentTeacherName;
+      if (teacherUserId != null) {
+        final resolved = await _resolveCloudTeacherDisplayName(
+          remoteClass: remoteClass,
+        );
+        if (resolved.isNotEmpty) {
+          enrollmentTeacherName = resolved;
+        } else {
+          final localName =
+              await _repo.teacherDisplayNameForUserId(teacherUserId);
+          if (!AppRepository.isGenericAccountName(localName)) {
+            enrollmentTeacherName = localName;
+          }
+        }
+      }
       await _notificationSync.syncClassEnrollment(
         classId: classId,
         classCode: (classRow['class_code'] as String?) ?? '',
@@ -2962,9 +4003,13 @@ class AppState extends ChangeNotifier {
         learnerUserId: _user!.id,
         learnerName: _user!.fullName,
         learnerFirebaseUid: learnerFirebaseUid,
+        teacherName: enrollmentTeacherName?.isNotEmpty == true
+            ? enrollmentTeacherName
+            : null,
       );
     }
     await _loadEnrolledClasses();
+    await _reconcileClassContentLiveSync();
     return null;
   }
 
@@ -2985,6 +4030,7 @@ class AppState extends ChangeNotifier {
     }
     await _syncEnrolledClassesFromCloud();
     await _loadEnrolledClasses();
+    await _reconcileClassContentLiveSync();
     notifyListeners();
   }
 
@@ -2992,6 +4038,7 @@ class AppState extends ChangeNotifier {
     try {
       await _syncEnrolledClassesFromCloud();
       await _loadEnrolledClasses();
+      await _reconcileClassContentLiveSync();
       notifyListeners();
     } catch (e, st) {
       debugPrint('Background enrolled-class sync failed: $e\n$st');
@@ -3010,6 +4057,7 @@ class AppState extends ChangeNotifier {
     final learnerFirebaseUid =
         _user!.firebaseUid ?? FirebaseService.instance.currentUid;
     await _repo.unenrollLearnerFromClass(_user!.id, classId);
+    await stopLiveClassContentSync(classId);
     if (classCode.isNotEmpty &&
         learnerFirebaseUid != null &&
         learnerFirebaseUid.isNotEmpty) {
@@ -3027,38 +4075,139 @@ class AppState extends ChangeNotifier {
 
   Future<void> _syncLearnerCategoriesToCloud() async {
     if (!CloudScope.syncMonitoring) return;
-    if (_user == null || !_user!.isLearner || !_notificationSync.isCloudAvailable) {
-      return;
-    }
-    final uid = await _learnerFirebaseUidForSync();
+    if (_user == null || !_notificationSync.isCloudAvailable) return;
+    if (!_hasPersonalBoardRole()) return;
+    final uid = await _personalBoardCloudUid();
     if (uid == null || uid.isEmpty) return;
-    final categories = await _repo.getCategories(_user!.id);
-    if (categories.isEmpty) return;
+    final remote =
+        await _notificationSync.getLearnerCategoriesFromCloud(uid);
+    if (remote.isNotEmpty) {
+      await _repo.mergeRemoteLearnerCategories(
+        learnerUserId: _user!.id,
+        remoteCategories: remote,
+      );
+    }
+    final local = (await _repo.getCategories(_user!.id))
+        .map(
+          (c) => RemoteLearnerCategory(
+            key: c.key,
+            name: c.name,
+            iconKey: c.iconKey,
+          ),
+        )
+        .toList();
+    final merged = AppRepository.mergeCategoriesForCloudExport(
+      local: local,
+      remote: remote,
+    );
+    if (merged.isEmpty) return;
     await _notificationSync.syncLearnerCategories(
       learnerFirebaseUid: uid,
-      categories: categories
-          .map(
-            (c) => RemoteLearnerCategory(
-              key: c.key,
-              name: c.name,
-              iconKey: c.iconKey,
-            ),
-          )
-          .toList(),
+      categories: merged,
+    );
+  }
+
+  Future<void> _pushLearnerCustomPhrasesToCloud() async {
+    if (!CloudScope.syncMonitoring) return;
+    if (_user == null || !_notificationSync.isCloudAvailable) return;
+    if (!_hasPersonalBoardRole()) return;
+    final uid = await _personalBoardCloudUid();
+    if (uid == null || uid.isEmpty) return;
+    final local = await _repo.getCustomPhrasesForCloudSync(
+      _user!.id,
+      firebaseUid: uid,
+    );
+    await _notificationSync.syncLearnerCustomPhrases(
+      learnerFirebaseUid: uid,
+      phrases: local,
+    );
+  }
+
+  Future<void> _pushLearnerFavoritesToCloud() async {
+    if (!CloudScope.syncMonitoring) return;
+    if (_user == null || !_hasPersonalBoardRole()) return;
+    final uid = await _personalBoardCloudUid();
+    if (uid == null || uid.isEmpty) return;
+    final local = await _repo.getFavoritesForCloudSync(
+      _user!.id,
+      firebaseUid: uid,
+    );
+    await _notificationSync.syncLearnerFavorites(
+      learnerFirebaseUid: uid,
+      favorites: local,
     );
   }
 
   Future<void> _syncLearnerCustomPhrasesToCloud() async {
     if (!CloudScope.syncMonitoring) return;
-    if (_user == null || !_user!.isLearner || !_notificationSync.isCloudAvailable) {
-      return;
-    }
-    final uid = await _learnerFirebaseUidForSync();
+    if (_user == null || !_notificationSync.isCloudAvailable) return;
+    if (!_hasPersonalBoardRole()) return;
+    final uid = await _personalBoardCloudUid();
     if (uid == null || uid.isEmpty) return;
-    final phrases = await _repo.getCustomPhrasesForCloudSync(_user!.id);
+    final remote =
+        await _notificationSync.getLearnerCustomPhrasesFromCloud(uid);
+    if (remote.isNotEmpty) {
+      await _repo.mergeRemoteLearnerCustomPhrases(
+        learnerUserId: _user!.id,
+        phrases: remote,
+      );
+      await _repo.dedupeCustomPhrases(_user!.id);
+    }
+    final local = await _repo.getCustomPhrasesForCloudSync(
+      _user!.id,
+      firebaseUid: uid,
+    );
     await _notificationSync.syncLearnerCustomPhrases(
       learnerFirebaseUid: uid,
-      phrases: phrases,
+      phrases: local,
+    );
+  }
+
+  Future<void> _syncLearnerFavoritesToCloud() async {
+    if (!CloudScope.syncMonitoring) return;
+    if (_user == null || !_hasPersonalBoardRole()) return;
+    final uid = await _personalBoardCloudUid();
+    if (uid == null || uid.isEmpty) return;
+    final remote = await _notificationSync.getLearnerFavoritesFromCloud(uid);
+    if (remote.isNotEmpty) {
+      await _repo.mergeRemoteLearnerFavorites(
+        learnerUserId: _user!.id,
+        favorites: remote,
+      );
+    }
+    final local = await _repo.getFavoritesForCloudSync(
+      _user!.id,
+      firebaseUid: uid,
+    );
+    await _notificationSync.syncLearnerFavorites(
+      learnerFirebaseUid: uid,
+      favorites: local,
+    );
+  }
+
+  Future<void> _syncLearnerSpeakHistoryToCloud() async {
+    if (!CloudScope.syncMonitoring) return;
+    if (_user == null || !_notificationSync.isCloudAvailable) return;
+    if (!_hasPersonalBoardRole()) return;
+    final uid = await _personalBoardCloudUid();
+    if (uid == null || uid.isEmpty) return;
+    final remote =
+        await _notificationSync.getLearnerSpeakHistoryFromCloud(uid);
+    if (remote.isNotEmpty) {
+      await _repo.mergeRemoteLearnerSpeakHistory(
+        learnerUserId: _user!.id,
+        history: remote,
+      );
+    }
+    final local = await _repo.getHistoryForCloudSync(_user!.id);
+    final merged = AppRepository.mergeSpeakHistoryForCloudExport(
+      local: local,
+      remote: remote,
+    );
+    if (merged.isEmpty) return;
+    await _notificationSync.syncLearnerSpeakHistory(
+      learnerFirebaseUid: uid,
+      history: merged,
     );
   }
 
@@ -3071,7 +4220,10 @@ class AppState extends ChangeNotifier {
     if (_user != null && (_user!.isParent || _user!.isTeacher)) {
       if (!await _ensureCloudAuthSession()) return;
     }
-    final learnerFirebaseUid = await _resolveLearnerFirebaseUid(learnerUserId);
+    final learnerFirebaseUid = learnerUserId == _user?.id
+        ? (await _resolveAccountFirebaseUid() ??
+            await _resolveLearnerFirebaseUid(learnerUserId))
+        : await _resolveLearnerFirebaseUid(learnerUserId);
     if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) return;
     try {
       final phrases = await _notificationSync
@@ -3083,6 +4235,60 @@ class AppState extends ChangeNotifier {
       );
     } catch (e, st) {
       debugPrint('Pull learner custom phrases failed: $e\n$st');
+    }
+  }
+
+  Future<void> _pullLearnerFavoritesFromCloud(int learnerUserId) async {
+    if (!CloudScope.syncMonitoring) return;
+    if (await NetworkStatus.isOffline()) return;
+    await FirebaseService.instance.initialize();
+    await _notificationSync.initialize();
+    if (!_notificationSync.isCloudAvailable) return;
+    if (_user != null && (_user!.isParent || _user!.isTeacher)) {
+      if (!await _ensureCloudAuthSession()) return;
+    }
+    final learnerFirebaseUid = learnerUserId == _user?.id
+        ? (await _resolveAccountFirebaseUid() ??
+            await _resolveLearnerFirebaseUid(learnerUserId))
+        : await _resolveLearnerFirebaseUid(learnerUserId);
+    if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) return;
+    try {
+      final favorites = await _notificationSync
+          .getLearnerFavoritesFromCloud(learnerFirebaseUid)
+          .timeout(const Duration(seconds: 15));
+      await _repo.mergeRemoteLearnerFavorites(
+        learnerUserId: learnerUserId,
+        favorites: favorites,
+      );
+    } catch (e, st) {
+      debugPrint('Pull learner favorites failed: $e\n$st');
+    }
+  }
+
+  Future<void> _pullLearnerSpeakHistoryFromCloud(int learnerUserId) async {
+    if (!CloudScope.syncMonitoring) return;
+    if (await NetworkStatus.isOffline()) return;
+    await FirebaseService.instance.initialize();
+    await _notificationSync.initialize();
+    if (!_notificationSync.isCloudAvailable) return;
+    if (_user != null && (_user!.isParent || _user!.isTeacher)) {
+      if (!await _ensureCloudAuthSession()) return;
+    }
+    final learnerFirebaseUid = learnerUserId == _user?.id
+        ? (await _resolveAccountFirebaseUid() ??
+            await _resolveLearnerFirebaseUid(learnerUserId))
+        : await _resolveLearnerFirebaseUid(learnerUserId);
+    if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) return;
+    try {
+      final history = await _notificationSync
+          .getLearnerSpeakHistoryFromCloud(learnerFirebaseUid)
+          .timeout(const Duration(seconds: 15));
+      await _repo.mergeRemoteLearnerSpeakHistory(
+        learnerUserId: learnerUserId,
+        history: history,
+      );
+    } catch (e, st) {
+      debugPrint('Pull learner speak history failed: $e\n$st');
     }
   }
 
@@ -3247,7 +4453,10 @@ class AppState extends ChangeNotifier {
   }
 
   /// Ensures cloud links are fresh before parent/teacher monitoring reloads.
-  Future<void> refreshChildMonitoringData(int learnerUserId) async {
+  Future<void> refreshChildMonitoringData(
+    int learnerUserId, {
+    bool full = true,
+  }) async {
     if (_user == null) return;
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
@@ -3264,10 +4473,19 @@ class AppState extends ChangeNotifier {
     }
     await _resolveLearnerFirebaseUid(learnerUserId);
     if (online) {
-      await _syncLearnerEnrollmentsFromCloudForUser(learnerUserId);
-      await getCategoriesForMonitoring(learnerUserId);
-      await _pullLearnerCustomPhrasesFromCloud(learnerUserId);
-      await _pullLearnerMonitoringCacheFromCloud(learnerUserId);
+      if (full) {
+        await Future.wait([
+          _syncLearnerEnrollmentsFromCloudForUser(learnerUserId),
+          getCategoriesForMonitoring(learnerUserId),
+          _pullLearnerCustomPhrasesFromCloud(learnerUserId),
+        ]);
+        await _pullLearnerMonitoringCacheFromCloud(learnerUserId);
+      } else {
+        await _pullLearnerMonitoringCacheFromCloud(
+          learnerUserId,
+          incremental: true,
+        );
+      }
     }
   }
 
@@ -3280,7 +4498,10 @@ class AppState extends ChangeNotifier {
     if (syncCloud &&
         CloudScope.syncMonitoring &&
         !await NetworkStatus.isOffline()) {
-      await _pullLearnerMonitoringCacheFromCloud(learnerUserId);
+      await _pullLearnerMonitoringCacheFromCloud(
+        learnerUserId,
+        incremental: true,
+      );
     }
     final range = _dateRangeForPeriod(period, month: month);
     return _repo.getPhraseUsageStats(
@@ -3290,21 +4511,51 @@ class AppState extends ChangeNotifier {
     );
   }
 
-  Future<VocabularyGrowthSummary> getChildVocabularyGrowth({
+  Future<VocabularyGrowthPanelData> getChildVocabularyGrowth({
     required int learnerUserId,
     required ChildUsagePeriod period,
     DateTime? month,
     DateTime? linkedAt,
+    bool syncCloud = true,
   }) async {
+    if (syncCloud &&
+        CloudScope.syncMonitoring &&
+        !await NetworkStatus.isOffline()) {
+      await FirebaseService.instance.initialize();
+      await _notificationSync.initialize();
+      if (_user != null && (_user!.isParent || _user!.isTeacher)) {
+        await _ensureCloudAuthSession();
+      }
+      await Future.wait([
+        _pullLearnerMonitoringCacheFromCloud(
+          learnerUserId,
+          incremental: true,
+        ),
+        _pullLearnerSpeakHistoryFromCloud(learnerUserId),
+        _pullLearnerCustomPhrasesFromCloud(learnerUserId),
+      ]);
+    }
+
     final linked = linkedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-    final firstUses = await _repo.getCustomPhraseAdditions(
-      learnerUserId: learnerUserId,
-    );
     final range = _dateRangeForPeriod(period, month: month);
     final locale =
         _language == AppLanguage.filipino ? 'fil_PH' : 'en_US';
     final earliest = linked.isAfter(range.$1) ? linked : range.$1;
 
+    final stats = await _repo.getPhraseUsageStats(
+      learnerUserId: learnerUserId,
+      rangeStart: range.$1,
+      rangeEnd: range.$2,
+    );
+    final phrasesUsed = stats
+        .map((s) => '${s.categoryKey}|${s.text}')
+        .toSet()
+        .length;
+    final phraseTaps = stats.fold<int>(0, (sum, s) => sum + s.count);
+
+    final firstUses = await _repo.getCustomPhraseAdditions(
+      learnerUserId: learnerUserId,
+    );
     final periodFirstUses = firstUses
         .where(
           (entry) =>
@@ -3313,11 +4564,26 @@ class AppState extends ChangeNotifier {
         )
         .toList();
 
-    return VocabularyGrowthCalculator.summarize(
-      firstUses: periodFirstUses,
+    final trendSummary = VocabularyGrowthCalculator.summarize(
+      firstUses: firstUses,
       now: DateTime.now(),
       rangeStart: earliest,
       localeName: locale,
+    );
+
+    final summary = VocabularyGrowthSummary(
+      totalVocabulary: periodFirstUses.length,
+      newWordsThisWeek: trendSummary.newWordsThisWeek,
+      newWordsThisMonth: trendSummary.newWordsThisMonth,
+      weeklyTrend: trendSummary.weeklyTrend,
+      monthlyTrend: trendSummary.monthlyTrend,
+      categorySlices: trendSummary.categorySlices,
+    );
+
+    return VocabularyGrowthPanelData(
+      summary: summary,
+      phrasesUsed: phrasesUsed,
+      phraseTaps: phraseTaps,
     );
   }
 
@@ -3382,12 +4648,14 @@ class AppState extends ChangeNotifier {
     required String lessonTitle,
     required ChildUsagePeriod period,
     DateTime? month,
+    int? lessonId,
   }) async {
     final range = _dateRangeForPeriod(period, month: month);
     return _repo.getLessonProgressForLesson(
       learnerUserId: learnerUserId,
       className: className,
       lessonTitle: lessonTitle,
+      lessonId: lessonId,
       rangeStart: range.$1,
       rangeEnd: range.$2,
     );
@@ -3402,7 +4670,10 @@ class AppState extends ChangeNotifier {
     if (syncCloud &&
         CloudScope.syncMonitoring &&
         !await NetworkStatus.isOffline()) {
-      await _pullLearnerMonitoringCacheFromCloud(learnerUserId);
+      await _pullLearnerMonitoringCacheFromCloud(
+        learnerUserId,
+        incremental: true,
+      );
     }
     final range = _dateRangeForPeriod(period, month: month);
     final allEvents = await _repo.getHistoryTimestamps(
@@ -3546,6 +4817,7 @@ class AppState extends ChangeNotifier {
     _resumeWordIndex = 0;
     _speechResumeCharOffset = 0;
     _speechHighlightOffset = 0;
+    _readAlongWordIndex = 0;
     await tts.stop();
     _currentSpeakGeneration = gen;
 
@@ -3553,17 +4825,18 @@ class AppState extends ChangeNotifier {
     _isSpeaking = true;
     _spokenWordStart = -1;
     _spokenWordEnd = -1;
-    _startReadAlongFallback(fromWordIndex: 0);
     notifyListeners();
 
-    final ok = await tts.speak(spoken, rate: ttsSpeed, lang: _language);
-    final cancelled = gen != _ttsGeneration;
-    if (cancelled || !ok) {
-      if (!cancelled) {
-        _currentSpeakGeneration = null;
-        _resetSpeechTracking();
-        notifyListeners();
-      }
+    final completed = await _speakUntilDone(gen: gen, fullText: spoken);
+    if (gen != _ttsGeneration) {
+      if (_speechPaused) return true;
+      return false;
+    }
+    if (!completed) {
+      if (_speechPaused) return true;
+      _currentSpeakGeneration = null;
+      _resetSpeechTracking();
+      notifyListeners();
       return false;
     }
 
@@ -3610,17 +4883,18 @@ class AppState extends ChangeNotifier {
 
     _speakingText = fullText;
     _isSpeaking = true;
-    _startReadAlongFallback(fromWordIndex: _resumeWordIndex);
     notifyListeners();
 
-    final ok = await tts.speak(remaining, rate: ttsSpeed, lang: _language);
-    final cancelled = gen != _ttsGeneration;
-    if (cancelled || !ok) {
-      if (!cancelled) {
-        _currentSpeakGeneration = null;
-        _resetSpeechTracking();
-        notifyListeners();
-      }
+    final completed = await _speakUntilDone(gen: gen, fullText: fullText);
+    if (gen != _ttsGeneration) {
+      if (_speechPaused) return true;
+      return false;
+    }
+    if (!completed) {
+      if (_speechPaused) return true;
+      _currentSpeakGeneration = null;
+      _resetSpeechTracking();
+      notifyListeners();
       return false;
     }
 

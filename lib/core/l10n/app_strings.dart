@@ -75,6 +75,12 @@ abstract final class AppStrings {
       ? 'Buong pangalan'
       : 'Full name';
 
+  static String firstName(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Pangalan' : 'First name';
+
+  static String lastName(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Apelyido' : 'Last name';
+
   static String fillAllFields(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Pakipunan ang lahat ng patlang.'
       : 'Please fill in all fields.';
@@ -516,6 +522,26 @@ abstract final class AppStrings {
       ? 'Piliin ang uri ng alert'
       : 'Choose alert type';
 
+  static String writeCustomAlertMessage(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Sariling mensahe'
+          : 'Custom message';
+
+  static String customAlertMessageTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Isulat ang mensahe'
+          : 'Write your message';
+
+  static String customAlertMessageHint(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Hal. Paki-datingan po sa school ngayong hapon.'
+          : 'e.g. Please come to school this afternoon.';
+
+  static String customAlertMessageEmpty(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Maglagay ng mensahe bago magpadala.'
+          : 'Enter a message before sending.';
+
   static String alertTypeLabel(AppLanguage lang, ParentAlertType type) =>
       switch (type) {
         ParentAlertType.needsAttention =>
@@ -553,24 +579,58 @@ abstract final class AppStrings {
   static String teacherAlertBody(
     AppLanguage lang,
     String teacherName,
-    String className,
     String childName,
     ParentAlertType type,
   ) =>
       switch (type) {
         ParentAlertType.needsAttention => lang == AppLanguage.filipino
-            ? '$teacherName reports na kailangan ng agarang atensyon si $childName sa $className. Pakicheck in agad.'
-            : '$teacherName reports that $childName needs immediate attention in $className. Please check in soon.',
+            ? 'Si Teacher $teacherName ay nag-ulat na kailangan ng agarang atensyon si $childName. Paki-check in po agad. Salamat.'
+            : 'Teacher $teacherName reports that $childName needs immediate attention. Please check in at your earliest convenience. Thank you.',
         ParentAlertType.distress => lang == AppLanguage.filipino
-            ? '$teacherName reports behavior/tantrum concerns for $childName sa $className. Kailangan ng support ninyo.'
-            : '$teacherName reports behavior/tantrum concerns for $childName in $className and needs your support.',
+            ? 'Si Teacher $teacherName ay nag-ulat ng behavior concern para kay $childName. Kailangan po ng inyong suporta. Salamat.'
+            : 'Teacher $teacherName reports a behavior concern for $childName and needs your support. Thank you.',
         ParentAlertType.schoolNeeded => lang == AppLanguage.filipino
-            ? '$teacherName requests parent presence for $childName sa $className. Pakiusap na pumunta o tumawag agad.'
-            : '$teacherName requests parent presence for $childName in $className. Please come to school or call as soon as possible.',
+            ? 'Si Teacher $teacherName ay humihiling ng inyong presensya para kay $childName. Pakiusap na pumunta o tumawag po agad. Salamat.'
+            : 'Teacher $teacherName requests your presence for $childName. Please come to school or call as soon as possible. Thank you.',
         ParentAlertType.teacherAlert => lang == AppLanguage.filipino
-            ? 'Nagpadala si $teacherName ng urgent alert para kay $childName sa $className. Pakitingnan agad.'
-            : '$teacherName sent an urgent alert for $childName in $className. Please check in as soon as you can.',
+            ? 'Si Teacher $teacherName ay nagpadala ng urgent alert para kay $childName. Pakitingnan po agad. Salamat.'
+            : 'Teacher $teacherName sent an urgent alert for $childName. Please check in as soon as you can. Thank you.',
       };
+
+  static String teacherCustomAlertTitle(
+    AppLanguage lang,
+    String teacherName,
+    String childName,
+  ) =>
+      lang == AppLanguage.filipino
+          ? 'Mensahe mula kay Teacher $teacherName — $childName'
+          : 'Message from Teacher $teacherName — $childName';
+
+  static String teacherCustomAlertBody(
+    AppLanguage lang,
+    String teacherName,
+    String message,
+  ) =>
+      lang == AppLanguage.filipino
+          ? 'Mula kay Teacher $teacherName: $message'
+          : 'From Teacher $teacherName: $message';
+
+  static String teacherAlertSms(
+    AppLanguage lang,
+    String teacherName,
+    String childName,
+    ParentAlertType type,
+  ) {
+    final body = teacherAlertBody(lang, teacherName, childName, type);
+    return '[TapTalk] $body';
+  }
+
+  static String teacherCustomAlertSms(
+    String teacherName,
+    String childName,
+    String message,
+  ) =>
+      '[TapTalk] From Teacher $teacherName re: $childName: $message';
 
   static String alertStudentSoon(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Paparating na ang alert sa magulang.'

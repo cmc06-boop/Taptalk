@@ -7,6 +7,7 @@ class TeacherAlertCloudEvent {
     required this.learnerUserId,
     required this.childName,
     required this.teacherUserId,
+    required this.teacherFirebaseUid,
     required this.teacherName,
     required this.classId,
     required this.className,
@@ -22,6 +23,7 @@ class TeacherAlertCloudEvent {
   final int learnerUserId;
   final String childName;
   final int teacherUserId;
+  final String teacherFirebaseUid;
   final String teacherName;
   final int classId;
   final String className;
@@ -36,6 +38,7 @@ class TeacherAlertCloudEvent {
         'learnerUserId': learnerUserId,
         'childName': childName,
         'teacherUserId': teacherUserId,
+        'teacherFirebaseUid': teacherFirebaseUid,
         'teacherName': teacherName,
         'classId': classId,
         'className': className,
@@ -57,6 +60,7 @@ class ClassEnrollmentCloudEvent {
     required this.learnerName,
     required this.learnerFirebaseUid,
     required this.enrolledAt,
+    this.teacherName,
   });
 
   final int classId;
@@ -67,6 +71,7 @@ class ClassEnrollmentCloudEvent {
   final String learnerName;
   final String learnerFirebaseUid;
   final DateTime enrolledAt;
+  final String? teacherName;
 
   Map<String, Object?> toFirestoreMap() => {
         'classId': classId,
@@ -77,6 +82,8 @@ class ClassEnrollmentCloudEvent {
         'learnerName': learnerName,
         'learnerFirebaseUid': learnerFirebaseUid,
         'enrolledAt': enrolledAt.toUtc().toIso8601String(),
+        if (teacherName != null && teacherName!.trim().isNotEmpty)
+          'teacherName': teacherName!.trim(),
       };
 }
 
@@ -89,6 +96,7 @@ class RemoteClassEnrollment {
     required this.learnerName,
     required this.learnerFirebaseUid,
     required this.enrolledAt,
+    this.teacherName,
   });
 
   final int classId;
@@ -98,6 +106,7 @@ class RemoteClassEnrollment {
   final String learnerName;
   final String learnerFirebaseUid;
   final DateTime enrolledAt;
+  final String? teacherName;
 }
 
 class RemoteTeacherClass {
@@ -107,6 +116,7 @@ class RemoteTeacherClass {
     required this.teacherFirebaseUid,
     required this.teacherUserId,
     required this.createdAt,
+    this.teacherName,
   });
 
   final String classCode;
@@ -114,6 +124,7 @@ class RemoteTeacherClass {
   final String teacherFirebaseUid;
   final int teacherUserId;
   final DateTime createdAt;
+  final String? teacherName;
 }
 
 class RemoteLearnerProfile {
@@ -136,16 +147,20 @@ class RemoteLearnerCustomPhrase {
     required this.phraseText,
     required this.categoryKey,
     required this.createdAt,
+    this.imagePath,
   });
 
   final String phraseText;
   final String categoryKey;
   final DateTime createdAt;
+  final String? imagePath;
 
   Map<String, Object?> toFirestoreMap() => {
         'phraseText': phraseText,
         'categoryKey': categoryKey,
         'createdAt': createdAt.toUtc().toIso8601String(),
+        if (imagePath != null && imagePath!.trim().isNotEmpty)
+          'imagePath': imagePath!.trim(),
       };
 
   factory RemoteLearnerCustomPhrase.fromMap(Map<String, dynamic> map) {
@@ -158,8 +173,96 @@ class RemoteLearnerCustomPhrase {
       phraseText: (map['phraseText'] as String?) ?? '',
       categoryKey: (map['categoryKey'] as String?) ?? '',
       createdAt: createdAt,
+      imagePath: map['imagePath'] as String?,
     );
   }
+}
+
+class RemoteLearnerFavorite {
+  const RemoteLearnerFavorite({
+    required this.phraseText,
+    required this.categoryKey,
+    this.phraseId,
+    this.imagePath,
+  });
+
+  final String phraseText;
+  final String categoryKey;
+  final int? phraseId;
+  final String? imagePath;
+
+  Map<String, Object?> toFirestoreMap() => {
+        'phraseText': phraseText,
+        'categoryKey': categoryKey,
+        if (phraseId != null) 'phraseId': phraseId,
+        if (imagePath != null && imagePath!.trim().isNotEmpty)
+          'imagePath': imagePath!.trim(),
+      };
+
+  factory RemoteLearnerFavorite.fromMap(Map<String, dynamic> map) {
+    return RemoteLearnerFavorite(
+      phraseText: (map['phraseText'] as String?) ?? '',
+      categoryKey: (map['categoryKey'] as String?) ?? '',
+      phraseId: map['phraseId'] as int?,
+      imagePath: map['imagePath'] as String?,
+    );
+  }
+}
+
+class RemoteLearnerSpeakHistory {
+  const RemoteLearnerSpeakHistory({
+    required this.phraseText,
+    required this.categoryKey,
+    required this.createdAt,
+    this.className,
+    this.lessonTitle,
+  });
+
+  final String phraseText;
+  final String categoryKey;
+  final DateTime createdAt;
+  final String? className;
+  final String? lessonTitle;
+
+  Map<String, Object?> toFirestoreMap() => {
+        'phraseText': phraseText,
+        'categoryKey': categoryKey,
+        'createdAt': createdAt.toUtc().toIso8601String(),
+        if (className != null && className!.trim().isNotEmpty)
+          'className': className!.trim(),
+        if (lessonTitle != null && lessonTitle!.trim().isNotEmpty)
+          'lessonTitle': lessonTitle!.trim(),
+      };
+
+  factory RemoteLearnerSpeakHistory.fromMap(Map<String, dynamic> map) {
+    final createdRaw = map['createdAt'];
+    DateTime createdAt = DateTime.now();
+    if (createdRaw is String) {
+      createdAt = DateTime.tryParse(createdRaw)?.toLocal() ?? createdAt;
+    }
+    return RemoteLearnerSpeakHistory(
+      phraseText: (map['phraseText'] as String?) ?? '',
+      categoryKey: (map['categoryKey'] as String?) ?? '',
+      createdAt: createdAt,
+      className: map['className'] as String?,
+      lessonTitle: map['lessonTitle'] as String?,
+    );
+  }
+}
+
+/// Live snapshot of For Me board data stored on `learner_profiles`.
+class RemoteLearnerPersonalBoardSnapshot {
+  const RemoteLearnerPersonalBoardSnapshot({
+    this.categories = const [],
+    this.customPhrases = const [],
+    this.favorites = const [],
+    this.speakHistory = const [],
+  });
+
+  final List<RemoteLearnerCategory> categories;
+  final List<RemoteLearnerCustomPhrase> customPhrases;
+  final List<RemoteLearnerFavorite> favorites;
+  final List<RemoteLearnerSpeakHistory> speakHistory;
 }
 
 class RemoteLearnerCategory {
@@ -212,16 +315,22 @@ class RemoteUserProfile {
     required this.email,
     required this.fullName,
     required this.role,
+    this.firstName,
     this.themeKey,
     this.profileCode,
+    this.language,
+    this.ttsSpeed,
   });
 
   final String firebaseUid;
   final String email;
   final String fullName;
   final String role;
+  final String? firstName;
   final String? themeKey;
   final String? profileCode;
+  final String? language;
+  final double? ttsSpeed;
 }
 
 /// Phrase tap / history event synced for cross-device monitoring.
@@ -323,6 +432,7 @@ class TeacherClassCloudEvent {
     required this.teacherFirebaseUid,
     required this.teacherUserId,
     required this.createdAt,
+    this.teacherName,
   });
 
   final String classCode;
@@ -330,6 +440,7 @@ class TeacherClassCloudEvent {
   final String teacherFirebaseUid;
   final int teacherUserId;
   final DateTime createdAt;
+  final String? teacherName;
 
   Map<String, Object?> toFirestoreMap() => {
         'classCode': classCode,
@@ -337,6 +448,8 @@ class TeacherClassCloudEvent {
         'teacherFirebaseUid': teacherFirebaseUid,
         'teacherUserId': teacherUserId,
         'createdAt': createdAt.toUtc().toIso8601String(),
+        if (teacherName != null && teacherName!.trim().isNotEmpty)
+          'teacherName': teacherName!.trim(),
       };
 }
 
@@ -363,6 +476,35 @@ class RemoteParentNotification {
   final String alertType;
   final DateTime createdAt;
   final bool isRead;
+}
+
+/// Teacher alert pulled from Firestore for cross-device recent alerts.
+class RemoteTeacherAlert {
+  const RemoteTeacherAlert({
+    required this.remoteId,
+    required this.teacherUserId,
+    required this.parentUserId,
+    required this.learnerUserId,
+    required this.childName,
+    required this.classId,
+    required this.className,
+    required this.alertType,
+    required this.title,
+    required this.body,
+    required this.createdAt,
+  });
+
+  final String remoteId;
+  final int teacherUserId;
+  final int parentUserId;
+  final int learnerUserId;
+  final String childName;
+  final int classId;
+  final String className;
+  final String alertType;
+  final String title;
+  final String body;
+  final DateTime createdAt;
 }
 
 /// Cloud backend for cross-device in-app notifications.
@@ -416,6 +558,10 @@ abstract class CloudNotificationBackend {
     required DateTime rangeEnd,
   });
 
+  Stream<List<RemoteLearnerActivity>> watchLearnerActivities(
+    String learnerFirebaseUid,
+  );
+
   Future<void> upsertTeacherClass(TeacherClassCloudEvent event);
 
   Future<void> removeTeacherClass({required String classCode});
@@ -432,6 +578,8 @@ abstract class CloudNotificationBackend {
 
   Future<RemoteClassContent?> getClassContentByCode(String classCode);
 
+  Stream<RemoteClassContent?> watchClassContentByCode(String classCode);
+
   Future<RemoteLearnerProfile?> findLearnerByProfileCode(String profileCode);
 
   Future<List<RemoteParentChildLink>> getParentChildLinksForParent(
@@ -441,6 +589,8 @@ abstract class CloudNotificationBackend {
   Future<void> upsertUserProfile(RemoteUserProfile profile);
 
   Future<RemoteUserProfile?> getUserProfile(String firebaseUid);
+
+  Stream<RemoteUserProfile> watchUserProfile(String firebaseUid);
 
   /// Updates learner name on all parent-child links and class enrollments.
   Future<void> updateLearnerReferencesOnCloud({
@@ -477,9 +627,37 @@ abstract class CloudNotificationBackend {
     String learnerFirebaseUid,
   );
 
+  Future<void> upsertLearnerFavorites({
+    required String learnerFirebaseUid,
+    required List<RemoteLearnerFavorite> favorites,
+  });
+
+  Future<List<RemoteLearnerFavorite>> getLearnerFavorites(
+    String learnerFirebaseUid,
+  );
+
+  Future<void> upsertLearnerSpeakHistory({
+    required String learnerFirebaseUid,
+    required List<RemoteLearnerSpeakHistory> history,
+  });
+
+  Future<List<RemoteLearnerSpeakHistory>> getLearnerSpeakHistory(
+    String learnerFirebaseUid,
+  );
+
   Stream<List<RemoteParentNotification>> watchParentNotifications({
     required int parentUserId,
     required String parentFirebaseUid,
+  });
+
+  Future<List<RemoteTeacherAlert>> getTeacherAlerts({
+    required int teacherUserId,
+    required String teacherFirebaseUid,
+  });
+
+  Stream<List<RemoteTeacherAlert>> watchTeacherAlerts({
+    required int teacherUserId,
+    required String teacherFirebaseUid,
   });
 
   Stream<List<RemoteClassEnrollment>> watchClassEnrollmentsForLearner(
@@ -496,6 +674,10 @@ abstract class CloudNotificationBackend {
 
   Stream<List<RemoteTeacherClass>> watchTeacherClassesForTeacher(
     String teacherFirebaseUid,
+  );
+
+  Stream<RemoteLearnerPersonalBoardSnapshot> watchLearnerPersonalBoard(
+    String learnerFirebaseUid,
   );
 
   Future<void> markParentNotificationRead(String remoteId);
@@ -572,6 +754,12 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
       const [];
 
   @override
+  Stream<List<RemoteLearnerActivity>> watchLearnerActivities(
+    String learnerFirebaseUid,
+  ) =>
+      const Stream.empty();
+
+  @override
   Future<void> upsertTeacherClass(TeacherClassCloudEvent event) async {}
 
   @override
@@ -598,6 +786,10 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
       null;
 
   @override
+  Stream<RemoteClassContent?> watchClassContentByCode(String classCode) =>
+      const Stream.empty();
+
+  @override
   Future<RemoteLearnerProfile?> findLearnerByProfileCode(
     String profileCode,
   ) async =>
@@ -614,6 +806,10 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
 
   @override
   Future<RemoteUserProfile?> getUserProfile(String firebaseUid) async => null;
+
+  @override
+  Stream<RemoteUserProfile> watchUserProfile(String firebaseUid) =>
+      const Stream.empty();
 
   @override
   Future<void> updateLearnerReferencesOnCloud({
@@ -662,9 +858,47 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
       const [];
 
   @override
+  Future<void> upsertLearnerFavorites({
+    required String learnerFirebaseUid,
+    required List<RemoteLearnerFavorite> favorites,
+  }) async {}
+
+  @override
+  Future<List<RemoteLearnerFavorite>> getLearnerFavorites(
+    String learnerFirebaseUid,
+  ) async =>
+      const [];
+
+  @override
+  Future<void> upsertLearnerSpeakHistory({
+    required String learnerFirebaseUid,
+    required List<RemoteLearnerSpeakHistory> history,
+  }) async {}
+
+  @override
+  Future<List<RemoteLearnerSpeakHistory>> getLearnerSpeakHistory(
+    String learnerFirebaseUid,
+  ) async =>
+      const [];
+
+  @override
   Stream<List<RemoteParentNotification>> watchParentNotifications({
     required int parentUserId,
     required String parentFirebaseUid,
+  }) =>
+      const Stream.empty();
+
+  @override
+  Future<List<RemoteTeacherAlert>> getTeacherAlerts({
+    required int teacherUserId,
+    required String teacherFirebaseUid,
+  }) async =>
+      const [];
+
+  @override
+  Stream<List<RemoteTeacherAlert>> watchTeacherAlerts({
+    required int teacherUserId,
+    required String teacherFirebaseUid,
   }) =>
       const Stream.empty();
 
@@ -689,6 +923,12 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
   @override
   Stream<List<RemoteTeacherClass>> watchTeacherClassesForTeacher(
     String teacherFirebaseUid,
+  ) =>
+      const Stream.empty();
+
+  @override
+  Stream<RemoteLearnerPersonalBoardSnapshot> watchLearnerPersonalBoard(
+    String learnerFirebaseUid,
   ) =>
       const Stream.empty();
 

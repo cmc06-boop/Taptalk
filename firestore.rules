@@ -4,7 +4,10 @@ service cloud.firestore {
   match /databases/{database}/documents {
     match /parent_notifications/{notificationId} {
       allow read: if request.auth != null
-        && resource.data.parentFirebaseUid == request.auth.uid;
+        && (
+          resource.data.parentFirebaseUid == request.auth.uid
+          || resource.data.teacherFirebaseUid == request.auth.uid
+        );
 
       allow create: if request.auth != null
         && request.resource.data.parentFirebaseUid is string
@@ -74,6 +77,7 @@ service cloud.firestore {
       allow read: if request.auth != null && (
         request.auth.uid == userId
         || resource.data.role == 'learner'
+        || resource.data.role == 'teacher'
       );
       allow create, update: if request.auth != null && request.auth.uid == userId;
       allow delete: if false;

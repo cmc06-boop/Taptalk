@@ -145,6 +145,7 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
         learnerUserId: widget.learnerUserId,
         className: enrolled.className,
         lessonTitle: lesson.title,
+        lessonId: lesson.id,
         period: widget.period,
         month: widget.month,
       );
@@ -288,9 +289,11 @@ class _LessonProgressCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final total = entry.totalPhrases ?? lesson.phraseCount;
     final tapped = entry.practicedPhrases;
-    final percent = total > 0 ? entry.progressPercent : 0;
+    final total = lesson.phraseCount > 0 ? lesson.phraseCount : 1;
+    final displayTapped = tapped > total ? total : tapped;
+    final percent =
+        total > 0 ? ((displayTapped / total) * 100).round().clamp(0, 100) : 0;
     final timeFmt = DateFormat('d MMM - h:mm a');
     final lastUsed = entry.lastAccessed;
     final formattedLastUsed =
@@ -348,7 +351,7 @@ class _LessonProgressCard extends StatelessWidget {
           const SizedBox(width: AppSpacing.sm),
           LessonProgressRing(
             percent: percent,
-            tapped: tapped,
+            tapped: displayTapped,
             total: total,
             theme: theme,
             lang: lang,

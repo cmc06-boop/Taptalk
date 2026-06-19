@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -21,7 +23,16 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
   String? _filterCategoryKey;
 
   Future<void> _refresh() async {
-    await context.read<AppState>().refreshLearnerCollections();
+    await context.read<AppState>().refreshFavoritesFromCloud();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(context.read<AppState>().refreshFavoritesFromCloud());
+    });
   }
 
   @override

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -5,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
+import '../core/utils/live_refresh.dart';
 import '../core/theme/theme_tokens.dart';
 import '../data/models/class_lesson.dart';
 import '../providers/app_state.dart';
@@ -37,8 +40,21 @@ class TeacherClassDetailScreen extends StatefulWidget {
 class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
   List<ClassLesson> _lessons = [];
   int _studentCount = 0;
-  bool _loading = false;
   late String _className;
+  int _lastClassRevision = 0;
+  AppState? _app;
+
+  bool _sameLessons(List<ClassLesson> a, List<ClassLesson> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id ||
+          a[i].title != b[i].title ||
+          a[i].phraseCount != b[i].phraseCount) {
+        return false;
+      }
+    }
+    return true;
+  }
 
   @override
   void initState() {
@@ -46,45 +62,41 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
     _className = widget.className;
     _studentCount =
         context.read<AppState>().teacherClassStudentCount(widget.classId);
-    _load();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      _app = context.read<AppState>();
+      unawaited(_app!.startLiveClassContentSync(
+        classId: widget.classId,
+        classCode: widget.classCode,
+      ));
+      await _load();
+    });
   }
 
   Future<void> _load({bool userRefresh = false}) async {
-    if (userRefresh || _lessons.isEmpty) setState(() => _loading = true);
     final app = context.read<AppState>();
     try {
       final cached = await Future.wait([
-        app.getTeacherClassLessonsForDisplay(widget.classId),
+        app.getTeacherClassLessonsForDisplay(
+          widget.classId,
+          cloudSyncInBackground: !userRefresh,
+        ),
         app.getTeacherClassStudentsForClass(
           widget.classId,
           cloudSyncInBackground: true,
         ),
       ]);
       if (!mounted) return;
+      final nextLessons = cached[0] as List<ClassLesson>;
+      final nextCount = (cached[1] as List).length;
+      if (_sameLessons(_lessons, nextLessons) && _studentCount == nextCount) {
+        return;
+      }
       setState(() {
-        _lessons = cached[0] as List<ClassLesson>;
-        _studentCount = (cached[1] as List).length;
-        _loading = false;
-      });
-
-      final synced = await Future.wait([
-        app.getTeacherClassLessonsForDisplay(
-          widget.classId,
-          cloudSyncInBackground: false,
-        ),
-        app.getTeacherClassStudentsForClass(
-          widget.classId,
-          cloudSyncInBackground: false,
-        ),
-      ]);
-      if (!mounted) return;
-      setState(() {
-        _lessons = synced[0] as List<ClassLesson>;
-        _studentCount = (synced[1] as List).length;
+        _lessons = nextLessons;
+        _studentCount = nextCount;
       });
     } catch (e, st) {
       debugPrint('Teacher class detail load failed: $e\n$st');
-      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -164,6 +176,8 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
       MaterialPageRoute<void>(
         builder: (_) => LessonEditorScreen(
           lessonId: lesson.id,
+          classId: widget.classId,
+          classCode: widget.classCode,
           lessonTitle: lesson.title,
           className: _className,
         ),
@@ -208,6 +222,12 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
+    _lastClassRevision = bindClassContentRevision(
+      lastClassRevision: _lastClassRevision,
+      classRevision: app.classContentRevision(widget.classId),
+      reload: _load,
+      isMounted: () => mounted,
+    );
     final theme = app.theme;
     final lang = app.language;
     final displayClassName = app.localizedContent(_className);
@@ -252,9 +272,7 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
                 ),
               ),
               const SizedBox(height: AppSpacing.md),
-              if (_loading)
-                const Center(child: CircularProgressIndicator())
-              else if (_lessons.isEmpty)
+              if (_lessons.isEmpty)
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(AppSpacing.xxl),

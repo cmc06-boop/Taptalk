@@ -48,3 +48,22 @@ class VocabularyGrowthSummary {
     categorySlices: [],
   );
 }
+
+/// Stats for the monitoring vocabulary growth panel (first section).
+class VocabularyGrowthPanelData {
+  const VocabularyGrowthPanelData({
+    required this.summary,
+    required this.phrasesUsed,
+    required this.phraseTaps,
+  });
+
+  final VocabularyGrowthSummary summary;
+  final int phrasesUsed;
+  final int phraseTaps;
+
+  static const empty = VocabularyGrowthPanelData(
+    summary: VocabularyGrowthSummary.empty,
+    phrasesUsed: 0,
+    phraseTaps: 0,
+  );
+}

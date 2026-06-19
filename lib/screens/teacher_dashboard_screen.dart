@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
+import '../core/utils/live_refresh.dart';
 import '../core/theme/theme_tokens.dart';
 import '../core/utils/class_name_utils.dart';
 import '../data/models/teacher_recent_alert.dart';
@@ -26,8 +27,6 @@ class TeacherDashboardScreen extends StatefulWidget {
 class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
   List<TeacherRecentAlert> _recentAlerts = [];
   List<TeacherRecentLesson> _recentLessons = [];
-  List<String> _subjects = [];
-  Map<String, int> _subjectStudentCounts = {};
   String? _selectedSubject;
   bool _loadingFeed = true;
   int _lastAlertsRevision = 0;
@@ -35,54 +34,50 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _load(refreshClasses: true);
+    });
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final revision = context.read<AppState>().teacherAlertsRevision;
-    if (revision != _lastAlertsRevision) {
-      _lastAlertsRevision = revision;
-      if (revision > 0) {
-        unawaited(_load());
+  bool _sameAlerts(List<TeacherRecentAlert> a, List<TeacherRecentAlert> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id ||
+          a[i].alertType != b[i].alertType ||
+          a[i].childName != b[i].childName ||
+          a[i].className != b[i].className) {
+        return false;
       }
     }
+    return true;
   }
 
-  Future<void> _load({bool userRefresh = false}) async {
-    final app = context.read<AppState>();
-    try {
-      if (userRefresh) {
-        await app.refreshTeacherClasses(cloudSyncInBackground: false);
-      } else {
-        await app.refreshTeacherClasses(cloudSyncInBackground: true);
+  bool _sameLessons(List<TeacherRecentLesson> a, List<TeacherRecentLesson> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id ||
+          a[i].title != b[i].title ||
+          a[i].className != b[i].className ||
+          a[i].phraseCount != b[i].phraseCount) {
+        return false;
       }
-      _applyClassStats(app);
-      if (mounted) setState(() => _loadingFeed = true);
-
-      final results = await Future.wait([
-        app.getTeacherRecentAlerts(),
-        app.getTeacherRecentLessons(),
-      ]);
-      if (!mounted) return;
-      setState(() {
-        _recentAlerts = results[0] as List<TeacherRecentAlert>;
-        _recentLessons = results[1] as List<TeacherRecentLesson>;
-        _loadingFeed = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _loadingFeed = false);
     }
+    return true;
   }
 
-  void _applyClassStats(AppState app) {
-    final subjects = <String>{};
+  List<String> _subjectsFor(AppState app) {
+    final subjects = app.teacherClasses
+        .map((c) => ClassNameUtils.subjectFrom(c.name))
+        .toSet()
+        .toList()
+      ..sort();
+    return subjects;
+  }
+
+  Map<String, int> _subjectStudentCountsFor(AppState app) {
     final classIdsBySubject = <String, List<int>>{};
     for (final teacherClass in app.teacherClasses) {
       final subject = ClassNameUtils.subjectFrom(teacherClass.name);
-      subjects.add(subject);
       classIdsBySubject.putIfAbsent(subject, () => []).add(teacherClass.id);
     }
     final subjectStudentCounts = <String, int>{};
@@ -93,38 +88,85 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
       }
       subjectStudentCounts[entry.key] = total;
     }
-    final sortedSubjects = subjects.toList()..sort();
-    setState(() {
-      _subjects = sortedSubjects;
-      _subjectStudentCounts = subjectStudentCounts;
-      if (_selectedSubject != null &&
-          !sortedSubjects.contains(_selectedSubject)) {
-        _selectedSubject = null;
-      }
-    });
+    return subjectStudentCounts;
   }
 
-  int _classCountForFilter(AppState app) {
-    if (_selectedSubject == null) return app.teacherClasses.length;
+  Future<void> _load({
+    bool userRefresh = false,
+    bool refreshClasses = false,
+  }) async {
+    final app = context.read<AppState>();
+    try {
+      if (userRefresh || refreshClasses) {
+        await app.refreshTeacherClasses(cloudSyncInBackground: !userRefresh);
+      }
+
+      final showSpinner =
+          userRefresh || (_recentAlerts.isEmpty && _recentLessons.isEmpty);
+      if (showSpinner && mounted) {
+        setState(() => _loadingFeed = true);
+      }
+
+      final results = await Future.wait([
+        app.getTeacherRecentAlerts(),
+        app.getTeacherRecentLessons(),
+      ]);
+      if (!mounted) return;
+
+      final alerts = results[0] as List<TeacherRecentAlert>;
+      final lessons = results[1] as List<TeacherRecentLesson>;
+      if (_sameAlerts(_recentAlerts, alerts) &&
+          _sameLessons(_recentLessons, lessons)) {
+        if (_loadingFeed && mounted) {
+          setState(() => _loadingFeed = false);
+        }
+        return;
+      }
+
+      setState(() {
+        _recentAlerts = alerts;
+        _recentLessons = lessons;
+        _loadingFeed = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingFeed = false);
+    }
+  }
+
+  int _classCountForFilter(AppState app, String? selectedSubject) {
+    if (selectedSubject == null) return app.teacherClasses.length;
     return app.teacherClasses
         .where(
-          (c) => ClassNameUtils.subjectFrom(c.name) == _selectedSubject,
+          (c) => ClassNameUtils.subjectFrom(c.name) == selectedSubject,
         )
         .length;
   }
 
-  int _studentCountForFilter(AppState app) {
+  int _studentCountForFilter(AppState app, Map<String, int> subjectStudentCounts) {
     if (_selectedSubject == null) return app.teacherStudentCount;
-    return _subjectStudentCounts[_selectedSubject] ?? 0;
+    return subjectStudentCounts[_selectedSubject] ?? 0;
   }
 
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
+    _lastAlertsRevision = bindLiveRevision(
+      lastRevision: _lastAlertsRevision,
+      currentRevision: app.teacherAlertsRevision,
+      reload: _load,
+      isMounted: () => mounted,
+    );
     final theme = app.theme;
     final lang = app.language;
-    final classCount = _classCountForFilter(app);
-    final studentCount = _studentCountForFilter(app);
+    final subjects = _subjectsFor(app);
+    final subjectStudentCounts = _subjectStudentCountsFor(app);
+    final selectedSubject =
+        _selectedSubject != null && subjects.contains(_selectedSubject)
+            ? _selectedSubject
+            : null;
+    final classCount = _classCountForFilter(app, selectedSubject);
+    final studentCount = _studentCountForFilter(app, subjectStudentCounts);
     final accent = theme.bgAccent;
 
     return LearnerScaffold(
@@ -191,8 +233,8 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                             theme: theme,
                             label: AppStrings.totalClasses(lang),
                             value: '$classCount',
-                            subjects: _subjects,
-                            selectedSubject: _selectedSubject,
+                            subjects: subjects,
+                            selectedSubject: selectedSubject,
                             allSubjectsLabel: AppStrings.allSubjects(lang),
                             subjectLabel: app.localizedContent,
                             onSubjectChanged: (value) =>
@@ -246,7 +288,6 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                     studentName: alert.childName.trim(),
                     timeLabel: AppStrings.timeAgo(alert.createdAt, lang),
                     description: AppStrings.alertTypeLabel(lang, alert.alertType),
-                    className: app.localizedContent(alert.className),
                     onTap: () => app.setRoute(AppRoute.teacherAlertHistory),
                   ),
                 ),

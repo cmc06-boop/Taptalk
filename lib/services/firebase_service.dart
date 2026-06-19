@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
@@ -15,6 +16,7 @@ class FirebaseService {
   static final FirebaseService instance = FirebaseService._();
 
   bool _initialized = false;
+  bool _appCheckActivated = false;
   String? _lastAuthErrorCode;
 
   static const _authTimeout = Duration(seconds: 12);
@@ -47,6 +49,23 @@ class FirebaseService {
 
   String? get currentUid => auth?.currentUser?.uid;
 
+  String? get currentUserEmail => auth?.currentUser?.email;
+
+  String? get currentUserDisplayName => auth?.currentUser?.displayName;
+
+  Future<void> updateDisplayName(String displayName) async {
+    if (!_initialized) return;
+    final name = displayName.trim();
+    if (name.isEmpty) return;
+    final user = auth?.currentUser;
+    if (user == null) return;
+    try {
+      await user.updateDisplayName(name);
+    } catch (e, st) {
+      debugPrint('Firebase updateDisplayName failed: $e\n$st');
+    }
+  }
+
   /// Waits for Firebase Auth to restore a persisted session after [initialize].
   Future<String?> waitForAuthUid({
     Duration timeout = const Duration(seconds: 5),
@@ -72,6 +91,7 @@ class FirebaseService {
     if (_initialized) return;
     if (Firebase.apps.isNotEmpty) {
       _initialized = true;
+      await _activateAppCheck();
       return;
     }
     try {
@@ -80,12 +100,31 @@ class FirebaseService {
       ).timeout(_initTimeout);
       _initialized = Firebase.apps.isNotEmpty;
       if (_initialized) {
+        await _activateAppCheck();
         debugPrint('Firebase initialized.');
       }
     } on TimeoutException {
       debugPrint('Firebase init timed out; app continues offline.');
     } catch (e, st) {
       debugPrint('Firebase init failed: $e\n$st');
+    }
+  }
+
+  Future<void> _activateAppCheck() async {
+    if (_appCheckActivated) return;
+    try {
+      await FirebaseAppCheck.instance.activate(
+        providerAndroid: kDebugMode
+            ? const AndroidDebugProvider()
+            : const AndroidPlayIntegrityProvider(),
+        providerApple: kDebugMode
+            ? const AppleDebugProvider()
+            : const AppleAppAttestProvider(),
+      );
+      _appCheckActivated = true;
+      debugPrint('Firebase App Check activated.');
+    } catch (e, st) {
+      debugPrint('Firebase App Check activation failed: $e\n$st');
     }
   }
 

@@ -94,13 +94,20 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
     if (file != null) setState(() => _imagePath = file.path);
   }
 
-  Future<void> _submit() async {
-    final text = _controller.text;
-    final image = _imagePath;
-    await widget.onAdd(text, image);
-    if (!mounted) return;
+  void _clearComposer() {
     _controller.clear();
+    _undoStack
+      ..clear()
+      ..add('');
     setState(() => _imagePath = null);
+  }
+
+  Future<void> _submit() async {
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+    final image = _imagePath;
+    _clearComposer();
+    await widget.onAdd(text, image);
   }
 
   @override
@@ -150,8 +157,8 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
                 IconButton(
                   icon: const Icon(Icons.close_rounded, size: 22),
                   onPressed: () async {
-                    await app.stopSpeech();
-                    _controller.clear();
+                    await context.read<AppState>().stopSpeech();
+                    _clearComposer();
                   },
                 ),
               ],

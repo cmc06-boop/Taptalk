@@ -17,6 +17,18 @@ import '../widgets/student_count_badge.dart';
 import '../widgets/taptalk_result_dialog.dart';
 import 'child_monitoring_screen.dart';
 
+class _TeacherAlertSelection {
+  const _TeacherAlertSelection.preset(this.alertType) : customMessage = null;
+
+  const _TeacherAlertSelection.custom(this.customMessage)
+      : alertType = ParentAlertType.teacherAlert;
+
+  final ParentAlertType alertType;
+  final String? customMessage;
+
+  bool get isCustom => customMessage != null;
+}
+
 class TeacherClassMonitoringScreen extends StatefulWidget {
   const TeacherClassMonitoringScreen({
     super.key,
@@ -36,7 +48,17 @@ class _TeacherClassMonitoringScreenState
     extends State<TeacherClassMonitoringScreen> {
   List<TeacherClassStudent> _students = [];
   bool _refreshing = false;
-  bool _syncingRoster = false;
+
+  bool _sameStudents(List<TeacherClassStudent> a, List<TeacherClassStudent> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].learnerId != b[i].learnerId ||
+          a[i].fullName != b[i].fullName) {
+        return false;
+      }
+    }
+    return true;
+  }
 
   @override
   void initState() {
@@ -44,50 +66,26 @@ class _TeacherClassMonitoringScreenState
     _loadStudents();
   }
 
-  /// Shows cached roster immediately, then merges cloud enrollments and prefetches
-  /// monitoring data without requiring a manual pull-to-refresh.
   Future<void> _loadStudents({bool userRefresh = false}) async {
     final app = context.read<AppState>();
     if (userRefresh) {
       if (_refreshing) return;
       setState(() => _refreshing = true);
-    } else if (mounted) {
-      setState(() => _syncingRoster = true);
     }
     try {
-      final cached = await app.getTeacherClassStudentsForClass(
+      final students = await app.getTeacherClassStudentsForClass(
         widget.classId,
-        cloudSyncInBackground: true,
-      );
-      if (mounted) {
-        setState(() => _students = cached);
-      }
-
-      final synced = await app.getTeacherClassStudentsForClass(
-        widget.classId,
-        cloudSyncInBackground: false,
+        cloudSyncInBackground: !userRefresh,
       );
       if (!mounted) return;
-      setState(() => _students = synced);
-
-      unawaited(_prefetchMonitoring(synced));
+      if (_sameStudents(_students, students)) return;
+      setState(() => _students = students);
     } catch (e, st) {
       debugPrint('Teacher class roster load failed: $e\n$st');
     } finally {
-      if (mounted) {
-        setState(() {
-          _refreshing = false;
-          _syncingRoster = false;
-        });
+      if (mounted && _refreshing) {
+        setState(() => _refreshing = false);
       }
-    }
-  }
-
-  Future<void> _prefetchMonitoring(List<TeacherClassStudent> students) async {
-    final app = context.read<AppState>();
-    for (final student in students) {
-      if (!mounted) return;
-      await app.refreshChildMonitoringData(student.learnerId);
     }
   }
 
@@ -104,11 +102,63 @@ class _TeacherClassMonitoringScreenState
     );
   }
 
+  Future<String?> _promptCustomAlertMessage(
+    AppLanguage lang,
+    TapTalkThemeToken theme,
+  ) async {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Text(
+          AppStrings.customAlertMessageTitle(lang),
+          style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 16),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 4,
+          maxLength: 140,
+          decoration: InputDecoration(
+            hintText: AppStrings.customAlertMessageHint(lang),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: theme.bgAccent, width: 1.5),
+            ),
+          ),
+          style: GoogleFonts.poppins(fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(AppStrings.cancel(lang)),
+          ),
+          FilledButton(
+            onPressed: () {
+              final text = controller.text.trim();
+              if (text.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(AppStrings.customAlertMessageEmpty(lang))),
+                );
+                return;
+              }
+              Navigator.pop(ctx, text);
+            },
+            style: FilledButton.styleFrom(backgroundColor: theme.bgAccent),
+            child: Text(AppStrings.ok(lang)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _confirmAndSendAlert(TeacherClassStudent student) async {
     final app = context.read<AppState>();
     final theme = app.theme;
     final lang = app.language;
-    final selectedType = await showModalBottomSheet<ParentAlertType>(
+    final selected = await showModalBottomSheet<_TeacherAlertSelection>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
@@ -153,7 +203,8 @@ class _TeacherClassMonitoringScreenState
                     color: Colors.transparent,
                     child: InkWell(
                       borderRadius: BorderRadius.circular(12),
-                      onTap: () => Navigator.pop(ctx, type),
+                      onTap: () =>
+                          Navigator.pop(ctx, _TeacherAlertSelection.preset(type)),
                       child: Ink(
                         padding: const EdgeInsets.symmetric(
                           horizontal: AppSpacing.sm,
@@ -187,6 +238,52 @@ class _TeacherClassMonitoringScreenState
                     ),
                   ),
                 ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => Navigator.pop(
+                      ctx,
+                      const _TeacherAlertSelection.custom(''),
+                    ),
+                    child: Ink(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.sm,
+                        vertical: AppSpacing.sm,
+                      ),
+                      decoration: BoxDecoration(
+                        color: theme.bgAccent.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: theme.bgAccent.withValues(alpha: 0.25),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.edit_outlined,
+                            size: 18,
+                            color: theme.bgAccent,
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                          Expanded(
+                            child: Text(
+                              AppStrings.writeCustomAlertMessage(lang),
+                              style: GoogleFonts.poppins(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: theme.textMain,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton(
@@ -199,7 +296,19 @@ class _TeacherClassMonitoringScreenState
         ),
       ),
     );
-    if (selectedType == null || !mounted) return;
+    if (selected == null || !mounted) return;
+
+    String? customMessage;
+    if (selected.isCustom) {
+      customMessage = await _promptCustomAlertMessage(lang, theme);
+      if (customMessage == null || customMessage.trim().isEmpty || !mounted) {
+        return;
+      }
+      customMessage = customMessage.trim();
+    }
+
+    final alertPreview =
+        customMessage ?? AppStrings.alertTypeLabel(lang, selected.alertType);
 
     final confirm = await showDialog<bool>(
       context: context,
@@ -243,8 +352,7 @@ class _TeacherClassMonitoringScreenState
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              '${AppStrings.alertStudentConfirm(lang, student.fullName)}\n\n'
-              '${AppStrings.alertTypeLabel(lang, selectedType)}',
+              '${AppStrings.alertStudentConfirm(lang, student.fullName)}\n\n$alertPreview',
               style: GoogleFonts.poppins(height: 1.35),
             ),
           ],
@@ -271,7 +379,8 @@ class _TeacherClassMonitoringScreenState
       learnerName: student.fullName,
       classId: widget.classId,
       className: widget.className,
-      alertType: selectedType,
+      alertType: selected.alertType,
+      customMessage: customMessage,
     );
     if (!mounted) return;
 
@@ -328,7 +437,7 @@ class _TeacherClassMonitoringScreenState
           AppSpacing.xxl,
         ),
         children: [
-          if (_syncingRoster && _students.isEmpty)
+          if (_refreshing && _students.isEmpty)
             const Padding(
               padding: EdgeInsets.all(AppSpacing.xxl),
               child: Center(child: CircularProgressIndicator()),
