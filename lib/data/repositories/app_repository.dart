@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../../core/constants/monitoring_constants.dart';
 import '../../core/constants/tts_speed_options.dart';
 import '../../core/utils/favorite_image_sync.dart';
 import '../../core/utils/phrase_image_cloud_sync.dart';
@@ -98,6 +99,19 @@ class AppRepository {
   /// True for learner "For Me" categories — excludes class/lesson phrase buckets.
   static bool isPersonalCategoryKey(String categoryKey) {
     return !isLessonCategoryKey(categoryKey);
+  }
+
+  /// Internal marker rows that start an app usage session (not phrase taps).
+  static const String appSessionCategoryKey = '__app_session__';
+  static const String appSessionPhraseText = '__session_open__';
+
+  static bool isAppSessionMarker({
+    required String categoryKey,
+    required String phraseText,
+  }) {
+    return normalizeCategoryKey(categoryKey) ==
+            normalizeCategoryKey(appSessionCategoryKey) &&
+        storedUserText(phraseText) == appSessionPhraseText;
   }
 
   static String monitoringCategoryKey({
@@ -937,6 +951,7 @@ class AppRepository {
     final db = await _dbHelper.database;
     await dedupeBuiltinPhrases(userId);
     await _purgeObsoleteBuiltinPhrases(userId);
+    await _purgeObsoleteCategories(userId);
 
     for (final (key, name, icon) in DefaultBuiltinContent.defaultCategories) {
       await db.insert('categories', {
@@ -984,6 +999,29 @@ class AppRepository {
     }
   }
 
+  Future<void> _purgeObsoleteCategories(int userId) async {
+    final db = await _dbHelper.database;
+    for (final key in DefaultBuiltinContent.obsoleteCategoryKeys) {
+      final normalized = normalizeCategoryKey(key);
+      if (normalized.isEmpty) continue;
+      final replacement = DefaultBuiltinContent.obsoleteCategoryKeyMigrations[key] ??
+          DefaultBuiltinContent.obsoleteCategoryKeyMigrations[normalized];
+      if (replacement != null && replacement.trim().isNotEmpty) {
+        await db.update(
+          'phrases',
+          {'category_key': normalizeCategoryKey(replacement)},
+          where: 'user_id = ? AND category_key = ?',
+          whereArgs: [userId, normalized],
+        );
+      }
+      await db.delete(
+        'categories',
+        where: 'user_id = ? AND category_key = ?',
+        whereArgs: [userId, normalized],
+      );
+    }
+  }
+
   Future<void> _purgeObsoleteBuiltinPhrases(int userId) async {
     final db = await _dbHelper.database;
     final allowed = {
@@ -1005,6 +1043,7 @@ class AppRepository {
   }
 
   Future<List<CategoryModel>> getCategories(int userId) async {
+    await _purgeObsoleteCategories(userId);
     final db = await _dbHelper.database;
     final rows = await db.query(
       'categories',
@@ -1012,7 +1051,18 @@ class AppRepository {
       whereArgs: [userId],
       orderBy: 'id ASC',
     );
-    return rows.map(CategoryModel.fromMap).toList();
+    final obsoleteKeys = DefaultBuiltinContent.obsoleteCategoryKeys.toSet();
+    final categories = rows
+        .map(CategoryModel.fromMap)
+        .where((category) => !obsoleteKeys.contains(category.key))
+        .toList();
+    categories.sort((a, b) {
+      final order = DefaultBuiltinContent.categoryOrderIndex(a.key)
+          .compareTo(DefaultBuiltinContent.categoryOrderIndex(b.key));
+      if (order != 0) return order;
+      return a.id.compareTo(b.id);
+    });
+    return categories;
   }
 
   Future<void> mergeRemoteLearnerCategories({
@@ -1198,6 +1248,93 @@ class AppRepository {
     }
     return merged.values.toList()
       ..sort((a, b) => a.firstUsedAt.compareTo(b.firstUsedAt));
+  }
+
+  /// Tap/usage counts for learner-added phrases only (vocabulary growth panel).
+  Future<({List<PhraseUsageStat> stats, int phrasesUsed, int phraseTaps})>
+      getCustomPhraseUsageStats({
+    required int learnerUserId,
+    required DateTime rangeStart,
+    required DateTime rangeEnd,
+  }) async {
+    await dedupeMonitoringHistory(learnerUserId);
+    final customPhrases = await getCustomPhraseAdditions(
+      learnerUserId: learnerUserId,
+    );
+    if (customPhrases.isEmpty) {
+      return (
+        stats: const <PhraseUsageStat>[],
+        phrasesUsed: 0,
+        phraseTaps: 0,
+      );
+    }
+
+    final customKeys = <String>{
+      for (final phrase in customPhrases)
+        '${normalizeCategoryKey(phrase.categoryKey)}|'
+            '${storedUserText(phrase.text).toLowerCase()}',
+    };
+
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT phrase_text, category_key, class_name, lesson_title,
+             COUNT(*) AS usage_count
+      FROM history
+      WHERE user_id = ?
+        AND created_at >= ?
+        AND created_at < ?
+      GROUP BY phrase_text, category_key, class_name, lesson_title
+    ''', [
+      learnerUserId,
+      rangeStart.millisecondsSinceEpoch,
+      rangeEnd.millisecondsSinceEpoch,
+    ]);
+
+    final merged = <String, PhraseUsageStat>{};
+    for (final row in rows) {
+      if (isAppSessionMarker(
+        categoryKey: row['category_key'] as String,
+        phraseText: row['phrase_text'] as String,
+      )) {
+        continue;
+      }
+      final stored = storedUserText(row['phrase_text'] as String);
+      final categoryKey = monitoringCategoryKey(
+        categoryKey: row['category_key'] as String,
+        className: row['class_name'] as String?,
+        lessonTitle: row['lesson_title'] as String?,
+      );
+      final lookupKey = '$categoryKey|${stored.toLowerCase()}';
+      if (!customKeys.contains(lookupKey)) continue;
+      final count = row['usage_count'] as int;
+      final existing = merged[lookupKey];
+      if (existing == null) {
+        merged[lookupKey] = PhraseUsageStat(
+          text: stored,
+          categoryKey: categoryKey,
+          count: count,
+        );
+      } else {
+        merged[lookupKey] = PhraseUsageStat(
+          text: stored,
+          categoryKey: categoryKey,
+          count: existing.count + count,
+        );
+      }
+    }
+
+    final stats = merged.values.toList()
+      ..sort((a, b) {
+        final byCount = b.count.compareTo(a.count);
+        if (byCount != 0) return byCount;
+        return a.text.compareTo(b.text);
+      });
+    final phraseTaps = stats.fold<int>(0, (sum, stat) => sum + stat.count);
+    return (
+      stats: stats,
+      phrasesUsed: stats.length,
+      phraseTaps: phraseTaps,
+    );
   }
 
   Future<List<RemoteLearnerCustomPhrase>> getCustomPhrasesForCloudSync(
@@ -1717,30 +1854,70 @@ class AppRepository {
       ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
   }
 
-  Future<void> mergeRemoteLearnerSpeakHistory({
+  /// Returns how many new history rows were inserted.
+  Future<int> mergeRemoteLearnerSpeakHistory({
     required int learnerUserId,
     required List<RemoteLearnerSpeakHistory> history,
   }) async {
-    if (history.isEmpty) return;
+    if (history.isEmpty) return 0;
     final db = await _dbHelper.database;
     final deduped = <String, RemoteLearnerSpeakHistory>{};
     for (final remote in history) {
       final text = storedUserText(remote.phraseText);
+      if (isAppSessionMarker(
+        categoryKey: remote.categoryKey,
+        phraseText: remote.phraseText,
+      )) {
+        continue;
+      }
       final categoryKey = normalizeCategoryKey(remote.categoryKey);
       if (text.isEmpty || categoryKey.isEmpty) continue;
       final key =
           '${text.toLowerCase()}|$categoryKey|${remote.createdAt.millisecondsSinceEpoch}';
       deduped.putIfAbsent(key, () => remote);
     }
+
+    var batch = db.batch();
+    var pending = 0;
+    var inserted = 0;
+
+    Future<void> flush() async {
+      if (pending == 0) return;
+      await batch.commit(noResult: true);
+      batch = db.batch();
+      pending = 0;
+    }
+
     for (final remote in deduped.values) {
       final text = storedUserText(remote.phraseText);
       if (text.isEmpty) continue;
-      final effectiveCategoryKey = resolveHistoryCategoryKey(
-        categoryKey: remote.categoryKey,
-        className: remote.className,
-        lessonTitle: remote.lessonTitle,
-      );
+      final trimmedClass = remote.className?.trim();
+      final trimmedLesson = remote.lessonTitle?.trim();
+      final hasLessonContext = trimmedClass != null &&
+          trimmedClass.isNotEmpty &&
+          trimmedLesson != null &&
+          trimmedLesson.isNotEmpty;
+      final effectiveCategoryKey = hasLessonContext
+          ? resolveHistoryCategoryKey(
+              categoryKey: remote.categoryKey,
+              className: remote.className,
+              lessonTitle: remote.lessonTitle,
+            )
+          : normalizeCategoryKey(remote.categoryKey);
       final createdAtMs = remote.createdAt.millisecondsSinceEpoch;
+      final syncKey = remoteActivitySyncKey(
+        createdAt: remote.createdAt,
+        phraseText: text,
+        categoryKey: effectiveCategoryKey,
+      );
+      final existingBySyncKey = await db.query(
+        'history',
+        where: 'user_id = ? AND remote_sync_key = ?',
+        whereArgs: [learnerUserId, syncKey],
+        limit: 1,
+      );
+      if (existingBySyncKey.isNotEmpty) continue;
+
       final existing = await db.query(
         'history',
         where:
@@ -1753,25 +1930,108 @@ class AppRepository {
         ],
         limit: 1,
       );
-      if (existing.isNotEmpty) continue;
-      await addHistory(
-        userId: learnerUserId,
-        text: text,
-        categoryKey: remote.categoryKey,
-        className: remote.className,
-        lessonTitle: remote.lessonTitle,
-        createdAt: remote.createdAt,
+      if (existing.isNotEmpty) {
+        if (existing.first['remote_sync_key'] == null) {
+          batch.update(
+            'history',
+            {'remote_sync_key': syncKey},
+            where: 'id = ?',
+            whereArgs: [existing.first['id']],
+          );
+          pending++;
+        }
+        if (pending >= 200) {
+          await flush();
+        }
+        continue;
+      }
+
+      final nearDuplicate = await db.query(
+        'history',
+        where:
+            'user_id = ? AND phrase_text = ? AND category_key = ? AND created_at >= ? AND created_at <= ?',
+        whereArgs: [
+          learnerUserId,
+          text,
+          effectiveCategoryKey,
+          createdAtMs -
+              MonitoringConstants.monitoringHistoryDedupeWindow.inMilliseconds,
+          createdAtMs +
+              MonitoringConstants.monitoringHistoryDedupeWindow.inMilliseconds,
+        ],
+        limit: 1,
       );
+      if (nearDuplicate.isNotEmpty) {
+        if (nearDuplicate.first['remote_sync_key'] == null) {
+          batch.update(
+            'history',
+            {'remote_sync_key': syncKey},
+            where: 'id = ?',
+            whereArgs: [nearDuplicate.first['id']],
+          );
+          pending++;
+        }
+        if (pending >= 200) {
+          await flush();
+        }
+        continue;
+      }
+
+      final row = <String, Object?>{
+        'user_id': learnerUserId,
+        'phrase_text': text,
+        'category_key': effectiveCategoryKey,
+        'created_at': createdAtMs,
+        'remote_sync_key': syncKey,
+      };
+      if (hasLessonContext) {
+        row['class_name'] = trimmedClass;
+        row['lesson_title'] = trimmedLesson;
+      }
+      batch.insert(
+        'history',
+        row,
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+      pending++;
+      inserted++;
+      if (pending >= 200) {
+        await flush();
+      }
     }
+    await flush();
+    if (inserted > 0) {
+      await dedupeMonitoringHistory(learnerUserId);
+    }
+    return inserted;
   }
 
   Future<void> deletePhrase(int userId, int phraseId) async {
     final db = await _dbHelper.database;
+    final rows = await db.query(
+      'phrases',
+      columns: ['phrase_text', 'category_key'],
+      where: 'id = ? AND user_id = ? AND is_builtin = 0',
+      whereArgs: [phraseId, userId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return;
+
+    final phraseText = (rows.first['phrase_text'] as String).trim();
+    final categoryKey = rows.first['category_key'] as String;
+
     await db.update(
       'phrases',
       {'is_active': 0},
       where: 'id = ? AND user_id = ? AND is_builtin = 0',
       whereArgs: [phraseId, userId],
+    );
+
+    await db.delete(
+      'favorites',
+      where:
+          'user_id = ? AND (phrase_id = ? OR (phrase_text = ? AND category_key = ?))',
+      whereArgs: [userId, phraseId, phraseText, categoryKey],
     );
   }
 
@@ -1902,6 +2162,12 @@ class AppRepository {
     final deduped = <HistoryModel>[];
     for (final row in rows) {
       final item = HistoryModel.fromMap(row);
+      if (isAppSessionMarker(
+        categoryKey: item.categoryKey,
+        phraseText: item.text,
+      )) {
+        continue;
+      }
       final key = _historyDedupeKey(
         phraseText: item.text,
         categoryKey: item.categoryKey,
@@ -1973,6 +2239,14 @@ class AppRepository {
     }
   }
 
+  /// Learner history is phrase taps and lesson phrases only — not app sessions.
+  Future<({int historyId, DateTime openedAt})?> recordAppSessionOpen(
+    int userId, {
+    DateTime? openedAt,
+  }) async {
+    return null;
+  }
+
   /// History rows not yet uploaded to Firestore for parent/teacher monitoring.
   Future<List<HistoryModel>> getUnsyncedHistory(int userId) async {
     final db = await _dbHelper.database;
@@ -2034,16 +2308,74 @@ class AppRepository {
     return '${ts}_${textKey}_${categoryKey.hashCode}';
   }
 
+  /// Removes duplicate monitoring rows caused by overlapping cloud sync sources.
+  Future<void> dedupeMonitoringHistory(int learnerUserId) async {
+    final windowMs = MonitoringConstants.monitoringHistoryDedupeWindow.inMilliseconds;
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'history',
+      where: 'user_id = ?',
+      whereArgs: [learnerUserId],
+      orderBy: 'created_at DESC, id DESC',
+    );
+    final keepIds = <int>{};
+    final deleteIds = <int>{};
+
+    for (final row in rows) {
+      final id = row['id'] as int;
+      final syncKey = row['remote_sync_key'] as String?;
+      if (syncKey != null && syncKey.trim().isNotEmpty) {
+        final duplicateSync = rows.where(
+          (other) =>
+              other['id'] != id &&
+              (other['remote_sync_key'] as String?)?.trim() == syncKey.trim(),
+        );
+        if (duplicateSync.any((other) => keepIds.contains(other['id'] as int))) {
+          deleteIds.add(id);
+          continue;
+        }
+      }
+      keepIds.add(id);
+    }
+
+    final contentSeen = <String, int>{};
+    for (final row in rows) {
+      final id = row['id'] as int;
+      if (deleteIds.contains(id) || !keepIds.contains(id)) continue;
+      final text = storedUserText(row['phrase_text'] as String);
+      final categoryKey = monitoringCategoryKey(
+        categoryKey: row['category_key'] as String,
+        className: row['class_name'] as String?,
+        lessonTitle: row['lesson_title'] as String?,
+      );
+      final createdAt = row['created_at'] as int;
+      final bucket = createdAt ~/ windowMs;
+      final contentKey = '$categoryKey|$text|$bucket';
+      final keptId = contentSeen[contentKey];
+      if (keptId == null) {
+        contentSeen[contentKey] = id;
+        continue;
+      }
+      deleteIds.add(id);
+    }
+
+    for (final id in deleteIds) {
+      await db.delete('history', where: 'id = ?', whereArgs: [id]);
+    }
+  }
+
   /// Persists cloud learner activities locally so parent/teacher monitoring
   /// works offline after at least one online sync.
-  Future<void> mergeRemoteLearnerActivities({
+  /// Returns how many new history rows were inserted.
+  Future<int> mergeRemoteLearnerActivities({
     required int learnerUserId,
     required List<RemoteLearnerActivity> activities,
   }) async {
-    if (activities.isEmpty) return;
+    if (activities.isEmpty) return 0;
     final db = await _dbHelper.database;
     var batch = db.batch();
     var pending = 0;
+    var inserted = 0;
 
     Future<void> flush() async {
       if (pending == 0) return;
@@ -2055,6 +2387,12 @@ class AppRepository {
     for (final activity in activities) {
       final text = activity.phraseText.trim();
       if (text.isEmpty) continue;
+      if (isAppSessionMarker(
+        categoryKey: activity.categoryKey,
+        phraseText: activity.phraseText,
+      )) {
+        continue;
+      }
       final trimmedClass = activity.className?.trim();
       final trimmedLesson = activity.lessonTitle?.trim();
       final hasLessonContext = trimmedClass != null &&
@@ -2074,6 +2412,14 @@ class AppRepository {
         phraseText: text,
         categoryKey: effectiveCategoryKey,
       );
+      final existingBySyncKey = await db.query(
+        'history',
+        where: 'user_id = ? AND remote_sync_key = ?',
+        whereArgs: [learnerUserId, syncKey],
+        limit: 1,
+      );
+      if (existingBySyncKey.isNotEmpty) continue;
+
       final existing = await db.query(
         'history',
         where:
@@ -2101,6 +2447,38 @@ class AppRepository {
         }
         continue;
       }
+
+      final nearDuplicate = await db.query(
+        'history',
+        where:
+            'user_id = ? AND phrase_text = ? AND category_key = ? AND created_at >= ? AND created_at <= ?',
+        whereArgs: [
+          learnerUserId,
+          text,
+          effectiveCategoryKey,
+          createdAtMs -
+              MonitoringConstants.monitoringHistoryDedupeWindow.inMilliseconds,
+          createdAtMs +
+              MonitoringConstants.monitoringHistoryDedupeWindow.inMilliseconds,
+        ],
+        limit: 1,
+      );
+      if (nearDuplicate.isNotEmpty) {
+        if (nearDuplicate.first['remote_sync_key'] == null) {
+          batch.update(
+            'history',
+            {'remote_sync_key': syncKey},
+            where: 'id = ?',
+            whereArgs: [nearDuplicate.first['id']],
+          );
+          pending++;
+        }
+        if (pending >= 200) {
+          await flush();
+        }
+        continue;
+      }
+
       final row = <String, Object?>{
         'user_id': learnerUserId,
         'phrase_text': text,
@@ -2118,11 +2496,16 @@ class AppRepository {
         conflictAlgorithm: ConflictAlgorithm.ignore,
       );
       pending++;
+      inserted++;
       if (pending >= 200) {
         await flush();
       }
     }
     await flush();
+    if (inserted > 0) {
+      await dedupeMonitoringHistory(learnerUserId);
+    }
+    return inserted;
   }
 
   Future<void> removeHistory(int historyId) async {
@@ -2247,6 +2630,7 @@ class AppRepository {
     required DateTime rangeEnd,
     bool personalOnly = false,
   }) async {
+    await dedupeMonitoringHistory(learnerUserId);
     final db = await _dbHelper.database;
     final rows = await db.rawQuery('''
       SELECT created_at, category_key, class_name, lesson_title
@@ -2291,6 +2675,12 @@ class AppRepository {
 
     final merged = <String, PhraseFirstUse>{};
     for (final row in rows) {
+      if (isAppSessionMarker(
+        categoryKey: row['category_key'] as String,
+        phraseText: row['phrase_text'] as String,
+      )) {
+        continue;
+      }
       final stored = storedUserText(row['phrase_text'] as String);
       final categoryKey = monitoringCategoryKey(
         categoryKey: row['category_key'] as String,
@@ -2321,6 +2711,7 @@ class AppRepository {
     required DateTime rangeStart,
     required DateTime rangeEnd,
   }) async {
+    await dedupeMonitoringHistory(learnerUserId);
     final db = await _dbHelper.database;
     final rows = await db.rawQuery('''
       SELECT phrase_text, category_key, class_name, lesson_title,
@@ -2339,6 +2730,12 @@ class AppRepository {
     final merged = <String, PhraseUsageStat>{};
     for (final row in rows) {
       final stored = storedUserText(row['phrase_text'] as String);
+      if (isAppSessionMarker(
+        categoryKey: row['category_key'] as String,
+        phraseText: row['phrase_text'] as String,
+      )) {
+        continue;
+      }
       final categoryKey = monitoringCategoryKey(
         categoryKey: row['category_key'] as String,
         className: row['class_name'] as String?,
@@ -2360,6 +2757,97 @@ class AppRepository {
           categoryKey: categoryKey,
           count: existing.count + count,
         );
+      }
+    }
+    return merged.values.toList()
+      ..sort((a, b) {
+        final byCount = b.count.compareTo(a.count);
+        if (byCount != 0) return byCount;
+        return a.text.compareTo(b.text);
+      });
+  }
+
+  /// Counts phrase usage directly from cloud learner_activity rows (monitoring).
+  static List<PhraseUsageStat> aggregatePhraseUsageStatsFromActivities({
+    required List<RemoteLearnerActivity> activities,
+    required DateTime rangeStart,
+    required DateTime rangeEnd,
+  }) {
+    final startMs = rangeStart.millisecondsSinceEpoch;
+    final endMs = rangeEnd.millisecondsSinceEpoch;
+    final merged = <String, PhraseUsageStat>{};
+
+    for (final activity in activities) {
+      final text = storedUserText(activity.phraseText);
+      if (text.isEmpty) continue;
+      final createdAtMs = activity.createdAt.millisecondsSinceEpoch;
+      if (createdAtMs < startMs || createdAtMs >= endMs) continue;
+      if (isAppSessionMarker(
+        categoryKey: activity.categoryKey,
+        phraseText: activity.phraseText,
+      )) {
+        continue;
+      }
+
+      final trimmedClass = activity.className?.trim();
+      final trimmedLesson = activity.lessonTitle?.trim();
+      final hasLessonContext = trimmedClass != null &&
+          trimmedClass.isNotEmpty &&
+          trimmedLesson != null &&
+          trimmedLesson.isNotEmpty;
+      final categoryKey = hasLessonContext
+          ? monitoringCategoryKey(
+              categoryKey: activity.categoryKey,
+              className: activity.className,
+              lessonTitle: activity.lessonTitle,
+            )
+          : normalizeCategoryKey(activity.categoryKey);
+      if (!isPersonalCategoryKey(categoryKey)) continue;
+
+      final mergeKey = '$categoryKey|$text';
+      final existing = merged[mergeKey];
+      if (existing == null) {
+        merged[mergeKey] = PhraseUsageStat(
+          text: text,
+          categoryKey: categoryKey,
+          count: 1,
+        );
+      } else {
+        merged[mergeKey] = PhraseUsageStat(
+          text: text,
+          categoryKey: categoryKey,
+          count: existing.count + 1,
+        );
+      }
+    }
+
+    return merged.values.toList()
+      ..sort((a, b) {
+        final byCount = b.count.compareTo(a.count);
+        if (byCount != 0) return byCount;
+        return a.text.compareTo(b.text);
+      });
+  }
+
+  /// Merges local history stats with cloud activity stats for monitoring totals.
+  static List<PhraseUsageStat> mergePhraseUsageStats(
+    List<PhraseUsageStat> local,
+    List<PhraseUsageStat> cloud,
+  ) {
+    if (cloud.isEmpty) return local;
+    if (local.isEmpty) return cloud;
+    final merged = <String, PhraseUsageStat>{
+      for (final stat in local)
+        '${stat.categoryKey}|${storedUserText(stat.text).toLowerCase()}': stat,
+    };
+    for (final stat in cloud) {
+      final key =
+          '${stat.categoryKey}|${storedUserText(stat.text).toLowerCase()}';
+      final existing = merged[key];
+      if (existing == null) {
+        merged[key] = stat;
+      } else if (stat.count > existing.count) {
+        merged[key] = stat;
       }
     }
     return merged.values.toList()
@@ -3342,6 +3830,7 @@ class AppRepository {
     required int teacherUserId,
     int limit = 4,
   }) async {
+    await dedupeTeacherAlerts(teacherUserId);
     final db = await _dbHelper.database;
     final rows = await db.rawQuery('''
       SELECT
@@ -3469,6 +3958,7 @@ class AppRepository {
     required String title,
     required String body,
     List<int>? parentUserIds,
+    DateTime? createdAt,
   }) async {
     final authorized = await isLearnerInTeacherClass(
       teacherUserId: teacherUserId,
@@ -3482,7 +3972,7 @@ class AppRepository {
     final parentIds = parentUserIds ?? await getLinkedParentIds(learnerUserId);
 
     final db = await _dbHelper.database;
-    final createdAt = DateTime.now().millisecondsSinceEpoch;
+    final createdAtMs = (createdAt ?? DateTime.now()).millisecondsSinceEpoch;
     final notificationIds = <int>[];
 
     Future<int> insertAlertRow(int parentUserId) {
@@ -3496,7 +3986,7 @@ class AppRepository {
         'alert_type': alertType.name,
         'title': title,
         'body': body,
-        'created_at': createdAt,
+        'created_at': createdAtMs,
         'is_read': 0,
       });
     }
@@ -3684,18 +4174,41 @@ class AppRepository {
       );
       if (existing.isNotEmpty) continue;
 
+      if (item.localNotificationId > 0) {
+        final localMatch = await db.query(
+          'parent_notifications',
+          where: 'id = ? AND teacher_user_id = ?',
+          whereArgs: [item.localNotificationId, teacherUserId],
+          limit: 1,
+        );
+        if (localMatch.isNotEmpty) {
+          await db.update(
+            'parent_notifications',
+            {
+              'remote_id': item.remoteId,
+              'class_id': item.classId,
+              'class_name': item.className,
+              'child_name': item.childName,
+            },
+            where: 'id = ?',
+            whereArgs: [localMatch.first['id']],
+          );
+          continue;
+        }
+      }
+
       final contentMatches = await db.query(
         'parent_notifications',
         where:
-            'teacher_user_id = ? AND learner_user_id = ? AND alert_type = ? AND title = ? AND body = ? AND created_at = ? AND (remote_id IS NULL OR remote_id = \'\')',
+            'teacher_user_id = ? AND learner_user_id = ? AND alert_type = ? AND title = ? AND body = ? AND (remote_id IS NULL OR remote_id = \'\')',
         whereArgs: [
           teacherUserId,
           item.learnerUserId,
           item.alertType,
           item.title,
           item.body,
-          createdAtMs,
         ],
+        orderBy: 'created_at DESC',
         limit: 1,
       );
       if (contentMatches.isNotEmpty) {
@@ -3728,6 +4241,7 @@ class AppRepository {
         'remote_id': item.remoteId,
       });
     }
+    await dedupeTeacherAlerts(teacherUserId);
   }
 
   ParentNotification _notificationFromRow(Map<String, Object?> row) {
@@ -3759,6 +4273,92 @@ class AppRepository {
     final remoteId = rows.first['remote_id'] as String?;
     if (remoteId == null || remoteId.trim().isEmpty) return null;
     return remoteId.trim();
+  }
+
+  Future<void> markNotificationRemoteId({
+    required int notificationId,
+    required String remoteId,
+  }) async {
+    final trimmed = remoteId.trim();
+    if (trimmed.isEmpty) return;
+    final db = await _dbHelper.database;
+    await db.update(
+      'parent_notifications',
+      {'remote_id': trimmed},
+      where: 'id = ?',
+      whereArgs: [notificationId],
+    );
+  }
+
+  static String _teacherAlertDedupeKey({
+    required int? learnerUserId,
+    required String alertType,
+    required String title,
+    required String body,
+    required int? classId,
+  }) {
+    return '${learnerUserId ?? 0}|$alertType|${title.trim()}|${body.trim()}|${classId ?? 0}';
+  }
+
+  /// Removes near-duplicate teacher-sent rows from local insert + cloud sync.
+  Future<void> dedupeTeacherAlerts(int teacherUserId) async {
+    const windowMs = 120000;
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'parent_notifications',
+      where: 'teacher_user_id = ?',
+      whereArgs: [teacherUserId],
+      orderBy: 'created_at DESC, id DESC',
+    );
+    final deleteIds = <int>{};
+    for (var i = 0; i < rows.length; i++) {
+      final row = rows[i];
+      final rowId = row['id'] as int;
+      if (deleteIds.contains(rowId)) continue;
+      final rowCreatedAt = row['created_at'] as int;
+      final rowKey = _teacherAlertDedupeKey(
+        learnerUserId: row['learner_user_id'] as int?,
+        alertType: row['alert_type'] as String,
+        title: row['title'] as String,
+        body: row['body'] as String,
+        classId: row['class_id'] as int?,
+      );
+      for (var j = i + 1; j < rows.length; j++) {
+        final other = rows[j];
+        final otherId = other['id'] as int;
+        if (deleteIds.contains(otherId)) continue;
+        if ((rowCreatedAt - (other['created_at'] as int)).abs() > windowMs) {
+          continue;
+        }
+        final otherKey = _teacherAlertDedupeKey(
+          learnerUserId: other['learner_user_id'] as int?,
+          alertType: other['alert_type'] as String,
+          title: other['title'] as String,
+          body: other['body'] as String,
+          classId: other['class_id'] as int?,
+        );
+        if (rowKey != otherKey) continue;
+        final rowRemote =
+            (row['remote_id'] as String?)?.trim().isNotEmpty ?? false;
+        final otherRemote =
+            (other['remote_id'] as String?)?.trim().isNotEmpty ?? false;
+        if (rowRemote && !otherRemote) {
+          deleteIds.add(otherId);
+        } else if (!rowRemote && otherRemote) {
+          deleteIds.add(rowId);
+          break;
+        } else {
+          deleteIds.add(otherId);
+        }
+      }
+    }
+    for (final id in deleteIds) {
+      await db.delete(
+        'parent_notifications',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
   }
 
   Future<List<String>> unreadNotificationRemoteIds(int parentUserId) async {

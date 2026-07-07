@@ -7,8 +7,10 @@ import 'package:provider/provider.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/utils/speak_feedback.dart';
+import '../data/models/favorite_model.dart';
 import '../data/models/phrase_model.dart';
 import '../providers/app_state.dart';
+import '../widgets/category_icon.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/phrase_card.dart';
 
@@ -21,9 +23,75 @@ class FavoritesScreen extends StatefulWidget {
 
 class _FavoritesScreenState extends State<FavoritesScreen> {
   String? _filterCategoryKey;
+  final Set<String> _removedFavoriteKeys = {};
 
   Future<void> _refresh() async {
     await context.read<AppState>().refreshFavoritesFromCloud();
+  }
+
+  PhraseModel? _phraseForFavorite(AppState app, FavoriteModel favorite) {
+    if (favorite.phraseId != null) {
+      for (final phrase in app.phrases) {
+        if (phrase.id == favorite.phraseId) return phrase;
+      }
+    }
+    final favoriteKey = favorite.dedupeKey;
+    for (final phrase in app.phrases) {
+      final phraseKey =
+          '${phrase.text.trim().toLowerCase()}__${phrase.categoryKey}';
+      if (phraseKey == favoriteKey) return phrase;
+    }
+    return null;
+  }
+
+  PhraseModel _displayPhrase(AppState app, FavoriteModel favorite) {
+    final resolved = _phraseForFavorite(app, favorite);
+    if (resolved != null) return resolved;
+    return PhraseModel(
+      id: favorite.phraseId ?? favorite.id,
+      userId: favorite.userId,
+      text: favorite.phraseText,
+      categoryKey: favorite.categoryKey,
+      imagePath: favorite.imagePath,
+      isBuiltin: true,
+    );
+  }
+
+  Future<void> _confirmDeletePhrase(
+    PhraseModel phrase,
+    FavoriteModel favorite,
+  ) async {
+    final app = context.read<AppState>();
+    final lang = app.language;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        content: Text(AppStrings.deletePhrase(lang)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(AppStrings.cancel(lang)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(AppStrings.delete(lang)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    setState(() => _removedFavoriteKeys.add(favorite.dedupeKey));
+    await app.deletePhrase(phrase);
+    if (!mounted) return;
+
+    final stillFavorite = context
+        .read<AppState>()
+        .favorites
+        .any((f) => f.dedupeKey == favorite.dedupeKey);
+    if (!stillFavorite) {
+      setState(() => _removedFavoriteKeys.remove(favorite.dedupeKey));
+    }
   }
 
   @override
@@ -43,17 +111,13 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     final denseGrid = AppSpacing.phraseGridIsDense(context);
     final filterKey = _filterCategoryKey ?? app.selectedCategoryKey;
 
-    final phrases = app.favorites
-        .where((f) => f.categoryKey == filterKey)
-        .map((f) {
-      return PhraseModel(
-        id: f.phraseId ?? f.id,
-        userId: f.userId,
-        text: f.phraseText,
-        categoryKey: f.categoryKey,
-        imagePath: f.imagePath,
-      );
-    }).toList();
+    final favoriteItems = app.favorites
+        .where(
+          (f) =>
+              f.categoryKey == filterKey &&
+              !_removedFavoriteKeys.contains(f.dedupeKey),
+        )
+        .toList();
 
     return LearnerScaffold(
       title: AppStrings.appName(lang),
@@ -115,7 +179,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
             ),
             const SizedBox(height: AppSpacing.sm),
             SizedBox(
-              height: 44,
+              height: 48,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
@@ -127,6 +191,11 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                   return FilterChip(
                     selected: active,
                     showCheckmark: false,
+                    avatar: CategoryIcon(
+                      category: cat,
+                      size: 16,
+                      color: active ? Colors.white : cat.accentColor,
+                    ),
                     label: Text(app.localizedCategoryName(cat)),
                     labelStyle: GoogleFonts.poppins(
                       fontSize: 12,
@@ -154,7 +223,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
               ),
             ),
             const SizedBox(height: AppSpacing.md),
-            if (phrases.isEmpty)
+            if (favoriteItems.isEmpty)
               SizedBox(
                 width: double.infinity,
                 height: MediaQuery.sizeOf(context).height * 0.38,
@@ -193,11 +262,14 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   gridDelegate: AppSpacing.phraseGridDelegate(context),
-                  itemCount: phrases.length,
+                  itemCount: favoriteItems.length,
                   itemBuilder: (context, i) {
-                    final phrase = phrases[i];
+                    final favorite = favoriteItems[i];
+                    final phrase = _displayPhrase(app, favorite);
                     return PhraseCard(
-                        key: ValueKey('fav_${phrase.id}_${lang.name}_${app.languageRevision}'),
+                        key: ValueKey(
+                          'fav_${favorite.id}_${favorite.dedupeKey}_${lang.name}_${app.languageRevision}',
+                        ),
                         phrase: phrase,
                         dense: denseGrid,
                         isFavorite: true,
@@ -212,7 +284,9 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                               record: true,
                             ),
                         onFavorite: () => app.toggleFavorite(phrase),
-                        onDelete: () {},
+                        onDelete: phrase.isBuiltin
+                            ? () {}
+                            : () => _confirmDeletePhrase(phrase, favorite),
                     );
                   },
                 ),

@@ -24,18 +24,21 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   }
 
   @override
-  Future<void> publishTeacherAlert(TeacherAlertCloudEvent event) async {
-    if (!isAvailable) return;
+  Future<String?> publishTeacherAlert(TeacherAlertCloudEvent event) async {
+    if (!isAvailable) return null;
     if (event.parentFirebaseUid.trim().isEmpty) {
       debugPrint('Skipping cloud alert: parent has no Firebase account linked.');
-      return;
+      return null;
     }
 
     final payload = event.toFirestoreMap()
       ..['parentFirebaseUid'] = event.parentFirebaseUid
       ..['createdAt'] = Timestamp.fromDate(event.createdAt.toUtc());
 
-    await FirebaseFirestore.instance.collection(collectionName).add(payload);
+    final doc = await FirebaseFirestore.instance
+        .collection(collectionName)
+        .add(payload);
+    return doc.id;
   }
 
   @override
@@ -191,13 +194,11 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     try {
       final rangeStartUtc = rangeStart.toUtc();
       final rangeEndUtc = rangeEnd.toUtc();
+      // Single-field query only — avoids requiring a composite Firestore index.
+      // Date range is applied client-side below.
       final snapshot = await FirebaseFirestore.instance
           .collection(activityCollectionName)
           .where('learnerFirebaseUid', isEqualTo: learnerFirebaseUid.trim())
-          .where(
-            'createdAt',
-            isGreaterThanOrEqualTo: Timestamp.fromDate(rangeStartUtc),
-          )
           .get();
       final activities = <RemoteLearnerActivity>[];
       for (final doc in snapshot.docs) {
@@ -231,17 +232,20 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
         .snapshots()
         .map((snapshot) {
       final activities = <RemoteLearnerActivity>[];
-      if (snapshot.docChanges.isNotEmpty) {
-        for (final change in snapshot.docChanges) {
-          if (change.type == DocumentChangeType.removed) continue;
-          final activity = _activityFromDocument(change.doc);
-          if (activity != null) activities.add(activity);
-        }
-      } else {
-        for (final doc in snapshot.docs) {
-          final activity = _activityFromDocument(doc);
-          if (activity != null) activities.add(activity);
-        }
+      final seen = <String>{};
+      void absorb(DocumentSnapshot<Map<String, dynamic>> doc) {
+        final activity = _activityFromDocument(doc);
+        if (activity == null) return;
+        final key =
+            '${activity.createdAt.millisecondsSinceEpoch}|'
+            '${activity.phraseText.trim().toLowerCase()}|'
+            '${activity.categoryKey}';
+        if (!seen.add(key)) return;
+        activities.add(activity);
+      }
+
+      for (final doc in snapshot.docs) {
+        absorb(doc);
       }
       return activities;
     });
@@ -1097,6 +1101,7 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       remoteId: doc.id,
       teacherUserId: data['teacherUserId'] as int? ?? 0,
       parentUserId: data['parentUserId'] as int? ?? 0,
+      localNotificationId: data['localNotificationId'] as int? ?? 0,
       learnerUserId: data['learnerUserId'] as int? ?? 0,
       childName: (data['childName'] as String?) ?? '',
       classId: data['classId'] as int? ?? 0,

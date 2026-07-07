@@ -8,6 +8,7 @@ import '../core/theme/theme_tokens.dart';
 import '../data/models/category_model.dart';
 import '../providers/app_state.dart';
 import '../widgets/add_category_dialog.dart';
+import '../widgets/category_icon.dart';
 import '../widgets/taptalk_shell.dart';
 
 class ChooseCategoryScreen extends StatefulWidget {
@@ -131,7 +132,7 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
                 crossAxisCount: categoryColumns,
                 mainAxisSpacing: AppSpacing.sm,
                 crossAxisSpacing: AppSpacing.sm,
-                childAspectRatio: categoryColumns >= 5 ? 1.05 : 0.96,
+                childAspectRatio: categoryColumns >= 5 ? 0.92 : 0.82,
               ),
               itemCount: app.categories.length,
               itemBuilder: (context, i) {
@@ -264,22 +265,44 @@ class _CategoryCardState extends State<_CategoryCard> {
               ],
             ),
             padding: const EdgeInsets.all(AppSpacing.sm),
-            child: Center(
-              child: AnimatedDefaultTextStyle(
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutCubic,
-                style: GoogleFonts.poppins(
-                  fontWeight: widget.selected ? FontWeight.w700 : FontWeight.w600,
-                  fontSize: 13,
-                  color: widget.selected ? theme.textMain : Colors.black87,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    color: widget.category.accentColor.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: Center(
+                    child: CategoryIcon(
+                      category: widget.category,
+                      size: 26,
+                      color: widget.selected
+                          ? theme.bgAccent
+                          : widget.category.accentColor,
+                    ),
+                  ),
                 ),
-                child: Text(
-                  widget.label,
-                  textAlign: TextAlign.center,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
+                const SizedBox(height: AppSpacing.xs),
+                AnimatedDefaultTextStyle(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  style: GoogleFonts.poppins(
+                    fontWeight:
+                        widget.selected ? FontWeight.w700 : FontWeight.w600,
+                    fontSize: 12,
+                    color: widget.selected ? theme.textMain : Colors.black87,
+                  ),
+                  child: Text(
+                    widget.label,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
         ),

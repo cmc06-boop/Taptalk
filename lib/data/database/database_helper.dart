@@ -28,7 +28,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 17,
+      version: 19,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE users (
@@ -82,9 +82,15 @@ class DatabaseHelper {
             category_key TEXT NOT NULL,
             created_at INTEGER NOT NULL,
             class_name TEXT,
-            lesson_title TEXT
+            lesson_title TEXT,
+            remote_sync_key TEXT
           )
         ''');
+        await db.execute(
+          'CREATE UNIQUE INDEX IF NOT EXISTS idx_history_remote_sync_key '
+          'ON history(user_id, remote_sync_key) '
+          'WHERE remote_sync_key IS NOT NULL',
+        );
         await _createParentChildrenTable(db);
         await _createClassTables(db);
         await _createParentNotificationsTable(db);
@@ -209,7 +215,38 @@ class DatabaseHelper {
             'WHERE is_builtin = 1',
           );
         }
+        if (oldVersion < 18) {
+          await _ensureHistoryRemoteSyncKeyColumn(db);
+        }
+        if (oldVersion < 19) {
+          await _purgeAppSessionHistoryMarkers(db);
+        }
       },
+    );
+  }
+
+  Future<void> _ensureHistoryRemoteSyncKeyColumn(Database db) async {
+    final columns = await db.rawQuery('PRAGMA table_info(history)');
+    final hasColumn = columns.any((col) => col['name'] == 'remote_sync_key');
+    if (hasColumn) return;
+    await db.execute('ALTER TABLE history ADD COLUMN remote_sync_key TEXT');
+    await db.execute(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_history_remote_sync_key '
+      'ON history(user_id, remote_sync_key) '
+      'WHERE remote_sync_key IS NOT NULL',
+    );
+  }
+
+  Future<void> _purgeAppSessionHistoryMarkers(Database db) async {
+    await db.delete(
+      'history',
+      where: 'phrase_text = ?',
+      whereArgs: ['__session_open__'],
+    );
+    await db.delete(
+      'history',
+      where: 'category_key IN (?, ?)',
+      whereArgs: ['__app_session__', 'app_session'],
     );
   }
 

@@ -9,31 +9,80 @@ class CategoryModel {
     this.iconKey = 'custom',
   });
 
+  static const _builtinIconKeys = <String>{
+    'activities',
+    'animals',
+    'colors',
+    'drinks',
+    'family',
+    'feelings',
+    'food',
+    'greetings',
+    'health_safety',
+    'hobbies',
+    'needs',
+    'places',
+    'responses',
+    'school',
+    'technology',
+    'transportation',
+  };
+
   final int id;
   final int userId;
   final String key;
   final String name;
   final String iconKey;
 
+  String get resolvedIconKey {
+    if (iconKey != 'custom' && _builtinIconKeys.contains(iconKey)) {
+      return iconKey;
+    }
+    if (_builtinIconKeys.contains(key)) return key;
+    return 'custom';
+  }
+
   IconData get icon {
-    switch (iconKey) {
+    switch (resolvedIconKey) {
       case 'feelings':
-        return Icons.volunteer_activism_outlined;
+        return Icons.sentiment_satisfied_alt_rounded;
       case 'food':
-        return Icons.restaurant_outlined;
+        return Icons.restaurant_rounded;
       case 'drinks':
-        return Icons.local_drink_outlined;
+        return Icons.local_cafe_rounded;
       case 'activities':
-        return Icons.landscape_outlined;
+        return Icons.celebration_rounded;
       case 'animals':
-        return Icons.pets_outlined;
+        return Icons.pets_rounded;
+      case 'colors':
+        return Icons.palette_rounded;
+      case 'family':
+        return Icons.family_restroom_rounded;
+      case 'greetings':
+        return Icons.waving_hand_rounded;
+      case 'health_safety':
+        return Icons.health_and_safety_rounded;
+      case 'hobbies':
+        return Icons.interests_rounded;
+      case 'needs':
+        return Icons.pan_tool_alt_rounded;
+      case 'places':
+        return Icons.location_on_rounded;
+      case 'responses':
+        return Icons.forum_rounded;
+      case 'school':
+        return Icons.school_rounded;
+      case 'technology':
+        return Icons.devices_rounded;
+      case 'transportation':
+        return Icons.directions_car_filled_rounded;
       default:
-        return Icons.edit_outlined;
+        return Icons.folder_rounded;
     }
   }
 
   Color get accentColor {
-    switch (iconKey) {
+    switch (resolvedIconKey) {
       case 'feelings':
         return const Color(0xFF4A90D9);
       case 'food':
@@ -44,6 +93,28 @@ class CategoryModel {
         return const Color(0xFFF5B942);
       case 'animals':
         return const Color(0xFF5BB88A);
+      case 'colors':
+        return const Color(0xFFE91E8C);
+      case 'family':
+        return const Color(0xFFFF7043);
+      case 'greetings':
+        return const Color(0xFF26A69A);
+      case 'health_safety':
+        return const Color(0xFFEF5350);
+      case 'hobbies':
+        return const Color(0xFF8D6E63);
+      case 'needs':
+        return const Color(0xFF42A5F5);
+      case 'places':
+        return const Color(0xFF66BB6A);
+      case 'responses':
+        return const Color(0xFF7E57C2);
+      case 'school':
+        return const Color(0xFFFFA726);
+      case 'technology':
+        return const Color(0xFF5C6BC0);
+      case 'transportation':
+        return const Color(0xFF78909C);
       default:
         return const Color(0xFF9E9E9E);
     }

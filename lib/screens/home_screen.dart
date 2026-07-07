@@ -11,6 +11,7 @@ import '../core/utils/speak_feedback.dart';
 import '../providers/app_state.dart';
 import '../services/stt_service.dart';
 import '../widgets/add_category_dialog.dart';
+import '../widgets/category_icon.dart';
 import '../widgets/edit_phrase_dialog.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/panel_card.dart';
@@ -243,7 +244,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           SizedBox(
-            height: 44,
+            height: 48,
             child: ListView.separated(
               controller: _categoryScroll,
               scrollDirection: Axis.horizontal,
@@ -257,6 +258,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   key: ValueKey('cat_${cat.key}_${lang.name}_${app.languageRevision}'),
                   selected: active,
                   showCheckmark: false,
+                  avatar: CategoryIcon(
+                    category: cat,
+                    size: 16,
+                    color: active ? Colors.white : cat.accentColor,
+                  ),
                   label: Text(app.localizedCategoryName(cat)),
                   labelStyle: GoogleFonts.poppins(
                     fontSize: 12,

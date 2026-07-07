@@ -1,11 +1,12 @@
 import 'package:intl/intl.dart';
 
 import '../constants/child_usage_period.dart';
+import '../constants/monitoring_constants.dart';
 import '../../data/models/child_session_summary.dart';
 
 /// Infers TapTalk usage sessions from phrase history timestamps.
 abstract final class SessionUsageCalculator {
-  static const _sessionGap = Duration(minutes: 15);
+  static const _sessionGap = MonitoringConstants.sessionGap;
   static const _minSession = Duration(minutes: 2);
   static const _phraseTail = Duration(seconds: 45);
 

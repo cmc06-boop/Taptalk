@@ -8,6 +8,7 @@ import '../core/l10n/app_strings.dart';
 import '../core/utils/speak_feedback.dart';
 import '../core/theme/theme_tokens.dart';
 import '../data/models/history_model.dart';
+import '../data/repositories/app_repository.dart';
 import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
 
@@ -21,23 +22,36 @@ class HistoryScreen extends StatefulWidget {
 class _HistoryScreenState extends State<HistoryScreen> {
   List<HistoryModel> _items = [];
 
+  /// Learner history shows phrase taps only — not internal app-session markers.
+  List<HistoryModel> _visibleHistory(List<HistoryModel> source) {
+    return source
+        .where(
+          (item) => !AppRepository.isAppSessionMarker(
+            categoryKey: item.categoryKey,
+            phraseText: item.text,
+          ),
+        )
+        .toList();
+  }
+
   @override
   void initState() {
     super.initState();
-    _items = List.from(context.read<AppState>().history);
+    _items = _visibleHistory(context.read<AppState>().history);
   }
 
   void _mergeNewHistory(List<HistoryModel> source) {
-    if (source.isEmpty) {
+    final visible = _visibleHistory(source);
+    if (visible.isEmpty) {
       if (_items.isNotEmpty) {
         setState(() => _items = []);
       }
       return;
     }
-    final hasNewEntries = source.length > _items.length ||
-        (_items.isNotEmpty && source.first.id != _items.first.id);
+    final hasNewEntries = visible.length > _items.length ||
+        (_items.isNotEmpty && visible.first.id != _items.first.id);
     if (hasNewEntries) {
-      setState(() => _items = List.from(source));
+      setState(() => _items = visible);
     }
   }
 
@@ -52,7 +66,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     await context.read<AppState>().refreshLearnerCollections();
     if (!mounted) return;
     setState(() {
-      _items = List.from(context.read<AppState>().history);
+      _items = _visibleHistory(context.read<AppState>().history);
     });
   }
 

@@ -1,5 +1,5 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 
@@ -69,8 +69,9 @@ enum AppRoute {
   teacherAlertHistory,
 }
 
-class AppState extends ChangeNotifier {
+class AppState extends ChangeNotifier with WidgetsBindingObserver {
   AppState() {
+    WidgetsBinding.instance.addObserver(this);
     _bindTtsCallbacks();
     _init();
   }
@@ -126,6 +127,7 @@ class AppState extends ChangeNotifier {
   int _liveDataRevision = 0;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   bool _monitoringSyncInFlight = false;
+  final Map<int, Future<void>> _monitoringHistoryPullChain = {};
   final Map<int, int> _childMonitoringRevision = {};
   final Map<int, int> _classContentRevision = {};
   final Map<int, DateTime> _classLocalEditAt = {};
@@ -214,6 +216,9 @@ class AppState extends ChangeNotifier {
 
   int childMonitoringRevision(int learnerUserId) =>
       _childMonitoringRevision[learnerUserId] ?? 0;
+
+  bool isLiveChildMonitoringSyncActive(int learnerUserId) =>
+      _notificationSync.isMonitoredLearnerMonitoringSyncActive(learnerUserId);
 
   int classContentRevision(int classId) => _classContentRevision[classId] ?? 0;
   int teacherClassStudentCount(int classId) =>
@@ -527,7 +532,7 @@ class AppState extends ChangeNotifier {
       if (_user!.isParent) {
         await _startParentChildLinkSync();
       }
-      unawaited(_prefetchMonitoredLearnerCaches());
+      unawaited(_prefetchMonitoredLearnerCachesWithRetry());
       unawaited(_reconcileClassContentLiveSync());
     }
     if (_user!.isLearner && CloudScope.syncMonitoring) {
@@ -1840,6 +1845,17 @@ class AppState extends ChangeNotifier {
 
   Future<void> deletePhrase(PhraseModel phrase) async {
     if (_user == null || phrase.userId != _user!.id) return;
+
+    final removedKey =
+        '${phrase.text.trim().toLowerCase()}__${phrase.categoryKey}';
+    _phrases = _phrases.where((p) => p.id != phrase.id).toList();
+    _favorites = _favorites
+        .where(
+          (f) => f.phraseId != phrase.id && f.dedupeKey != removedKey,
+        )
+        .toList();
+    notifyListeners();
+
     if (!phrase.isBuiltin) {
       await _repo.deletePhrase(_user!.id, phrase.id);
     }
@@ -1848,6 +1864,7 @@ class AppState extends ChangeNotifier {
     if (!phrase.isBuiltin &&
         (_user!.isLearner || _user!.isParent || _user!.isTeacher)) {
       unawaited(_pushLearnerCustomPhrasesToCloud());
+      unawaited(_pushLearnerFavoritesToCloud());
     }
   }
 
@@ -1994,10 +2011,14 @@ class AppState extends ChangeNotifier {
     if (!_notificationSync.isCloudAvailable) return;
     final uid = await _learnerFirebaseUidForSync();
     if (uid == null || uid.isEmpty) return;
+    final effectiveCategoryKey =
+        AppRepository.isLessonCategoryKey(categoryKey)
+            ? categoryKey
+            : AppRepository.normalizeCategoryKey(categoryKey);
     final syncKey = AppRepository.remoteActivitySyncKey(
       createdAt: createdAt,
       phraseText: phraseText,
-      categoryKey: categoryKey,
+      categoryKey: effectiveCategoryKey,
     );
     final pushed = await _notificationSync.pushLearnerActivity(
       LearnerActivityCloudEvent(
@@ -2115,7 +2136,7 @@ class AppState extends ChangeNotifier {
         await _startTeacherMonitoringSync();
         await _startTeacherAlertSync();
       }
-      await _prefetchMonitoredLearnerCaches();
+      await _prefetchMonitoredLearnerCachesWithRetry();
       await _reconcileClassContentLiveSync();
     }
   }
@@ -2331,43 +2352,272 @@ class AppState extends ChangeNotifier {
   Future<void> startLiveChildMonitoringSync(int learnerUserId) async {
     if (_user == null || (!_user!.isParent && !_user!.isTeacher)) return;
     if (!CloudScope.syncMonitoring) return;
-    if (!_liveMonitoredLearnerIds.add(learnerUserId)) return;
 
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
-    if (!_notificationSync.isCloudAvailable) {
-      _liveMonitoredLearnerIds.remove(learnerUserId);
-      return;
-    }
+    if (!_notificationSync.isCloudAvailable) return;
+    if (!await _ensureCloudAuthSession()) return;
 
-    final uid = await _resolveLearnerFirebaseUid(learnerUserId);
-    if (uid == null || uid.isEmpty) {
-      _liveMonitoredLearnerIds.remove(learnerUserId);
-      return;
-    }
-
-    await _notificationSync.startMonitoredLearnerActivitySync(
-      learnerUserId: learnerUserId,
-      learnerFirebaseUid: uid,
-      onChanged: (activities) async {
-        await _repo.mergeRemoteLearnerActivities(
-          learnerUserId: learnerUserId,
-          activities: activities,
-        );
-        _bumpChildMonitoringRevision(learnerUserId);
-      },
+    final uid = await _resolveLearnerFirebaseUid(
+      learnerUserId,
+      forMonitoring: true,
     );
+    if (uid == null || uid.isEmpty) return;
+
+    _liveMonitoredLearnerIds.add(learnerUserId);
+
+    if (!_notificationSync.isMonitoredLearnerBoardSyncActive(learnerUserId)) {
+      await _notificationSync.startMonitoredLearnerBoardSync(
+        learnerUserId: learnerUserId,
+        learnerFirebaseUid: uid,
+        onChanged: (snapshot) async {
+          final changed = await _mergeMonitoredLearnerBoardSnapshot(
+            learnerUserId: learnerUserId,
+            snapshot: snapshot,
+          );
+          if (changed) {
+            _bumpChildMonitoringRevision(learnerUserId);
+          }
+        },
+      );
+    }
+
+    if (!_notificationSync.isMonitoredLearnerActivitySyncActive(learnerUserId)) {
+      await _notificationSync.startMonitoredLearnerActivitySync(
+        learnerUserId: learnerUserId,
+        learnerFirebaseUid: uid,
+        onChanged: (activities) async {
+          if (activities.isEmpty) return;
+          await _mergeMonitoredLearnerActivities(
+            learnerUserId: learnerUserId,
+            activities: activities,
+          );
+          _bumpChildMonitoringRevision(learnerUserId);
+        },
+      );
+    }
   }
 
   Future<void> stopLiveChildMonitoringSync(int learnerUserId) async {
     _liveMonitoredLearnerIds.remove(learnerUserId);
+    await _notificationSync.stopMonitoredLearnerBoardSync(learnerUserId);
     await _notificationSync.stopMonitoredLearnerActivitySync(learnerUserId);
+  }
+
+  /// Merges phrase taps from `learner_activity` into local history for monitoring.
+  Future<bool> _mergeMonitoredLearnerActivities({
+    required int learnerUserId,
+    required List<RemoteLearnerActivity> activities,
+  }) async {
+    if (activities.isEmpty) return false;
+    final inserted = await _repo.mergeRemoteLearnerActivities(
+      learnerUserId: learnerUserId,
+      activities: activities,
+    );
+    return inserted > 0;
+  }
+
+  /// Merges learner_profiles board data into local SQLite for monitoring.
+  Future<bool> _mergeMonitoredLearnerBoardSnapshot({
+    required int learnerUserId,
+    required RemoteLearnerPersonalBoardSnapshot snapshot,
+  }) async {
+    var changed = false;
+    if (snapshot.categories.isNotEmpty) {
+      await _repo.mergeRemoteLearnerCategories(
+        learnerUserId: learnerUserId,
+        remoteCategories: snapshot.categories,
+      );
+      changed = true;
+    }
+    if (snapshot.customPhrases.isNotEmpty) {
+      final before = (await _repo.getCustomPhraseAdditions(
+        learnerUserId: learnerUserId,
+      )).length;
+      await _repo.mergeRemoteLearnerCustomPhrases(
+        learnerUserId: learnerUserId,
+        phrases: snapshot.customPhrases,
+      );
+      await _repo.dedupeCustomPhrases(learnerUserId);
+      final after = (await _repo.getCustomPhraseAdditions(
+        learnerUserId: learnerUserId,
+      )).length;
+      if (after != before) changed = true;
+    }
+    if (snapshot.speakHistory.isNotEmpty) {
+      final inserted = await _repo.mergeRemoteLearnerSpeakHistory(
+        learnerUserId: learnerUserId,
+        history: snapshot.speakHistory,
+      );
+      if (inserted > 0) changed = true;
+    }
+    if (changed) {
+      await _repo.dedupeMonitoringHistory(learnerUserId);
+    }
+    return changed;
+  }
+
+  /// Pulls learner phrase taps from `learner_activity` into local history.
+  Future<List<RemoteLearnerActivity>> _fetchLearnerActivitiesForMonitoring(
+    int learnerUserId, {
+    bool full = true,
+    DateTime? rangeStart,
+  }) async {
+    if (!CloudScope.syncMonitoring) return const [];
+    if (await NetworkStatus.isOffline()) return const [];
+    await FirebaseService.instance.initialize();
+    await _notificationSync.initialize();
+    if (!_notificationSync.isCloudAvailable) return const [];
+    if (_user != null && (_user!.isParent || _user!.isTeacher)) {
+      if (!await _ensureCloudAuthSession()) return const [];
+    }
+    final learnerFirebaseUid = await _resolveLearnerFirebaseUid(
+      learnerUserId,
+      forMonitoring: true,
+    );
+    if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) {
+      return const [];
+    }
+    try {
+      final activityRangeStart = rangeStart ??
+          (full
+              ? MonitoringConstants.cloudActivityPullRangeStart()
+              : DateTime.now().subtract(
+                  MonitoringConstants.monitoringIncrementalLookback,
+                ));
+      final activityTimeout = full
+          ? MonitoringConstants.monitoringPullTimeout
+          : MonitoringConstants.monitoringIncrementalPullTimeout;
+      return await _notificationSync
+          .getLearnerActivitiesFromCloud(
+            learnerFirebaseUid: learnerFirebaseUid,
+            rangeStart: activityRangeStart,
+            rangeEnd: MonitoringConstants.cloudActivityPullRangeEnd(),
+          )
+          .timeout(activityTimeout);
+    } catch (e, st) {
+      debugPrint('Fetch learner activities for monitoring failed: $e\n$st');
+      return const [];
+    }
+  }
+
+  Future<bool> _pullLearnerActivitiesForMonitoring(
+    int learnerUserId, {
+    bool full = true,
+  }) async {
+    final activities = await _fetchLearnerActivitiesForMonitoring(
+      learnerUserId,
+      full: full,
+    );
+    if (activities.isEmpty) return false;
+    return _mergeMonitoredLearnerActivities(
+      learnerUserId: learnerUserId,
+      activities: activities,
+    );
+  }
+
+  /// Pulls learner_profiles board data and learner_activity taps into SQLite.
+  Future<bool> _pullLearnerMonitoringBoardFromCloud(
+    int learnerUserId, {
+    bool full = true,
+  }) async {
+    if (!CloudScope.syncMonitoring) return false;
+    if (await NetworkStatus.isOffline()) return false;
+    await FirebaseService.instance.initialize();
+    await _notificationSync.initialize();
+    if (!_notificationSync.isCloudAvailable) return false;
+    if (_user != null && (_user!.isParent || _user!.isTeacher)) {
+      if (!await _ensureCloudAuthSession()) return false;
+    }
+    final learnerFirebaseUid = await _resolveLearnerFirebaseUid(
+      learnerUserId,
+      forMonitoring: true,
+    );
+    if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) {
+      debugPrint(
+        'Pull learner monitoring board skipped: no Firebase UID for user $learnerUserId',
+      );
+      return false;
+    }
+    try {
+      final results = await Future.wait([
+        _notificationSync
+            .getLearnerCategoriesFromCloud(learnerFirebaseUid)
+            .timeout(const Duration(seconds: 15)),
+        _notificationSync
+            .getLearnerCustomPhrasesFromCloud(learnerFirebaseUid)
+            .timeout(const Duration(seconds: 15)),
+        _notificationSync
+            .getLearnerSpeakHistoryFromCloud(learnerFirebaseUid)
+            .timeout(const Duration(seconds: 15)),
+      ]);
+      final boardChanged = await _mergeMonitoredLearnerBoardSnapshot(
+        learnerUserId: learnerUserId,
+        snapshot: RemoteLearnerPersonalBoardSnapshot(
+          categories: results[0] as List<RemoteLearnerCategory>,
+          customPhrases: results[1] as List<RemoteLearnerCustomPhrase>,
+          speakHistory: results[2] as List<RemoteLearnerSpeakHistory>,
+        ),
+      );
+      final activityChanged = await _pullLearnerActivitiesForMonitoring(
+        learnerUserId,
+        full: full,
+      );
+      return boardChanged || activityChanged;
+    } catch (e, st) {
+      debugPrint('Pull learner monitoring board failed: $e\n$st');
+      return false;
+    }
+  }
+
+  /// Pulls learner monitoring data from cloud into local SQLite for monitoring views.
+  Future<void> _syncLearnerMonitoringBoardFromCloud(
+    int learnerUserId, {
+    bool full = true,
+  }) async {
+    final prior = _monitoringHistoryPullChain[learnerUserId] ?? Future<void>.value();
+    final task = prior.then((_) async {
+      final changed = await _pullLearnerMonitoringBoardFromCloud(
+        learnerUserId,
+        full: full,
+      );
+      if (changed) {
+        _bumpChildMonitoringRevision(learnerUserId);
+      }
+    });
+    _monitoringHistoryPullChain[learnerUserId] = task;
+    try {
+      await task;
+    } finally {
+      if (identical(_monitoringHistoryPullChain[learnerUserId], task)) {
+        _monitoringHistoryPullChain.remove(learnerUserId);
+      }
+    }
+  }
+
+  Future<void> _prefetchMonitoredLearnerCachesWithRetry() async {
+    for (var attempt = 0; attempt < 4; attempt++) {
+      if (_user == null || (!_user!.isParent && !_user!.isTeacher)) return;
+      await FirebaseService.instance.initialize();
+      await _notificationSync.initialize();
+      if (_notificationSync.isCloudAvailable &&
+          !await NetworkStatus.isOffline()) {
+        await _prefetchMonitoredLearnerCaches();
+        return;
+      }
+      if (attempt < 3) {
+        await Future<void>.delayed(Duration(seconds: 2 * (attempt + 1)));
+      }
+    }
   }
 
   Future<void> _prefetchMonitoredLearnerCaches() async {
     if (_user == null) return;
     if (await NetworkStatus.isOffline() || !_notificationSync.isCloudAvailable) {
       return;
+    }
+    if (_user!.isParent || _user!.isTeacher) {
+      if (!await _ensureCloudAuthSession()) return;
     }
     if (_user!.isParent) {
       if (_linkedChildren.isEmpty) {
@@ -2379,7 +2629,6 @@ class AppState extends ChangeNotifier {
           learnerIds.map((id) => refreshChildMonitoringData(id)),
         );
       }
-      return;
     }
     if (_user!.isTeacher) {
       await _syncTeacherClassesFromCloud();
@@ -2397,57 +2646,12 @@ class AppState extends ChangeNotifier {
         );
       }
     }
-  }
-
-  /// Pulls cloud learner activity into local SQLite for offline parent/teacher views.
-  Future<void> _pullLearnerMonitoringCacheFromCloud(
-    int learnerUserId, {
-    bool incremental = false,
-  }) async {
-    if (!CloudScope.syncMonitoring) return;
-    if (await NetworkStatus.isOffline()) return;
-    await FirebaseService.instance.initialize();
-    await _notificationSync.initialize();
-    if (!_notificationSync.isCloudAvailable) return;
-    if (_user != null && (_user!.isParent || _user!.isTeacher)) {
-      if (!await _ensureCloudAuthSession()) return;
-    }
-    final learnerFirebaseUid = await _resolveLearnerFirebaseUid(learnerUserId);
-    if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) {
-      debugPrint(
-        'Pull learner monitoring skipped: no Firebase UID for user $learnerUserId',
+    if (_liveMonitoredLearnerIds.isNotEmpty) {
+      await Future.wait(
+        _liveMonitoredLearnerIds.map(
+          (id) => refreshChildMonitoringData(id, full: false),
+        ),
       );
-      return;
-    }
-    try {
-      final latestLocal = await _repo.getLatestSyncedActivityTime(learnerUserId);
-      final rangeStart = incremental
-          ? (latestLocal?.subtract(const Duration(minutes: 2)) ??
-              MonitoringConstants.cloudActivityPullRangeStart())
-          : MonitoringConstants.cloudActivityPullRangeStart();
-      final timeout = incremental
-          ? MonitoringConstants.monitoringIncrementalPullTimeout
-          : MonitoringConstants.monitoringPullTimeout;
-      final activities = await _notificationSync
-          .getLearnerActivitiesFromCloud(
-            learnerFirebaseUid: learnerFirebaseUid,
-            rangeStart: rangeStart,
-            rangeEnd: MonitoringConstants.cloudActivityPullRangeEnd(),
-          )
-          .timeout(timeout);
-      debugPrint(
-        'Pulled ${activities.length} learner activities for user $learnerUserId'
-        '${incremental ? ' (incremental)' : ''}',
-      );
-      await _repo.mergeRemoteLearnerActivities(
-        learnerUserId: learnerUserId,
-        activities: activities,
-      );
-      if (activities.isNotEmpty) {
-        _bumpChildMonitoringRevision(learnerUserId);
-      }
-    } catch (e, st) {
-      debugPrint('Pull learner monitoring cache failed: $e\n$st');
     }
   }
 
@@ -2521,16 +2725,21 @@ class AppState extends ChangeNotifier {
   }
 
   /// Parent/teacher Firestore reads require an active Firebase Auth session.
-  Future<bool> _ensureCloudAuthSession() async {
-    final uid = await _resolveAccountFirebaseUid();
-    if (uid == null || uid.isEmpty) {
-      debugPrint(
-        'Cloud auth session missing for ${_user?.role ?? "unknown"}; '
-        'monitoring sync needs online sign-in.',
-      );
-      return false;
+  Future<bool> _ensureCloudAuthSession({
+    Duration timeout = const Duration(seconds: 12),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    while (true) {
+      final uid = await _resolveAccountFirebaseUid();
+      if (uid != null && uid.isNotEmpty) return true;
+      if (!DateTime.now().isBefore(deadline)) break;
+      await Future<void>.delayed(const Duration(milliseconds: 450));
     }
-    return true;
+    debugPrint(
+      'Cloud auth session missing for ${_user?.role ?? "unknown"}; '
+      'monitoring sync needs online sign-in.',
+    );
+    return false;
   }
 
   /// Firebase UID for the signed-in parent, waiting for auth restore when needed.
@@ -4283,16 +4492,23 @@ class AppState extends ChangeNotifier {
       final history = await _notificationSync
           .getLearnerSpeakHistoryFromCloud(learnerFirebaseUid)
           .timeout(const Duration(seconds: 15));
-      await _repo.mergeRemoteLearnerSpeakHistory(
+      final inserted = await _repo.mergeRemoteLearnerSpeakHistory(
         learnerUserId: learnerUserId,
         history: history,
+      );
+      if (inserted > 0) {
+        _bumpChildMonitoringRevision(learnerUserId);
+      }
+      debugPrint(
+        'Pulled ${history.length} speak history entries for user $learnerUserId'
+        ' ($inserted new)',
       );
     } catch (e, st) {
       debugPrint('Pull learner speak history failed: $e\n$st');
     }
   }
 
-  /// All learner categories (default + custom), synced from cloud when needed.
+  /// All learner categories (default + custom) from local store after board sync.
   Future<List<CategoryModel>> getCategoriesForMonitoring(
     int learnerUserId,
   ) async {
@@ -4300,24 +4516,6 @@ class AppState extends ChangeNotifier {
     if (categories.isEmpty) {
       await _repo.seedLearnerData(learnerUserId);
       categories = await _repo.getCategories(learnerUserId);
-    }
-    if (!CloudScope.syncMonitoring) return categories;
-    if (await NetworkStatus.isOffline()) return categories;
-    final uid = await _resolveLearnerFirebaseUid(learnerUserId);
-    if (uid != null && uid.isNotEmpty && _notificationSync.isCloudAvailable) {
-      try {
-        final remote =
-            await _notificationSync.getLearnerCategoriesFromCloud(uid);
-        if (remote.isNotEmpty) {
-          await _repo.mergeRemoteLearnerCategories(
-            learnerUserId: learnerUserId,
-            remoteCategories: remote,
-          );
-          categories = await _repo.getCategories(learnerUserId);
-        }
-      } catch (e, st) {
-        debugPrint('Pull monitoring categories failed: $e\n$st');
-      }
     }
     return categories;
   }
@@ -4345,11 +4543,27 @@ class AppState extends ChangeNotifier {
     return uid;
   }
 
-  Future<String?> _resolveLearnerFirebaseUid(int learnerUserId) async {
+  Future<String?> _resolveLearnerFirebaseUid(
+    int learnerUserId, {
+    bool forMonitoring = false,
+  }) async {
     final fromUser = await _repo.getFirebaseUidForUser(learnerUserId);
     if (fromUser != null && fromUser.isNotEmpty) return fromUser;
 
     if (!CloudScope.syncMonitoring) return null;
+
+    if (forMonitoring &&
+        _user != null &&
+        (_user!.isParent || _user!.isTeacher)) {
+      final fromCloud = await _resolveLearnerFirebaseUidFromCloud(learnerUserId);
+      if (fromCloud != null && fromCloud.isNotEmpty) return fromCloud;
+      return null;
+    }
+
+    return _resolveLearnerFirebaseUidFromCloud(learnerUserId);
+  }
+
+  Future<String?> _resolveLearnerFirebaseUidFromCloud(int learnerUserId) async {
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
     if (!_notificationSync.isCloudAvailable || _user == null) return null;
@@ -4460,10 +4674,14 @@ class AppState extends ChangeNotifier {
     if (_user == null) return;
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
+    var cloudReady = true;
     if (_user!.isParent || _user!.isTeacher) {
-      if (!await _ensureCloudAuthSession()) return;
+      cloudReady = await _ensureCloudAuthSession();
     }
-    final online = !await NetworkStatus.isOffline();
+    final online = cloudReady &&
+        !await NetworkStatus.isOffline() &&
+        !NetworkStatus.isCloudBlocked &&
+        _notificationSync.isCloudAvailable;
     if (online) {
       if (_user!.isTeacher) {
         await _syncTeacherClassesFromCloud();
@@ -4471,21 +4689,26 @@ class AppState extends ChangeNotifier {
         await _loadLinkedChildren(syncCloudInBackground: false);
       }
     }
-    await _resolveLearnerFirebaseUid(learnerUserId);
-    if (online) {
+    final learnerUid =
+        await _resolveLearnerFirebaseUid(learnerUserId, forMonitoring: true);
+    if (online && learnerUid != null && learnerUid.isNotEmpty) {
       if (full) {
-        await Future.wait([
-          _syncLearnerEnrollmentsFromCloudForUser(learnerUserId),
-          getCategoriesForMonitoring(learnerUserId),
-          _pullLearnerCustomPhrasesFromCloud(learnerUserId),
-        ]);
-        await _pullLearnerMonitoringCacheFromCloud(learnerUserId);
-      } else {
-        await _pullLearnerMonitoringCacheFromCloud(
-          learnerUserId,
-          incremental: true,
-        );
+        await _syncLearnerEnrollmentsFromCloudForUser(learnerUserId);
       }
+      await _syncLearnerMonitoringBoardFromCloud(
+        learnerUserId,
+        full: full,
+      );
+      if (_liveMonitoredLearnerIds.contains(learnerUserId)) {
+        await startLiveChildMonitoringSync(learnerUserId);
+      }
+    } else if (online) {
+      debugPrint(
+        'Monitoring refresh skipped: no learner Firebase UID for user $learnerUserId',
+      );
+    }
+    if (full) {
+      _bumpChildMonitoringRevision(learnerUserId);
     }
   }
 
@@ -4495,20 +4718,38 @@ class AppState extends ChangeNotifier {
     DateTime? month,
     bool syncCloud = true,
   }) async {
-    if (syncCloud &&
-        CloudScope.syncMonitoring &&
-        !await NetworkStatus.isOffline()) {
-      await _pullLearnerMonitoringCacheFromCloud(
-        learnerUserId,
-        incremental: true,
-      );
-    }
     final range = _dateRangeForPeriod(period, month: month);
-    return _repo.getPhraseUsageStats(
+
+    List<RemoteLearnerActivity> cloudActivities = const [];
+    if (syncCloud) {
+      cloudActivities = await _fetchLearnerActivitiesForMonitoring(
+        learnerUserId,
+        full: false,
+        rangeStart: range.$1,
+      );
+      if (cloudActivities.isNotEmpty) {
+        await _repo.mergeRemoteLearnerActivities(
+          learnerUserId: learnerUserId,
+          activities: cloudActivities,
+        );
+      }
+    }
+
+    final localStats = await _repo.getPhraseUsageStats(
       learnerUserId: learnerUserId,
       rangeStart: range.$1,
       rangeEnd: range.$2,
     );
+    if (!syncCloud || cloudActivities.isEmpty) {
+      return localStats;
+    }
+
+    final cloudStats = AppRepository.aggregatePhraseUsageStatsFromActivities(
+      activities: cloudActivities,
+      rangeStart: range.$1,
+      rangeEnd: range.$2,
+    );
+    return AppRepository.mergePhraseUsageStats(localStats, cloudStats);
   }
 
   Future<VocabularyGrowthPanelData> getChildVocabularyGrowth({
@@ -4516,46 +4757,53 @@ class AppState extends ChangeNotifier {
     required ChildUsagePeriod period,
     DateTime? month,
     DateTime? linkedAt,
-    bool syncCloud = true,
+    bool syncCloud = false,
   }) async {
-    if (syncCloud &&
-        CloudScope.syncMonitoring &&
-        !await NetworkStatus.isOffline()) {
-      await FirebaseService.instance.initialize();
-      await _notificationSync.initialize();
-      if (_user != null && (_user!.isParent || _user!.isTeacher)) {
-        await _ensureCloudAuthSession();
-      }
-      await Future.wait([
-        _pullLearnerMonitoringCacheFromCloud(
-          learnerUserId,
-          incremental: true,
-        ),
-        _pullLearnerSpeakHistoryFromCloud(learnerUserId),
-        _pullLearnerCustomPhrasesFromCloud(learnerUserId),
-      ]);
-    }
-
     final linked = linkedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
     final range = _dateRangeForPeriod(period, month: month);
     final locale =
         _language == AppLanguage.filipino ? 'fil_PH' : 'en_US';
     final earliest = linked.isAfter(range.$1) ? linked : range.$1;
 
-    final stats = await _repo.getPhraseUsageStats(
+    List<RemoteLearnerActivity> cloudActivities = const [];
+    if (syncCloud) {
+      cloudActivities = await _fetchLearnerActivitiesForMonitoring(
+        learnerUserId,
+        full: false,
+        rangeStart: range.$1,
+      );
+      if (cloudActivities.isNotEmpty) {
+        await _repo.mergeRemoteLearnerActivities(
+          learnerUserId: learnerUserId,
+          activities: cloudActivities,
+        );
+      }
+    }
+
+    final localStats = await _repo.getPhraseUsageStats(
       learnerUserId: learnerUserId,
       rangeStart: range.$1,
       rangeEnd: range.$2,
     );
-    final phrasesUsed = stats
-        .map((s) => '${s.categoryKey}|${s.text}')
-        .toSet()
-        .length;
-    final phraseTaps = stats.fold<int>(0, (sum, s) => sum + s.count);
+    final cloudStats = cloudActivities.isEmpty
+        ? const <PhraseUsageStat>[]
+        : AppRepository.aggregatePhraseUsageStatsFromActivities(
+            activities: cloudActivities,
+            rangeStart: range.$1,
+            rangeEnd: range.$2,
+          );
+    final usageStats =
+        AppRepository.mergePhraseUsageStats(localStats, cloudStats);
+    final phrasesUsed = usageStats.length;
+    final phraseTaps =
+        usageStats.fold<int>(0, (sum, stat) => sum + stat.count);
 
-    final firstUses = await _repo.getCustomPhraseAdditions(
+    final firstUsesFromCustom = await _repo.getCustomPhraseAdditions(
       learnerUserId: learnerUserId,
     );
+    final firstUses = firstUsesFromCustom.isNotEmpty
+        ? firstUsesFromCustom
+        : await _repo.getPhraseFirstUses(learnerUserId: learnerUserId);
     final periodFirstUses = firstUses
         .where(
           (entry) =>
@@ -4572,7 +4820,9 @@ class AppState extends ChangeNotifier {
     );
 
     final summary = VocabularyGrowthSummary(
-      totalVocabulary: periodFirstUses.length,
+      totalVocabulary: periodFirstUses.isNotEmpty
+          ? periodFirstUses.length
+          : phrasesUsed,
       newWordsThisWeek: trendSummary.newWordsThisWeek,
       newWordsThisMonth: trendSummary.newWordsThisMonth,
       weeklyTrend: trendSummary.weeklyTrend,
@@ -4665,16 +4915,8 @@ class AppState extends ChangeNotifier {
     required int learnerUserId,
     required ChildUsagePeriod period,
     DateTime? month,
-    bool syncCloud = true,
+    bool syncCloud = false,
   }) async {
-    if (syncCloud &&
-        CloudScope.syncMonitoring &&
-        !await NetworkStatus.isOffline()) {
-      await _pullLearnerMonitoringCacheFromCloud(
-        learnerUserId,
-        incremental: true,
-      );
-    }
     final range = _dateRangeForPeriod(period, month: month);
     final allEvents = await _repo.getHistoryTimestamps(
       learnerUserId: learnerUserId,

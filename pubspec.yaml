@@ -32,6 +32,7 @@ dependencies:
   telephony: ^0.2.0
   permission_handler: ^11.4.0
   url_launcher: ^6.3.1
+  flutter_svg: ^2.3.0
 
 dev_dependencies:
   flutter_test:
@@ -48,7 +49,24 @@ hooks:
 flutter:
   uses-material-design: true
   assets:
+    - assets/icons/categories/
     - assets/images/
+    - assets/images/Activities/
+    - assets/images/Animals/
+    - assets/images/Colors/
+    - assets/images/Drinks/
+    - assets/images/Family/
+    - assets/images/Feelings/
+    - assets/images/Foods/
+    - assets/images/Greetings/
+    - "assets/images/Health & Safety/"
+    - assets/images/Hobbies/
+    - assets/images/Needs/
+    - assets/images/Places/
+    - assets/images/Responses/
+    - assets/images/School/
+    - assets/images/Technology/
+    - assets/images/Transportation/
   fonts:
     - family: Poppins
       fonts:

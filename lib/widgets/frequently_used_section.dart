@@ -93,10 +93,24 @@ class _FrequentlyUsedSectionState extends State<FrequentlyUsedSection> {
   @override
   void didUpdateWidget(covariant FrequentlyUsedSection oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.reloadNonce != widget.reloadNonce ||
-        oldWidget.stats != widget.stats) {
+    if (!_statsEqual(oldWidget.stats, widget.stats)) {
       _syncSelectedCategory();
     }
+  }
+
+  bool _statsEqual(List<PhraseUsageStat> a, List<PhraseUsageStat> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      final left = a[i];
+      final right = b[i];
+      if (left.text != right.text ||
+          left.categoryKey != right.categoryKey ||
+          left.count != right.count) {
+        return false;
+      }
+    }
+    return true;
   }
 
   void _syncSelectedCategory() {

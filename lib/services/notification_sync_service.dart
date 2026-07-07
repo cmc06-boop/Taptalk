@@ -27,6 +27,8 @@ class NotificationSyncService {
   StreamSubscription<RemoteUserProfile>? _userProfileSubscription;
   final Map<int, StreamSubscription<List<RemoteLearnerActivity>>>
       _monitoredLearnerActivitySubscriptions = {};
+  final Map<int, StreamSubscription<RemoteLearnerPersonalBoardSnapshot>>
+      _monitoredLearnerBoardSubscriptions = {};
   final Map<int, StreamSubscription<RemoteClassContent?>>
       _classContentSubscriptions = {};
   final Map<int, int> _lastAppliedClassContentFingerprint = {};
@@ -65,6 +67,7 @@ class NotificationSyncService {
       parentIds = await _resolveLinkedParentIdsFromCloud(learnerUserId);
     }
 
+    final createdAt = DateTime.now();
     final result = await _repository.sendTeacherAlertToParents(
       teacherUserId: teacherUserId,
       teacherName: teacherName,
@@ -76,6 +79,7 @@ class NotificationSyncService {
       title: title,
       body: body,
       parentUserIds: parentIds,
+      createdAt: createdAt,
     );
 
     if (!_cloud.isAvailable) {
@@ -88,7 +92,6 @@ class NotificationSyncService {
       return result;
     }
 
-    final createdAt = DateTime.now();
     var cloudPublished = 0;
 
     for (final notificationId in result.notificationIds) {
@@ -99,7 +102,7 @@ class NotificationSyncService {
           await _repository.getFirebaseUidForUser(parentId);
       if (parentFirebaseUid == null || parentFirebaseUid.isEmpty) continue;
       try {
-        await _cloud.publishTeacherAlert(
+        final remoteId = await _cloud.publishTeacherAlert(
           TeacherAlertCloudEvent(
             localNotificationId: notificationId,
             parentUserId: parentId,
@@ -117,6 +120,12 @@ class NotificationSyncService {
             createdAt: createdAt,
           ),
         );
+        if (remoteId != null && remoteId.isNotEmpty) {
+          await _repository.markNotificationRemoteId(
+            notificationId: notificationId,
+            remoteId: remoteId,
+          );
+        }
         cloudPublished++;
       } catch (e, st) {
         debugPrint('Cloud alert publish failed: $e\n$st');
@@ -133,7 +142,7 @@ class NotificationSyncService {
             result.notificationIds.isNotEmpty ? result.notificationIds.first : -1;
         for (final parentUid in parentUids) {
           try {
-            await _cloud.publishTeacherAlert(
+            final remoteId = await _cloud.publishTeacherAlert(
               TeacherAlertCloudEvent(
                 localNotificationId: localNotificationId,
                 parentUserId: -1,
@@ -151,6 +160,14 @@ class NotificationSyncService {
                 createdAt: createdAt,
               ),
             );
+            if (remoteId != null &&
+                remoteId.isNotEmpty &&
+                localNotificationId > 0) {
+              await _repository.markNotificationRemoteId(
+                notificationId: localNotificationId,
+                remoteId: remoteId,
+              );
+            }
             cloudPublished++;
           } catch (e, st) {
             debugPrint('Cloud-only alert publish failed: $e\n$st');
@@ -401,8 +418,49 @@ class NotificationSyncService {
     );
   }
 
+  bool isMonitoredLearnerActivitySyncActive(int learnerUserId) =>
+      _monitoredLearnerActivitySubscriptions.containsKey(learnerUserId);
+
   Future<void> stopMonitoredLearnerActivitySync(int learnerUserId) async {
     await _monitoredLearnerActivitySubscriptions.remove(learnerUserId)?.cancel();
+  }
+
+  /// Live learner monitoring sync (`learner_profiles` + `learner_activity`).
+  Future<void> startMonitoredLearnerBoardSync({
+    required int learnerUserId,
+    required String learnerFirebaseUid,
+    required Future<void> Function(RemoteLearnerPersonalBoardSnapshot snapshot)
+        onChanged,
+  }) async {
+    await stopMonitoredLearnerBoardSync(learnerUserId);
+    await _cloud.initialize();
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return;
+
+    _monitoredLearnerBoardSubscriptions[learnerUserId] = _cloud
+        .watchLearnerPersonalBoard(learnerFirebaseUid)
+        .listen(
+      (snapshot) async {
+        try {
+          await onChanged(snapshot);
+        } catch (e, st) {
+          debugPrint('Monitored learner board handler failed: $e\n$st');
+        }
+      },
+      onError: (Object e, StackTrace st) {
+        debugPrint('Monitored learner board sync error: $e\n$st');
+      },
+    );
+  }
+
+  bool isMonitoredLearnerBoardSyncActive(int learnerUserId) =>
+      _monitoredLearnerBoardSubscriptions.containsKey(learnerUserId);
+
+  bool isMonitoredLearnerMonitoringSyncActive(int learnerUserId) =>
+      isMonitoredLearnerBoardSyncActive(learnerUserId) &&
+      isMonitoredLearnerActivitySyncActive(learnerUserId);
+
+  Future<void> stopMonitoredLearnerBoardSync(int learnerUserId) async {
+    await _monitoredLearnerBoardSubscriptions.remove(learnerUserId)?.cancel();
   }
 
   Future<void> stopAllMonitoredLearnerActivitySync() async {
@@ -410,6 +468,10 @@ class NotificationSyncService {
       await sub.cancel();
     }
     _monitoredLearnerActivitySubscriptions.clear();
+    for (final sub in _monitoredLearnerBoardSubscriptions.values) {
+      await sub.cancel();
+    }
+    _monitoredLearnerBoardSubscriptions.clear();
   }
 
   Future<RemoteTeacherClass?> getTeacherClassByCodeFromCloud(

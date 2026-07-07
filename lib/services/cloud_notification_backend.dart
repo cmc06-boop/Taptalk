@@ -492,11 +492,13 @@ class RemoteTeacherAlert {
     required this.title,
     required this.body,
     required this.createdAt,
+    this.localNotificationId = 0,
   });
 
   final String remoteId;
   final int teacherUserId;
   final int parentUserId;
+  final int localNotificationId;
   final int learnerUserId;
   final String childName;
   final int classId;
@@ -517,7 +519,7 @@ abstract class CloudNotificationBackend {
 
   bool get isAvailable;
 
-  Future<void> publishTeacherAlert(TeacherAlertCloudEvent event);
+  Future<String?> publishTeacherAlert(TeacherAlertCloudEvent event);
 
   Future<void> upsertParentChildLink({
     required int parentUserId,
@@ -697,7 +699,8 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
   Future<void> initialize() async {}
 
   @override
-  Future<void> publishTeacherAlert(TeacherAlertCloudEvent event) async {}
+  Future<String?> publishTeacherAlert(TeacherAlertCloudEvent event) async =>
+      null;
 
   @override
   Future<void> upsertParentChildLink({

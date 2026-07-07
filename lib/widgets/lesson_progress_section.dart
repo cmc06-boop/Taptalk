@@ -54,21 +54,24 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
   @override
   void initState() {
     super.initState();
-    _loadClasses(syncCloud: false);
+    _loadClasses(syncCloud: true);
   }
 
   @override
   void didUpdateWidget(covariant LessonProgressSection oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.reloadNonce != widget.reloadNonce &&
-        widget.syncCloudOnReload) {
-      unawaited(_loadClasses(syncCloud: true));
-    }
     if (oldWidget.period != widget.period ||
-        oldWidget.month != widget.month ||
-        oldWidget.reloadNonce != widget.reloadNonce) {
+        oldWidget.month != widget.month) {
       if (_selectedClass != null && _selectedLesson != null) {
         _loadProgress(_selectedClass!, _selectedLesson!, silent: true);
+      }
+      return;
+    }
+    if (oldWidget.reloadNonce != widget.reloadNonce) {
+      if (_selectedClass != null && _selectedLesson != null) {
+        unawaited(
+          _loadProgress(_selectedClass!, _selectedLesson!, silent: true),
+        );
       }
     }
   }
