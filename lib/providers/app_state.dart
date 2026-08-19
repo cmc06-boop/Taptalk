@@ -1,4 +1,6 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
@@ -126,6 +128,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   int _teacherAlertsRevision = 0;
   int _liveDataRevision = 0;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  StreamSubscription<User?>? _firebaseAuthRestoreSubscription;
+  bool _loggedCloudAuthMissing = false;
   bool _monitoringSyncInFlight = false;
   final Map<int, Future<void>> _monitoringHistoryPullChain = {};
   final Map<int, int> _childMonitoringRevision = {};
@@ -336,7 +340,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     required int gen,
     required String fullText,
   }) async {
-    while (true) {
+    var attempts = 0;
+    while (attempts < 4) {
+      attempts++;
       if (gen != _ttsGeneration || !_isSpeaking || _speechPaused) {
         return false;
       }
@@ -361,10 +367,39 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
       final ok = await tts.speak(remaining, rate: _ttsSpeed, lang: _language);
       if (gen != _ttsGeneration) return false;
-      if (ok) return true;
+      if (ok) {
+        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+          await _waitForWindowsTtsCompletion(
+            gen: gen,
+            textLength: remaining.length,
+          );
+        }
+        return gen == _ttsGeneration;
+      }
 
-      if (_isSpeaking && !_speechPaused) continue;
-      return false;
+      if (!_isSpeaking || _speechPaused) return false;
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+    return false;
+  }
+
+  Future<void> _waitForWindowsTtsCompletion({
+    required int gen,
+    required int textLength,
+  }) async {
+    final completer = Completer<void>();
+    final previousComplete = tts.onComplete;
+    tts.onComplete = () {
+      previousComplete?.call();
+      if (!completer.isCompleted) completer.complete();
+    };
+    try {
+      await completer.future.timeout(
+        Duration(milliseconds: (textLength * 130).clamp(2000, 60000)),
+        onTimeout: () {},
+      );
+    } finally {
+      tts.onComplete = previousComplete;
     }
   }
 
@@ -462,7 +497,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   /// Firebase (auth + notifications) and TTS — runs after the first screen is shown.
   Future<void> _initCloudServicesInBackground() async {
     try {
-      unawaited(tts.init());
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+        // Windows Firebase Auth restores after the first frame; defer cloud sync.
+        await Future<void>.delayed(const Duration(milliseconds: 1200));
+      }
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+        await tts.init();
+      } else {
+        unawaited(tts.init());
+      }
       // Auth (sign up / log in) needs Firebase even when no user is logged in yet.
       await FirebaseService.instance.initialize();
       if (_user != null &&
@@ -519,6 +562,17 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (!needsFullCloud) return;
 
     await _syncFirebaseSessionAfterRestore();
+    if (_user!.isParent || _user!.isTeacher) {
+      if (!await _ensureCloudAuthSession(
+        timeout: const Duration(seconds: 15),
+      )) {
+        debugPrint(
+          'Monitoring sync deferred for ${_user!.role}: '
+          'sign in again to restore Firebase session.',
+        );
+        return;
+      }
+    }
     if (_user!.isParent && CloudScope.notifications) {
       await _syncCloudDataAfterFirebaseReady();
     }
@@ -973,8 +1027,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
     if (!_notificationSync.isCloudAvailable) return;
-    final firebaseUid =
-        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+
+    final String? firebaseUid;
+    if (_user!.isLearner) {
+      firebaseUid = await _learnerFirebaseUidForSync();
+    } else {
+      if (!await _ensureCloudAuthSession()) return;
+      firebaseUid = await _resolveAccountFirebaseUid();
+    }
     if (firebaseUid == null || firebaseUid.isEmpty) return;
 
     String? profileCode;
@@ -1134,15 +1194,18 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _pullPersonalBoardFromCloud() async {
-    if (!_hasPersonalBoardRole()) return;
+    if (_user == null || !_hasPersonalBoardRole()) return;
     if (!CloudScope.syncMonitoring) return;
     if (await NetworkStatus.isOffline()) return;
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
     if (!_notificationSync.isCloudAvailable) return;
-    if (!await _ensureCloudAuthSession()) return;
 
-    final uid = await _resolveAccountFirebaseUid();
+    final uid = _user!.isLearner
+        ? await _learnerFirebaseUidForSync()
+        : (await _ensureCloudAuthSession()
+            ? await _resolveAccountFirebaseUid()
+            : null);
     if (uid == null || uid.isEmpty) return;
 
     try {
@@ -1167,8 +1230,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (_user == null) return;
     if (await NetworkStatus.isOffline()) return;
     await FirebaseService.instance.initialize();
+    final isWindows =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
     final authUid = await FirebaseService.instance.waitForAuthUid(
-      timeout: const Duration(seconds: 12),
+      timeout: isWindows ? const Duration(seconds: 20) : const Duration(seconds: 12),
     );
     if (authUid == null || authUid.isEmpty) {
       debugPrint('Account cloud restore skipped: Firebase auth not ready');
@@ -1190,6 +1255,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
     if (!_notificationSync.isCloudAvailable) return null;
+    if (_user!.isLearner) {
+      return _learnerFirebaseUidForSync();
+    }
     if (!await _ensureCloudAuthSession()) return null;
     return _resolveAccountFirebaseUid();
   }
@@ -1206,6 +1274,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (_user == null || !_hasPersonalBoardRole()) return;
     if (!CloudScope.syncMonitoring) return;
     try {
+      if (_user!.isLearner) {
+        if (await _learnerFirebaseUidForSync() == null) return;
+      } else if (!await _ensureCloudAuthSession()) {
+        return;
+      }
       await _syncUserProfileToCloud();
       await _syncPersonalBoardToCloud();
     } catch (e, st) {
@@ -1761,6 +1834,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _liveDataRevision = 0;
     await _connectivitySubscription?.cancel();
     _connectivitySubscription = null;
+    await _firebaseAuthRestoreSubscription?.cancel();
+    _firebaseAuthRestoreSubscription = null;
+    _loggedCloudAuthMissing = false;
     await _notificationSync.stopParentSync();
     await _notificationSync.stopMonitoringSync();
     await FirebaseService.instance.signOut();
@@ -1981,15 +2057,24 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<String?> _learnerFirebaseUidForSync() async {
     if (_user == null || !_user!.isLearner) return null;
-    final uid = _user!.firebaseUid ?? FirebaseService.instance.currentUid;
-    if (uid != null && uid.isNotEmpty) return uid;
+    final stored = _user!.firebaseUid?.trim();
+    if (stored != null && stored.isNotEmpty) return stored;
+
+    final uid = FirebaseService.instance.currentUid;
+    if (uid != null && uid.isNotEmpty) {
+      await _repo.linkFirebaseUid(_user!.id, uid);
+      _user = _user!.copyWith(firebaseUid: uid);
+      return uid;
+    }
     if (!FirebaseService.instance.isAvailable) return null;
-    final restored = await FirebaseService.instance.waitForAuthUid();
+    final restored = await FirebaseService.instance.waitForAuthUid(
+      timeout: !kIsWeb && defaultTargetPlatform == TargetPlatform.windows
+          ? const Duration(seconds: 20)
+          : const Duration(seconds: 8),
+    );
     if (restored != null && restored.isNotEmpty) {
-      if (_user!.firebaseUid == null || _user!.firebaseUid!.isEmpty) {
-        await _repo.linkFirebaseUid(_user!.id, restored);
-        _user = _user!.copyWith(firebaseUid: restored);
-      }
+      await _repo.linkFirebaseUid(_user!.id, restored);
+      _user = _user!.copyWith(firebaseUid: restored);
       return restored;
     }
     return null;
@@ -2711,34 +2796,55 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
 
-    var uid = _user!.firebaseUid ?? FirebaseService.instance.currentUid;
-    uid ??= await FirebaseService.instance.waitForAuthUid(
-      timeout: const Duration(seconds: 8),
+    var authUid = FirebaseService.instance.currentUid;
+    authUid ??= await FirebaseService.instance.waitForAuthUid(
+      timeout: !kIsWeb && defaultTargetPlatform == TargetPlatform.windows
+          ? const Duration(seconds: 20)
+          : const Duration(seconds: 8),
     );
-    if (uid == null || uid.isEmpty) return null;
+    if (authUid == null || authUid.isEmpty) return null;
 
-    if (_user!.firebaseUid == null || _user!.firebaseUid!.isEmpty) {
-      await _repo.linkFirebaseUid(_user!.id, uid);
-      _user = _user!.copyWith(firebaseUid: uid);
+    final storedUid = _user!.firebaseUid?.trim();
+    if (storedUid != null &&
+        storedUid.isNotEmpty &&
+        storedUid != authUid) {
+      debugPrint(
+        'Firebase UID mismatch (db=$storedUid, auth=$authUid); cloud sync skipped.',
+      );
+      return null;
     }
-    return uid;
+
+    if (storedUid == null || storedUid.isEmpty) {
+      await _repo.linkFirebaseUid(_user!.id, authUid);
+      _user = _user!.copyWith(firebaseUid: authUid);
+    }
+    return authUid;
   }
 
   /// Parent/teacher Firestore reads require an active Firebase Auth session.
   Future<bool> _ensureCloudAuthSession({
     Duration timeout = const Duration(seconds: 12),
   }) async {
-    final deadline = DateTime.now().add(timeout);
+    if (_user == null) return false;
+
+    final isWindows =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+    final effectiveTimeout =
+        isWindows ? timeout + const Duration(seconds: 8) : timeout;
+    final deadline = DateTime.now().add(effectiveTimeout);
     while (true) {
       final uid = await _resolveAccountFirebaseUid();
       if (uid != null && uid.isNotEmpty) return true;
       if (!DateTime.now().isBefore(deadline)) break;
       await Future<void>.delayed(const Duration(milliseconds: 450));
     }
-    debugPrint(
-      'Cloud auth session missing for ${_user?.role ?? "unknown"}; '
-      'monitoring sync needs online sign-in.',
-    );
+    if (!_loggedCloudAuthMissing) {
+      _loggedCloudAuthMissing = true;
+      debugPrint(
+        'Cloud auth session missing for ${_user!.role}; '
+        'sign in again to restore cloud sync.',
+      );
+    }
     return false;
   }
 
@@ -2858,7 +2964,39 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       debugPrint(
         'No Firebase session for ${_user!.role}; SMS/cloud need sign-in again.',
       );
+      _watchForLateFirebaseAuthRestore();
     }
+  }
+
+  /// Firebase Auth can restore a persisted session shortly after startup.
+  void _watchForLateFirebaseAuthRestore() {
+    if (_user == null || !_user!.isOnlineAccount) return;
+    final firebaseAuth = FirebaseService.instance.auth;
+    if (firebaseAuth == null || firebaseAuth.currentUser != null) return;
+
+    _firebaseAuthRestoreSubscription?.cancel();
+    _firebaseAuthRestoreSubscription =
+        firebaseAuth.authStateChanges().listen((user) async {
+      if (user == null || _user == null) return;
+      await _firebaseAuthRestoreSubscription?.cancel();
+      _firebaseAuthRestoreSubscription = null;
+
+      final storedUid = _user!.firebaseUid?.trim();
+      if (storedUid != null &&
+          storedUid.isNotEmpty &&
+          user.uid != storedUid) {
+        debugPrint('Late Firebase auth UID mismatch; cloud sync skipped.');
+        return;
+      }
+
+      if (storedUid == null || storedUid.isEmpty) {
+        await _repo.linkFirebaseUid(_user!.id, user.uid);
+        _user = _user!.copyWith(firebaseUid: user.uid);
+      }
+
+      debugPrint('Firebase auth restored; resuming cloud sync.');
+      unawaited(_activateMonitoringSync());
+    });
   }
 
   Future<UserModel> _linkFirebaseAccountIfAvailable({
@@ -2993,9 +3131,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (!_notificationSync.isCloudAvailable) return;
     if (await NetworkStatus.isOffline()) return;
     if (NetworkStatus.isCloudBlocked) return;
+    if (!await _ensureCloudAuthSession()) return;
 
-    final teacherFirebaseUid =
-        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    final teacherFirebaseUid = await _resolveAccountFirebaseUid();
     if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) return;
 
     try {
@@ -3056,8 +3194,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }) async {
     if (!CloudScope.syncMonitoring) return;
     if (_user == null || !_user!.isTeacher) return;
-    final teacherFirebaseUid =
-        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+    if (!await _ensureCloudAuthSession()) return;
+    final teacherFirebaseUid = await _resolveAccountFirebaseUid();
     if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) return;
 
     await _notificationSync.syncTeacherClass(
@@ -5060,7 +5198,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _speechResumeCharOffset = 0;
     _speechHighlightOffset = 0;
     _readAlongWordIndex = 0;
-    await tts.stop();
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      if (_isSpeaking) await tts.stop();
+    } else {
+      await tts.stop();
+    }
     _currentSpeakGeneration = gen;
 
     _speakingText = spoken;

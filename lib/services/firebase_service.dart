@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:math';
 
 import 'package:firebase_app_check/firebase_app_check.dart';
@@ -17,6 +18,7 @@ class FirebaseService {
 
   bool _initialized = false;
   bool _appCheckActivated = false;
+  bool _appCheckSkipLogged = false;
   String? _lastAuthErrorCode;
 
   static const _authTimeout = Duration(seconds: 12);
@@ -49,6 +51,11 @@ class FirebaseService {
 
   String? get currentUid => auth?.currentUser?.uid;
 
+  bool get hasActiveAuthSession {
+    final uid = currentUid;
+    return uid != null && uid.isNotEmpty;
+  }
+
   String? get currentUserEmail => auth?.currentUser?.email;
 
   String? get currentUserDisplayName => auth?.currentUser?.displayName;
@@ -67,24 +74,51 @@ class FirebaseService {
   }
 
   /// Waits for Firebase Auth to restore a persisted session after [initialize].
+  ///
+  /// On Windows, Auth restores asynchronously and auth-state EventChannel
+  /// callbacks may arrive off the platform thread, so we poll [currentUser]
+  /// instead of relying on [authStateChanges] alone.
   Future<String?> waitForAuthUid({
-    Duration timeout = const Duration(seconds: 5),
+    Duration? timeout,
   }) async {
     if (!_initialized) return null;
     final firebaseAuth = auth;
     if (firebaseAuth == null) return null;
-    final existing = firebaseAuth.currentUser;
-    if (existing != null) return existing.uid;
-    try {
-      return await firebaseAuth
-          .authStateChanges()
-          .where((user) => user != null)
-          .map((user) => user!.uid)
-          .first
-          .timeout(timeout);
-    } catch (_) {
-      return firebaseAuth.currentUser?.uid;
+
+    final isWindows =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+    final effectiveTimeout = timeout ??
+        (isWindows ? const Duration(seconds: 20) : const Duration(seconds: 8));
+
+    if (isWindows) {
+      await Future<void>.delayed(const Duration(milliseconds: 900));
     }
+
+    final immediate = firebaseAuth.currentUser;
+    if (immediate != null) return immediate.uid;
+
+    final deadline = DateTime.now().add(effectiveTimeout);
+    while (DateTime.now().isBefore(deadline)) {
+      final user = firebaseAuth.currentUser;
+      if (user != null) return user.uid;
+
+      if (!isWindows) {
+        try {
+          return await firebaseAuth
+              .authStateChanges()
+              .where((candidate) => candidate != null)
+              .map((candidate) => candidate!.uid)
+              .first
+              .timeout(const Duration(milliseconds: 600));
+        } catch (_) {
+          // Fall through to polling below.
+        }
+      }
+
+      await Future<void>.delayed(const Duration(milliseconds: 450));
+    }
+
+    return firebaseAuth.currentUser?.uid;
   }
 
   Future<void> initialize() async {
@@ -112,6 +146,28 @@ class FirebaseService {
 
   Future<void> _activateAppCheck() async {
     if (_appCheckActivated) return;
+
+    final isWindows =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+    final windowsDebugToken = !kIsWeb
+        ? Platform.environment['APP_CHECK_DEBUG_TOKEN']?.trim()
+        : null;
+
+    // Windows only supports the debug provider; without a registered token,
+    // enforced App Check blocks Firestore even when Auth is valid.
+    if (isWindows &&
+        kDebugMode &&
+        (windowsDebugToken == null || windowsDebugToken.isEmpty)) {
+      if (!_appCheckSkipLogged) {
+        _appCheckSkipLogged = true;
+        debugPrint(
+          'Skipping Firebase App Check on Windows (no APP_CHECK_DEBUG_TOKEN). '
+          'Set APP_CHECK_DEBUG_TOKEN if cloud sync is blocked.',
+        );
+      }
+      return;
+    }
+
     try {
       await FirebaseAppCheck.instance.activate(
         providerAndroid: kDebugMode
@@ -120,6 +176,11 @@ class FirebaseService {
         providerApple: kDebugMode
             ? const AppleDebugProvider()
             : const AppleAppAttestProvider(),
+        providerWindows: WindowsDebugProvider(
+          debugToken: windowsDebugToken != null && windowsDebugToken.isNotEmpty
+              ? windowsDebugToken
+              : null,
+        ),
       );
       _appCheckActivated = true;
       debugPrint('Firebase App Check activated.');

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
@@ -15,6 +17,9 @@ class TtsService {
   VoidCallback? onComplete;
   void Function(String message)? onError;
 
+  static bool get _isWindows =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
   Future<void> _configureTts() async {
     _tts.setStartHandler(() => onStart?.call());
     _tts.setProgressHandler((text, start, end, word) {
@@ -23,7 +28,10 @@ class TtsService {
     _tts.setCompletionHandler(() => onComplete?.call());
     _tts.setCancelHandler(() => onComplete?.call());
     _tts.setErrorHandler((message) => onError?.call(message));
-    await _tts.awaitSpeakCompletion(true);
+
+    // Windows SAPI/UWP backends hang or fail silently when this is true.
+    await _tts.awaitSpeakCompletion(!_isWindows);
+
     if (defaultTargetPlatform == TargetPlatform.iOS) {
       await _tts.setSharedInstance(true);
     }
@@ -36,12 +44,18 @@ class TtsService {
         // Keep default engine if Google TTS is unavailable.
       }
     }
+    if (_isWindows) {
+      await _prepareWindowsVoice();
+    }
   }
 
   Future<void> _recreateEngine() async {
     try {
       await _tts.stop();
     } catch (_) {}
+    if (_isWindows) {
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    }
     _tts = FlutterTts();
     _ready = false;
     await init();
@@ -78,8 +92,119 @@ class TtsService {
     return false;
   }
 
+  static bool _speakResultOk(dynamic result) {
+    return result == null ||
+        result == 1 ||
+        result == '1' ||
+        result == 'success' ||
+        result == true ||
+        result.toString().toLowerCase() == 'ok';
+  }
+
+  Future<List<String>> _installedLanguages() async {
+    try {
+      final raw = await _tts.getLanguages;
+      if (raw is! List) return const [];
+      return raw.map((entry) => entry.toString()).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  String _pickInstalledLanguage(List<String> languages, List<String> preferred) {
+    for (final code in preferred) {
+      final normalized = code.toLowerCase();
+      for (final language in languages) {
+        final candidate = language.toLowerCase();
+        if (candidate == normalized || candidate.startsWith('$normalized-')) {
+          return language;
+        }
+      }
+    }
+    return languages.isNotEmpty ? languages.first : 'en-US';
+  }
+
+  Future<String> _resolveWindowsLanguage(AppLanguage lang) async {
+    final languages = await _installedLanguages();
+    if (lang == AppLanguage.filipino) {
+      return _pickInstalledLanguage(
+        languages,
+        const ['fil-PH', 'tl-PH', 'fil', 'tl', 'en-US', 'en-GB', 'en'],
+      );
+    }
+    return _pickInstalledLanguage(
+      languages,
+      const ['en-US', 'en-GB', 'en-PH', 'en'],
+    );
+  }
+
+  Future<void> _applyWindowsVoice(String languageCode) async {
+    try {
+      final raw = await _tts.getVoices;
+      if (raw is! List || raw.isEmpty) {
+        await _tts.setLanguage(languageCode);
+        return;
+      }
+
+      final normalized = languageCode.toLowerCase();
+      final prefix = normalized.split('-').first;
+
+      Map<dynamic, dynamic>? best;
+      Map<dynamic, dynamic>? englishFallback;
+      Map<dynamic, dynamic>? anyFallback;
+
+      for (final entry in raw) {
+        if (entry is! Map) continue;
+        anyFallback ??= entry;
+        final locale = entry['locale']?.toString() ?? '';
+        final name = entry['name']?.toString() ?? '';
+        final localeLower = locale.toLowerCase();
+        final isEnglish =
+            localeLower.startsWith('en') || localeLower.contains('english');
+        if (isEnglish) {
+          englishFallback ??= entry;
+        }
+
+        final localeMatches = localeLower == normalized ||
+            localeLower.startsWith('$prefix-') ||
+            (prefix.length >= 2 && localeLower.startsWith(prefix));
+        if (!localeMatches) continue;
+
+        if (name.toLowerCase().contains('microsoft')) {
+          best = entry;
+          break;
+        }
+        best ??= entry;
+      }
+
+      best ??= englishFallback ?? anyFallback;
+      if (best == null) {
+        await _tts.setLanguage(languageCode);
+        return;
+      }
+
+      await _tts.setVoice(<String, String>{
+        'name': best['name']?.toString() ?? '',
+        'locale': best['locale']?.toString() ?? languageCode,
+      });
+    } catch (e, st) {
+      debugPrint('Windows voice setup failed: $e\n$st');
+      try {
+        await _tts.setLanguage(languageCode);
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _prepareWindowsVoice() async {
+    await _applyWindowsVoice(await _resolveWindowsLanguage(AppLanguage.english));
+  }
+
   Future<String> resolveLanguageCode(AppLanguage lang) async {
     await init();
+
+    if (_isWindows) {
+      return _resolveWindowsLanguage(lang);
+    }
 
     final primary = lang == AppLanguage.filipino ? 'fil-PH' : 'en-US';
     final fallback = lang == AppLanguage.filipino ? 'tl-PH' : 'en-GB';
@@ -96,6 +221,32 @@ class TtsService {
       }
     } catch (_) {}
     return hardFallback;
+  }
+
+  Future<void> _ensureWindowsIdle() async {
+    try {
+      await _tts.stop();
+    } catch (_) {}
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+  }
+
+  Future<bool> _speakAndWaitForCompletion(String text) async {
+    if (!_isWindows) {
+      final result = await _tts.speak(text);
+      return _speakResultOk(result);
+    }
+
+    // Windows plays audio asynchronously; waiting on onComplete is unreliable
+    // because stop/cancel events and MediaPlayer callbacks can race.
+    await _ensureWindowsIdle();
+    await _tts.setVolume(1.0);
+
+    var result = await _tts.speak(text);
+    if (!_speakResultOk(result)) {
+      await _ensureWindowsIdle();
+      result = await _tts.speak(text);
+    }
+    return _speakResultOk(result);
   }
 
   Future<bool> speak(
@@ -121,24 +272,24 @@ class TtsService {
         final languageCode = await resolveLanguageCode(lang);
         _resolvedLanguageCode = languageCode;
         await _tts.setSpeechRate(nativeSpeechRate(rate));
-        try {
-          await _tts.setLanguage(languageCode);
-        } catch (_) {
-          _resolvedLanguageCode = 'en-US';
-          await _tts.setLanguage('en-US');
+        if (_isWindows) {
+          await _applyWindowsVoice(languageCode);
+          await _tts.setVolume(1.0);
+        } else {
+          try {
+            await _tts.setLanguage(languageCode);
+          } catch (_) {
+            _resolvedLanguageCode = 'en-US';
+            await _tts.setLanguage('en-US');
+          }
         }
-        final result = await _tts.speak(text.trim());
+
+        final ok = await _speakAndWaitForCompletion(text.trim());
         if (epoch != _speakEpoch) return false;
-        final ok = result == null ||
-            result == 1 ||
-            result == '1' ||
-            result == 'success' ||
-            result == true ||
-            result.toString().toLowerCase() == 'ok';
         if (ok) return true;
-      } catch (_) {
+      } catch (e, st) {
         if (epoch != _speakEpoch) return false;
-        // Retry by recreating the engine in the next loop iteration.
+        debugPrint('TTS speak attempt $attempt failed: $e\n$st');
       }
     }
     if (epoch != _speakEpoch) return false;
@@ -158,6 +309,9 @@ class TtsService {
     _speakEpoch++;
     try {
       await _tts.stop();
+      if (_isWindows) {
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+      }
     } catch (_) {}
   }
 }
