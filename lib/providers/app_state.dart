@@ -22,9 +22,11 @@ import '../data/models/vocabulary_growth_summary.dart';
 import '../core/constants/tts_speed_options.dart';
 import '../core/theme/theme_tokens.dart';
 import '../data/database/database_helper.dart';
+import '../data/default_builtin_content.dart';
 import '../data/models/favorite_model.dart';
 import '../data/models/history_model.dart';
 import '../data/models/enrolled_class_model.dart';
+import '../data/models/class_join_request.dart';
 import '../data/models/linked_child_model.dart';
 import '../data/models/password_reset_outcome.dart';
 import '../data/models/parent_notification.dart';
@@ -69,6 +71,8 @@ enum AppRoute {
   teacherMyClasses,
   teacherMonitoring,
   teacherAlertHistory,
+  teacherRecentLessons,
+  teacherJoinRequests,
 }
 
 class AppState extends ChangeNotifier with WidgetsBindingObserver {
@@ -94,6 +98,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   int _languageRevision = 0;
   double _ttsSpeed = TtsSpeedOptions.defaultSpeed;
   String _selectedCategoryKey = 'feelings';
+  String? _selectedSubcategoryKey;
   bool _drawerOpen = false;
   bool _isSpeaking = false;
   String _speakingText = '';
@@ -112,6 +117,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   List<String> _emergencyContacts = [];
   String _profileCode = '';
   String _welcomeFirstName = '';
+  String _address = '';
+  int? _age;
+  String _gradeLevel = '';
 
   List<CategoryModel> _categories = [];
   List<PhraseModel> _phrases = [];
@@ -122,6 +130,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   int? _selectedChildId;
   List<EnrolledClassModel> _enrolledClasses = [];
   List<({int id, String name, String code})> _teacherClasses = [];
+  List<ClassJoinRequest> _pendingJoinRequests = [];
+  int _joinRequestsRevision = 0;
   int _teacherStudentCount = 0;
   final Map<int, int> _teacherClassStudentCounts = {};
   final Set<String> _deletedClassCodes = {};
@@ -154,6 +164,30 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   int get languageRevision => _languageRevision;
   double get ttsSpeed => _ttsSpeed;
   String get selectedCategoryKey => _selectedCategoryKey;
+  String? get selectedSubcategoryKey => _selectedSubcategoryKey;
+
+  String get effectivePhraseCategoryKey =>
+      _selectedSubcategoryKey ?? _selectedCategoryKey;
+
+  bool get showingSubcategoryPicker =>
+      DefaultBuiltinContent.hasSubcategories(_selectedCategoryKey) &&
+      _selectedSubcategoryKey == null;
+
+  List<CategoryModel> get topLevelCategories =>
+      categories.where((c) => c.isTopLevel).toList();
+
+  List<CategoryModel> get subcategoriesForSelected {
+    return categories
+        .where((c) => c.parentKey == _selectedCategoryKey)
+        .toList();
+  }
+
+  CategoryModel? get selectedTopLevelCategory {
+    for (final c in categories) {
+      if (c.key == _selectedCategoryKey) return c;
+    }
+    return null;
+  }
   bool get drawerOpen => _drawerOpen;
   bool get isSpeaking => _isSpeaking;
   String get speakingText => _speakingText;
@@ -170,6 +204,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   List<String> get emergencyContacts => List.unmodifiable(_emergencyContacts);
+  String get address => _address;
+  int? get age => _age;
+  String get gradeLevel => _gradeLevel;
 
   /// First name from sign-up (For Me welcome). Never uses email.
   String welcomeFirstName(AppLanguage lang) {
@@ -213,6 +250,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   List<EnrolledClassModel> get enrolledClasses => _enrolledClasses;
   List<({int id, String name, String code})> get teacherClasses =>
       _teacherClasses;
+  List<ClassJoinRequest> get pendingJoinRequests => _pendingJoinRequests;
+  int get pendingJoinRequestCount => _pendingJoinRequests.length;
+  int get joinRequestsRevision => _joinRequestsRevision;
   int get teacherStudentCount => _teacherStudentCount;
   int get teacherAlertsRevision => _teacherAlertsRevision;
 
@@ -240,17 +280,22 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   List<PhraseModel> get phrasesForCategory {
     final ownerId = _personalBoardUserId;
     if (ownerId == null) return const [];
+    if (showingSubcategoryPicker) return const [];
     return _phrases
         .where(
           (p) =>
               p.userId == ownerId &&
-              p.categoryKey == _selectedCategoryKey &&
+              p.categoryKey == effectivePhraseCategoryKey &&
               p.isActive,
         )
         .toList();
   }
 
   CategoryModel? get selectedCategory {
+    final key = _selectedSubcategoryKey ?? _selectedCategoryKey;
+    for (final c in categories) {
+      if (c.key == key) return c;
+    }
     for (final c in categories) {
       if (c.key == _selectedCategoryKey) return c;
     }
@@ -545,6 +590,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (needsMonitoringSync) {
       await _syncPendingLearnerActivityToCloud();
       await _startLearnerEnrollmentSync();
+      await _startLearnerJoinRequestSync();
       _startPendingActivitySyncTimer();
     }
 
@@ -658,6 +704,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       (settings['tts_speed'] as num?)?.toDouble() ??
           TtsSpeedOptions.defaultSpeed,
     );
+    _applyProfileExtrasFromSettings(settings);
     await _markLanguageOnboardingDoneIfRestored();
     await _syncLanguagePref();
     await _syncTtsSpeedPref();
@@ -666,6 +713,21 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       _languageRevision++;
     }
     notifyListeners();
+  }
+
+  void _applyProfileExtrasFromSettings(Map<String, dynamic> settings) {
+    _address = (settings['address'] as String?)?.trim() ?? '';
+    final ageRaw = settings['age'];
+    if (ageRaw is int) {
+      _age = ageRaw;
+    } else if (ageRaw is num) {
+      _age = ageRaw.toInt();
+    } else if (ageRaw is String) {
+      _age = int.tryParse(ageRaw.trim());
+    } else {
+      _age = null;
+    }
+    _gradeLevel = (settings['grade_level'] as String?)?.trim() ?? '';
   }
 
   Future<void> _startPersonalBoardSync() async {
@@ -784,6 +846,221 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         }
       },
     );
+    await _startTeacherJoinRequestSync();
+  }
+
+  Future<void> _startTeacherJoinRequestSync() async {
+    if (_user == null || !_user!.isTeacher || !CloudScope.syncMonitoring) return;
+    final teacherFirebaseUid = await _resolveAccountFirebaseUid();
+    if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) return;
+    await _syncJoinRequestsFromCloudForTeacher();
+    await _notificationSync.startTeacherJoinRequestSync(
+      teacherFirebaseUid: teacherFirebaseUid,
+      onChanged: (requests) async {
+        if (_user == null || !_user!.isTeacher) return;
+        try {
+          await _repo.mergeRemoteJoinRequestsForTeacher(
+            teacherUserId: _user!.id,
+            requests: requests,
+          );
+          await _loadPendingJoinRequests();
+          _joinRequestsRevision++;
+          notifyListeners();
+        } catch (e, st) {
+          debugPrint('Teacher join request live sync failed: $e\n$st');
+        }
+      },
+    );
+  }
+
+  Future<void> _startLearnerJoinRequestSync() async {
+    if (_user == null || !_user!.isLearner || !CloudScope.syncMonitoring) return;
+    final uid = await _learnerFirebaseUidForSync();
+    if (uid == null || uid.isEmpty) return;
+    await _notificationSync.startLearnerJoinRequestSync(
+      learnerFirebaseUid: uid,
+      onChanged: (requests) async {
+        if (_user == null || !_user!.isLearner) return;
+        try {
+          await _repo.mergeRemoteJoinRequestsForLearner(
+            learnerUserId: _user!.id,
+            requests: requests,
+          );
+          _enrolledClasses = await _repo.getEnrolledClasses(_user!.id);
+          _bumpLiveDataRevision();
+          notifyListeners();
+        } catch (e, st) {
+          debugPrint('Learner join request live sync failed: $e\n$st');
+        }
+      },
+    );
+  }
+
+  Future<void> _syncJoinRequestsFromCloudForTeacher() async {
+    if (_user == null || !_user!.isTeacher || !_notificationSync.isCloudAvailable) {
+      return;
+    }
+    final teacherFirebaseUid = await _resolveAccountFirebaseUid();
+    if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) return;
+    try {
+      final remote = await _notificationSync.getJoinRequestsForTeacherFromCloud(
+        teacherFirebaseUid,
+      );
+      await _repo.mergeRemoteJoinRequestsForTeacher(
+        teacherUserId: _user!.id,
+        requests: remote,
+      );
+      await _loadPendingJoinRequests();
+    } catch (e, st) {
+      debugPrint('Teacher join request cloud pull failed: $e\n$st');
+    }
+  }
+
+  Future<void> _loadPendingJoinRequests() async {
+    if (_user == null || !_user!.isTeacher) {
+      _pendingJoinRequests = [];
+      return;
+    }
+    _pendingJoinRequests =
+        await _repo.getPendingJoinRequestsForTeacher(_user!.id);
+  }
+
+  Future<void> refreshPendingJoinRequests({
+    bool cloudSyncInBackground = true,
+  }) async {
+    if (_user == null || !_user!.isTeacher) {
+      _pendingJoinRequests = [];
+      notifyListeners();
+      return;
+    }
+    await _loadPendingJoinRequests();
+    _joinRequestsRevision++;
+    notifyListeners();
+    if (cloudSyncInBackground) {
+      unawaited(_syncJoinRequestsFromCloudForTeacher().then((_) async {
+        await _loadPendingJoinRequests();
+        _joinRequestsRevision++;
+        notifyListeners();
+      }));
+    } else {
+      await _syncJoinRequestsFromCloudForTeacher();
+      await _loadPendingJoinRequests();
+      _joinRequestsRevision++;
+      notifyListeners();
+    }
+  }
+
+  Future<String?> acceptJoinRequest(int requestId) async {
+    if (_user == null || !_user!.isTeacher) {
+      return AppStrings.notSignedIn(_language);
+    }
+    final request = await _repo.findJoinRequestById(requestId);
+    if (request == null || !request.isPending) {
+      return AppStrings.somethingWentWrong(_language);
+    }
+    if (request.teacherUserId != _user!.id) {
+      return AppStrings.somethingWentWrong(_language);
+    }
+    if (!await _repo.isLearnerEnrolled(request.learnerUserId, request.classId)) {
+      await _repo.enrollLearnerInClass(request.learnerUserId, request.classId);
+    }
+    final learnerFirebaseUid = request.learnerFirebaseUid?.trim() ?? '';
+    final teacherFirebaseUid =
+        request.teacherFirebaseUid?.trim() ??
+        (await _resolveAccountFirebaseUid()) ??
+        '';
+    if (learnerFirebaseUid.isNotEmpty && teacherFirebaseUid.isNotEmpty) {
+      final teacherName = await _repo.teacherDisplayNameForUserId(_user!.id);
+      await _notificationSync.syncClassEnrollment(
+        classId: request.classId,
+        classCode: request.classCode,
+        className: request.className,
+        teacherFirebaseUid: teacherFirebaseUid,
+        learnerUserId: request.learnerUserId,
+        learnerName: request.learnerName,
+        learnerFirebaseUid: learnerFirebaseUid,
+        teacherName: AppRepository.isGenericAccountName(teacherName)
+            ? null
+            : teacherName,
+      );
+    }
+    final respondedAt = DateTime.now();
+    await _repo.updateJoinRequestStatus(
+      requestId: requestId,
+      status: ClassJoinRequestStatus.accepted,
+      respondedAt: respondedAt,
+    );
+    if (learnerFirebaseUid.isNotEmpty && teacherFirebaseUid.isNotEmpty) {
+      await _notificationSync.syncClassJoinRequest(
+        event: ClassJoinRequestCloudEvent(
+          classId: request.classId,
+          classCode: request.classCode,
+          className: request.className,
+          teacherFirebaseUid: teacherFirebaseUid,
+          teacherUserId: request.teacherUserId,
+          learnerUserId: request.learnerUserId,
+          learnerName: request.learnerName,
+          learnerFirebaseUid: learnerFirebaseUid,
+          status: ClassJoinRequest.statusToString(
+            ClassJoinRequestStatus.accepted,
+          ),
+          requestedAt: request.requestedAt,
+          respondedAt: respondedAt,
+        ),
+      );
+    }
+    await _refreshTeacherClassCounts();
+    await _loadPendingJoinRequests();
+    _joinRequestsRevision++;
+    notifyListeners();
+    return null;
+  }
+
+  Future<String?> rejectJoinRequest(int requestId) async {
+    if (_user == null || !_user!.isTeacher) {
+      return AppStrings.notSignedIn(_language);
+    }
+    final request = await _repo.findJoinRequestById(requestId);
+    if (request == null || !request.isPending) {
+      return AppStrings.somethingWentWrong(_language);
+    }
+    if (request.teacherUserId != _user!.id) {
+      return AppStrings.somethingWentWrong(_language);
+    }
+    final respondedAt = DateTime.now();
+    await _repo.updateJoinRequestStatus(
+      requestId: requestId,
+      status: ClassJoinRequestStatus.rejected,
+      respondedAt: respondedAt,
+    );
+    final learnerFirebaseUid = request.learnerFirebaseUid?.trim() ?? '';
+    final teacherFirebaseUid =
+        request.teacherFirebaseUid?.trim() ??
+        (await _resolveAccountFirebaseUid()) ??
+        '';
+    if (learnerFirebaseUid.isNotEmpty && teacherFirebaseUid.isNotEmpty) {
+      await _notificationSync.syncClassJoinRequest(
+        event: ClassJoinRequestCloudEvent(
+          classId: request.classId,
+          classCode: request.classCode,
+          className: request.className,
+          teacherFirebaseUid: teacherFirebaseUid,
+          teacherUserId: request.teacherUserId,
+          learnerUserId: request.learnerUserId,
+          learnerName: request.learnerName,
+          learnerFirebaseUid: learnerFirebaseUid,
+          status: ClassJoinRequest.statusToString(
+            ClassJoinRequestStatus.rejected,
+          ),
+          requestedAt: request.requestedAt,
+          respondedAt: respondedAt,
+        ),
+      );
+    }
+    await _loadPendingJoinRequests();
+    _joinRequestsRevision++;
+    notifyListeners();
+    return null;
   }
 
   Future<void> _syncTeacherAlertsFromCloud() async {
@@ -900,9 +1177,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _favorites = [];
     _history = [];
     _selectedCategoryKey = 'feelings';
+    _selectedSubcategoryKey = null;
+    _selectedSubcategoryKey = null;
     _profileCode = '';
     _enrolledClasses = [];
     _emergencyContacts = [];
+    _address = '';
+    _age = null;
+    _gradeLevel = '';
   }
 
   void _resetAccountSession() {
@@ -911,6 +1193,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _notifications = [];
     _selectedChildId = null;
     _teacherClasses = [];
+    _pendingJoinRequests = [];
+    _joinRequestsRevision = 0;
     _teacherStudentCount = 0;
     _teacherClassStudentCounts.clear();
     _deletedClassCodes.clear();
@@ -948,6 +1232,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     } else {
       _emergencyContacts = [];
     }
+    _applyProfileExtrasFromSettings(settings);
 
     if (_user!.isLearner) {
       _profileCode = await _repo.ensureLearnerProfileCode(_user!.id);
@@ -1060,6 +1345,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         profileCode: profileCode,
         language: AppStrings.langCode(_language),
         ttsSpeed: _ttsSpeed,
+        address: _address.isEmpty ? null : _address,
+        age: _age,
+        gradeLevel: _gradeLevel.isEmpty ? null : _gradeLevel,
       ),
     );
 
@@ -1100,6 +1388,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           ? cloudLanguage
           : profile.language,
       ttsSpeed: cloudSource.ttsSpeed ?? profile.ttsSpeed,
+      address: (profile.address?.trim().isNotEmpty ?? false)
+          ? profile.address
+          : cloudSource.address,
+      age: profile.age ?? cloudSource.age,
+      gradeLevel: (profile.gradeLevel?.trim().isNotEmpty ?? false)
+          ? profile.gradeLevel
+          : cloudSource.gradeLevel,
     );
   }
 
@@ -1184,6 +1479,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           (settings['tts_speed'] as num?)?.toDouble() ??
               TtsSpeedOptions.defaultSpeed,
         );
+        _applyProfileExtrasFromSettings(settings);
         await _markLanguageOnboardingDoneIfRestored();
         await _syncLanguagePref();
         await _syncTtsSpeedPref();
@@ -1347,7 +1643,25 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void selectCategory(String key) {
-    _selectedCategoryKey = key;
+    if (key == _selectedCategoryKey &&
+        DefaultBuiltinContent.hasSubcategories(key) &&
+        _selectedSubcategoryKey != null) {
+      _selectedSubcategoryKey = null;
+    } else {
+      _selectedCategoryKey = key;
+      _selectedSubcategoryKey = null;
+    }
+    notifyListeners();
+  }
+
+  void selectSubcategory(String key) {
+    _selectedSubcategoryKey = key;
+    notifyListeners();
+  }
+
+  void clearSubcategorySelection() {
+    if (_selectedSubcategoryKey == null) return;
+    _selectedSubcategoryKey = null;
     notifyListeners();
   }
 
@@ -1903,12 +2217,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<String?> addPhrase(String text, {String? imagePath}) async {
     if (_user == null || text.trim().isEmpty) return null;
+    if (showingSubcategoryPicker) return null;
     final savedImagePath = await persistPhraseImageIfNeeded(imagePath);
     final stored = text.trim();
     await _repo.addPhrase(
       userId: _user!.id,
       text: stored,
-      categoryKey: _selectedCategoryKey,
+      categoryKey: effectivePhraseCategoryKey,
       imagePath: savedImagePath,
     );
     await _refreshPersonalBoard();
@@ -3074,6 +3389,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
     await _loadTeacherClasses();
+    await _loadPendingJoinRequests();
     await _refreshTeacherClassCounts();
     notifyListeners();
 
@@ -3084,6 +3400,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
     await _syncTeacherClassesFromCloud();
     await _loadTeacherClasses();
+    await _loadPendingJoinRequests();
     await _refreshTeacherClassCounts();
     notifyListeners();
   }
@@ -3288,6 +3605,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<List<TeacherRecentLesson>> getTeacherRecentLessons({int limit = 8}) async {
+    if (_user == null || !_user!.isTeacher) return [];
+    return _repo.getRecentLessonsForTeacher(
+      teacherUserId: _user!.id,
+      limit: limit,
+    );
+  }
+
+  Future<List<TeacherRecentLesson>> getTeacherLessonHistory({int limit = 100}) async {
     if (_user == null || !_user!.isTeacher) return [];
     return _repo.getRecentLessonsForTeacher(
       teacherUserId: _user!.id,
@@ -4305,16 +4630,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       }
     }
     final classId = classRow['id'] as int;
-    final alreadyEnrolled =
-        await _repo.isLearnerEnrolled(_user!.id, classId);
-    if (!alreadyEnrolled) {
-      await _repo.enrollLearnerInClass(_user!.id, classId);
-    }
-    // Always pull lessons from cloud (even if already enrolled).
-    await _syncClassLessonsFromCloud(classId: classId, classCode: normalized);
-    if (alreadyEnrolled) {
-      await _loadEnrolledClasses();
+    if (await _repo.isLearnerEnrolled(_user!.id, classId)) {
       return AppStrings.classAlreadyEnrolled(_language);
+    }
+    final existingRequest = await _repo.findJoinRequest(
+      learnerUserId: _user!.id,
+      classId: classId,
+    );
+    if (existingRequest != null && existingRequest.isPending) {
+      return AppStrings.joinRequestAlreadyPending(_language);
     }
     final learnerFirebaseUid =
         _user!.firebaseUid ?? FirebaseService.instance.currentUid;
@@ -4323,40 +4647,47 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         (teacherUserId == null
             ? null
             : await _repo.getFirebaseUidForUser(teacherUserId));
-    if (learnerFirebaseUid != null &&
-        learnerFirebaseUid.isNotEmpty &&
-        teacherFirebaseUid != null &&
-        teacherFirebaseUid.isNotEmpty) {
-      String? enrollmentTeacherName;
-      if (teacherUserId != null) {
-        final resolved = await _resolveCloudTeacherDisplayName(
-          remoteClass: remoteClass,
-        );
-        if (resolved.isNotEmpty) {
-          enrollmentTeacherName = resolved;
-        } else {
-          final localName =
-              await _repo.teacherDisplayNameForUserId(teacherUserId);
-          if (!AppRepository.isGenericAccountName(localName)) {
-            enrollmentTeacherName = localName;
-          }
-        }
-      }
-      await _notificationSync.syncClassEnrollment(
+    if (learnerFirebaseUid == null ||
+        learnerFirebaseUid.isEmpty ||
+        teacherFirebaseUid == null ||
+        teacherFirebaseUid.isEmpty ||
+        teacherUserId == null) {
+      return AppStrings.signInOnlineToJoinClass(_language);
+    }
+    if (!_notificationSync.isCloudAvailable) {
+      return AppStrings.signInOnlineToJoinClass(_language);
+    }
+    final now = DateTime.now();
+    final className = (classRow['class_name'] as String?) ?? '';
+    await _repo.upsertJoinRequest(
+      learnerUserId: _user!.id,
+      classId: classId,
+      classCode: normalized,
+      className: className,
+      teacherUserId: teacherUserId,
+      learnerName: _user!.fullName,
+      status: ClassJoinRequestStatus.pending,
+      requestedAt: now,
+      learnerFirebaseUid: learnerFirebaseUid,
+      teacherFirebaseUid: teacherFirebaseUid,
+      remoteId: '${normalized}_$learnerFirebaseUid',
+    );
+    await _notificationSync.syncClassJoinRequest(
+      event: ClassJoinRequestCloudEvent(
         classId: classId,
-        classCode: (classRow['class_code'] as String?) ?? '',
-        className: (classRow['class_name'] as String?) ?? '',
+        classCode: normalized,
+        className: className,
         teacherFirebaseUid: teacherFirebaseUid,
+        teacherUserId: teacherUserId,
         learnerUserId: _user!.id,
         learnerName: _user!.fullName,
         learnerFirebaseUid: learnerFirebaseUid,
-        teacherName: enrollmentTeacherName?.isNotEmpty == true
-            ? enrollmentTeacherName
-            : null,
-      );
-    }
-    await _loadEnrolledClasses();
-    await _reconcileClassContentLiveSync();
+        status: ClassJoinRequest.statusToString(
+          ClassJoinRequestStatus.pending,
+        ),
+        requestedAt: now,
+      ),
+    );
     return null;
   }
 
@@ -5145,6 +5476,31 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           contacts: cleaned,
         );
       }
+    }
+    notifyListeners();
+    return null;
+  }
+
+  Future<String?> updateProfileExtras({
+    required String address,
+    int? age,
+    required String gradeLevel,
+  }) async {
+    if (_user == null) return AppStrings.notSignedIn(_language);
+    await _repo.updateUserSettings(
+      _user!.id,
+      address: address,
+      age: age,
+      clearAge: age == null,
+      gradeLevel: gradeLevel,
+    );
+    _address = address.trim();
+    _age = age;
+    _gradeLevel = gradeLevel.trim();
+    if (CloudScope.syncMonitoring) {
+      await FirebaseService.instance.initialize();
+      await _notificationSync.initialize();
+      await _syncUserProfileToCloud();
     }
     notifyListeners();
     return null;

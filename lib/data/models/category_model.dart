@@ -7,6 +7,7 @@ class CategoryModel {
     required this.key,
     required this.name,
     this.iconKey = 'custom',
+    this.parentKey,
   });
 
   static const _builtinIconKeys = <String>{
@@ -14,9 +15,16 @@ class CategoryModel {
     'animals',
     'colors',
     'drinks',
+    'drinks_cold',
+    'drinks_dairy',
+    'drinks_hot',
     'family',
     'feelings',
     'food',
+    'food_dessert',
+    'food_fruits',
+    'food_meals',
+    'food_vegetables',
     'greetings',
     'health_safety',
     'hobbies',
@@ -33,6 +41,9 @@ class CategoryModel {
   final String key;
   final String name;
   final String iconKey;
+  final String? parentKey;
+
+  bool get isTopLevel => parentKey == null || parentKey!.trim().isEmpty;
 
   String get resolvedIconKey {
     if (iconKey != 'custom' && _builtinIconKeys.contains(iconKey)) {
@@ -48,8 +59,22 @@ class CategoryModel {
         return Icons.sentiment_satisfied_alt_rounded;
       case 'food':
         return Icons.restaurant_rounded;
+      case 'food_fruits':
+        return Icons.apple_rounded;
+      case 'food_vegetables':
+        return Icons.grass_rounded;
+      case 'food_dessert':
+        return Icons.cake_rounded;
+      case 'food_meals':
+        return Icons.ramen_dining_rounded;
       case 'drinks':
         return Icons.local_cafe_rounded;
+      case 'drinks_hot':
+        return Icons.coffee_rounded;
+      case 'drinks_cold':
+        return Icons.ac_unit_rounded;
+      case 'drinks_dairy':
+        return Icons.local_drink_rounded;
       case 'activities':
         return Icons.celebration_rounded;
       case 'animals':
@@ -82,12 +107,29 @@ class CategoryModel {
   }
 
   Color get accentColor {
-    switch (resolvedIconKey) {
+    final paletteKey = _builtinIconKeys.contains(key)
+        ? key
+        : (_builtinIconKeys.contains(resolvedIconKey) ? resolvedIconKey : key);
+    switch (paletteKey) {
       case 'feelings':
         return const Color(0xFF4A90D9);
       case 'food':
         return const Color(0xFFE85D5D);
+      case 'food_fruits':
+        return const Color(0xFF43A047);
+      case 'food_vegetables':
+        return const Color(0xFF7CB342);
+      case 'food_dessert':
+        return const Color(0xFFEC407A);
+      case 'food_meals':
+        return const Color(0xFFE85D5D);
       case 'drinks':
+        return const Color(0xFF9B59D4);
+      case 'drinks_hot':
+        return const Color(0xFF8D6E63);
+      case 'drinks_cold':
+        return const Color(0xFF29B6F6);
+      case 'drinks_dairy':
         return const Color(0xFF9B59D4);
       case 'activities':
         return const Color(0xFFF5B942);
@@ -126,6 +168,7 @@ class CategoryModel {
         'category_key': key,
         'category_name': name,
         'icon_key': iconKey,
+        if (parentKey != null) 'parent_category_key': parentKey,
       };
 
   factory CategoryModel.fromMap(Map<String, Object?> map) {
@@ -135,6 +178,7 @@ class CategoryModel {
       key: map['category_key'] as String,
       name: map['category_name'] as String,
       iconKey: (map['icon_key'] as String?) ?? 'custom',
+      parentKey: map['parent_category_key'] as String?,
     );
   }
 }

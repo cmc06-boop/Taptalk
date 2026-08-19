@@ -37,8 +37,8 @@ class _ClassesScreenState extends State<ClassesScreen> {
     app.notifyEnrolledClassesChanged();
     await TapTalkResultDialog.showSuccess(
       context,
-      title: AppStrings.classEnrolledTitle(lang),
-      message: AppStrings.classEnrolled(lang),
+      title: AppStrings.joinRequestSentTitle(lang),
+      message: AppStrings.joinRequestSent(lang),
     );
   }
 

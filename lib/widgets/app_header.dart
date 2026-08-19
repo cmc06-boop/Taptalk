@@ -20,6 +20,7 @@ class AppHeader extends StatelessWidget {
     this.showAlerts = false,
     this.showBackButton = false,
     this.notificationBadgeCount = 0,
+    this.trailingAction,
   });
 
   final String title;
@@ -34,6 +35,7 @@ class AppHeader extends StatelessWidget {
   final bool showAlerts;
   final bool showBackButton;
   final int notificationBadgeCount;
+  final Widget? trailingAction;
 
   @override
   Widget build(BuildContext context) {
@@ -132,6 +134,8 @@ class AppHeader extends StatelessWidget {
               accent: theme.bgAccent,
               filled: true,
             )
+          else if (trailingAction != null)
+            trailingAction!
           else if (showProfile)
             _CircleIconButton(
               icon: Icons.person_outline_rounded,

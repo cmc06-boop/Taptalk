@@ -12,6 +12,7 @@ import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/password_strength_hint.dart';
 import '../widgets/panel_card.dart';
+import '../widgets/code_qr_sheet.dart';
 import '../widgets/taptalk_result_dialog.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -23,9 +24,15 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   final _nameController = TextEditingController();
+  final _addressController = TextEditingController();
+  final _ageController = TextEditingController();
+  final _gradeLevelController = TextEditingController();
   final _emergency1Controller = TextEditingController();
   final _emergency2Controller = TextEditingController();
   String _savedName = '';
+  String _savedAddress = '';
+  String _savedAge = '';
+  String _savedGradeLevel = '';
   List<String> _savedEmergencyContacts = const [];
   bool _showSecondEmergency = false;
   bool _editing = false;
@@ -34,6 +41,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _addressController.dispose();
+    _ageController.dispose();
+    _gradeLevelController.dispose();
     _emergency1Controller.dispose();
     _emergency2Controller.dispose();
     super.dispose();
@@ -41,17 +51,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _syncFromUser(AppState app) {
     final name = app.user?.fullName ?? '';
+    final address = app.address;
+    final age = app.age?.toString() ?? '';
+    final gradeLevel = app.gradeLevel;
     final isLearner = app.user?.isLearner ?? false;
     final contacts = isLearner ? app.emergencyContacts : const <String>[];
-    if (_savedName == name && _savedEmergencyContacts.join('|') == contacts.join('|')) {
+    if (_savedName == name &&
+        _savedAddress == address &&
+        _savedAge == age &&
+        _savedGradeLevel == gradeLevel &&
+        _savedEmergencyContacts.join('|') == contacts.join('|')) {
       return;
     }
     _savedName = name;
+    _savedAddress = address;
+    _savedAge = age;
+    _savedGradeLevel = gradeLevel;
     _savedEmergencyContacts = List.from(contacts);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (_nameController.text != name) {
         _nameController.text = name;
+      }
+      if (_addressController.text != address) {
+        _addressController.text = address;
+      }
+      if (_ageController.text != age) {
+        _ageController.text = age;
+      }
+      if (_gradeLevelController.text != gradeLevel) {
+        _gradeLevelController.text = gradeLevel;
       }
       if (!isLearner) return;
       final first = contacts.isNotEmpty ? contacts.first : '';
@@ -90,6 +119,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _cancelEdits() {
     _nameController.text = _savedName;
+    _addressController.text = _savedAddress;
+    _ageController.text = _savedAge;
+    _gradeLevelController.text = _savedGradeLevel;
     _emergency1Controller.text = _savedEmergencyContacts.isNotEmpty ? _savedEmergencyContacts[0] : '';
     _emergency2Controller.text = _savedEmergencyContacts.length > 1 ? _savedEmergencyContacts[1] : '';
     _showSecondEmergency = _savedEmergencyContacts.length > 1;
@@ -101,6 +133,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final name = _nameController.text.trim();
     final email = (app.user?.email ?? '').trim();
     final isLearner = app.user?.isLearner ?? false;
+    final isParent = app.user?.isParent ?? false;
+    final isTeacher = app.user?.isTeacher ?? false;
     if (name.isEmpty || email.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(AppStrings.fillAllFields(lang))),
@@ -115,8 +149,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     final contacts = isLearner ? _draftEmergencyContacts : const <String>[];
+    final address = _addressController.text.trim();
+    final ageRaw = _ageController.text.trim();
+    final gradeLevel = _gradeLevelController.text.trim();
+    int? age;
+    if (ageRaw.isNotEmpty) {
+      age = int.tryParse(ageRaw);
+      if (age == null || age < 1 || age > 120) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppStrings.invalidAge(lang))),
+        );
+        return;
+      }
+    }
     setState(() => _saving = true);
     final err = await app.updateProfileName(_nameController.text);
+    if (err == null && (isLearner || isParent || isTeacher)) {
+      await app.updateProfileExtras(
+        address: address,
+        age: age,
+        gradeLevel: isLearner ? gradeLevel : '',
+      );
+    }
     if (err == null && isLearner) {
       await app.updateEmergencyContacts(contacts);
     }
@@ -131,6 +185,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
     _savedName = _nameController.text.trim();
+    _savedAddress = address;
+    _savedAge = age?.toString() ?? '';
+    _savedGradeLevel = isLearner ? gradeLevel : '';
     if (isLearner) {
       _savedEmergencyContacts = List.from(contacts);
     }
@@ -286,6 +343,63 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   value: user?.email ?? '',
                   theme: theme,
                 ),
+                if ((user?.isLearner ?? false) ||
+                    (user?.isParent ?? false) ||
+                    (user?.isTeacher ?? false)) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  _ProfileField(
+                    label: AppStrings.address(lang),
+                    controller: _addressController,
+                    theme: theme,
+                    enabled: _editing,
+                    keyboardType: TextInputType.streetAddress,
+                    onChanged: _editing ? (_) => setState(() {}) : null,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  if (user?.isLearner ?? false)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: _ProfileField(
+                            label: AppStrings.age(lang),
+                            controller: _ageController,
+                            theme: theme,
+                            enabled: _editing,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                              LengthLimitingTextInputFormatter(3),
+                            ],
+                            onChanged: _editing ? (_) => setState(() {}) : null,
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          child: _ProfileField(
+                            label: AppStrings.gradeLevel(lang),
+                            controller: _gradeLevelController,
+                            theme: theme,
+                            enabled: _editing,
+                            onChanged: _editing ? (_) => setState(() {}) : null,
+                          ),
+                        ),
+                      ],
+                    )
+                  else
+                    _ProfileField(
+                      label: AppStrings.age(lang),
+                      controller: _ageController,
+                      theme: theme,
+                      enabled: _editing,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(3),
+                      ],
+                      onChanged: _editing ? (_) => setState(() {}) : null,
+                    ),
+                ],
                 if (user?.isLearner ?? false) ...[
                   const SizedBox(height: AppSpacing.md),
                   Text(
@@ -360,6 +474,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                         ),
                       ),
+                      OutlinedButton(
+                        onPressed: app.profileCode.isEmpty
+                            ? null
+                            : () => CodeQrSheet.show(
+                                  context,
+                                  title: AppStrings.showQrCode(lang),
+                                  code: app.profileCode,
+                                  subtitle: AppStrings.profileCodeHint(lang),
+                                  shareMessage: AppStrings.shareProfileCodeMessage(
+                                    lang,
+                                    app.profileCode,
+                                  ),
+                                ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: theme.textMain,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.sm,
+                            vertical: AppSpacing.sm,
+                          ),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          side: BorderSide(
+                            color: theme.textMain.withValues(alpha: 0.2),
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.qr_code_2_rounded,
+                          size: 18,
+                          color: theme.textMain.withValues(alpha: 0.85),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
                       FilledButton(
                         onPressed: app.profileCode.isEmpty
                             ? null
@@ -734,6 +883,7 @@ class _ProfileField extends StatelessWidget {
     this.hintText,
     this.showLabel = true,
     this.enabled = true,
+    this.inputFormatters,
   });
 
   final String label;
@@ -746,6 +896,7 @@ class _ProfileField extends StatelessWidget {
   final String? hintText;
   final bool showLabel;
   final bool enabled;
+  final List<TextInputFormatter>? inputFormatters;
 
   @override
   Widget build(BuildContext context) {
@@ -769,6 +920,7 @@ class _ProfileField extends StatelessWidget {
           obscureText: obscure,
           onChanged: onChanged,
           keyboardType: keyboardType,
+          inputFormatters: inputFormatters,
           style: GoogleFonts.poppins(
             fontSize: 14,
             fontWeight: FontWeight.w400,

@@ -16,6 +16,8 @@ import 'screens/teacher_alert_history_screen.dart';
 import 'screens/teacher_dashboard_screen.dart';
 import 'screens/teacher_monitoring_screen.dart';
 import 'screens/teacher_my_classes_screen.dart';
+import 'screens/teacher_join_requests_screen.dart';
+import 'screens/teacher_recent_lessons_screen.dart';
 import 'screens/forgot_password_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/profile_screen.dart';
@@ -110,10 +112,14 @@ class TapTalkApp extends StatelessWidget {
         return const TeacherDashboardScreen();
       case AppRoute.teacherMyClasses:
         return const TeacherMyClassesScreen();
+      case AppRoute.teacherJoinRequests:
+        return const TeacherJoinRequestsScreen();
       case AppRoute.teacherMonitoring:
         return const TeacherMonitoringScreen();
       case AppRoute.teacherAlertHistory:
         return const TeacherAlertHistoryScreen();
+      case AppRoute.teacherRecentLessons:
+        return const TeacherRecentLessonsScreen();
     }
   }
 }

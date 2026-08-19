@@ -16,6 +16,7 @@ import '../widgets/class_color_card.dart';
 import '../widgets/inline_dropdown_field.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/teacher_alert_card.dart';
+import 'lesson_editor_screen.dart';
 
 class TeacherDashboardScreen extends StatefulWidget {
   const TeacherDashboardScreen({super.key});
@@ -146,6 +147,29 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
   int _studentCountForFilter(AppState app, Map<String, int> subjectStudentCounts) {
     if (_selectedSubject == null) return app.teacherStudentCount;
     return subjectStudentCounts[_selectedSubject] ?? 0;
+  }
+
+  void _openRecentLesson(TeacherRecentLesson lesson) {
+    final app = context.read<AppState>();
+    final teacherClass = app.teacherClasses.where((c) => c.id == lesson.classId);
+    if (teacherClass.isEmpty) return;
+    final classInfo = teacherClass.first;
+
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute<void>(
+            builder: (_) => LessonEditorScreen(
+              lessonId: lesson.id,
+              classId: lesson.classId,
+              classCode: classInfo.code,
+              lessonTitle: lesson.title,
+              className: lesson.className,
+            ),
+          ),
+        )
+        .then((_) {
+          if (mounted) _load();
+        });
   }
 
   @override
@@ -297,7 +321,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
               theme: theme,
               title: AppStrings.recentLessons(lang),
               actionLabel: AppStrings.viewAll(lang),
-              onAction: () => app.setRoute(AppRoute.teacherMyClasses),
+              onAction: () => app.setRoute(AppRoute.teacherRecentLessons),
             ),
             if (_loadingFeed)
               const SizedBox.shrink()
@@ -321,10 +345,10 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                       classId: lesson.classId,
                       title: lesson.title,
                       badge: lesson.className,
-                      subtitle:
-                          '${AppStrings.phrasesCount(lesson.phraseCount, lang)} · ${AppStrings.timeAgo(lesson.createdAt, lang)}',
+                      subtitle: AppStrings.phrasesCount(lesson.phraseCount, lang),
                       icon: Icons.auto_stories_rounded,
                       layout: ClassColorCardLayout.tile,
+                      onTap: () => _openRecentLesson(lesson),
                     );
                   },
                 ),

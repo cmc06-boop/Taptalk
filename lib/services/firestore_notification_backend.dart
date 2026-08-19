@@ -10,6 +10,7 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   static const String collectionName = 'parent_notifications';
   static const String linkCollectionName = 'parent_child_links';
   static const String enrollmentCollectionName = 'class_enrollments_cloud';
+  static const String joinRequestCollectionName = 'class_join_requests_cloud';
   static const String teacherClassCollectionName = 'teacher_classes_cloud';
   static const String learnerProfileCollectionName = 'learner_profiles';
   static const String userProfileCollectionName = 'user_profiles';
@@ -147,6 +148,85 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
         .collection(enrollmentCollectionName)
         .doc(docId)
         .delete();
+  }
+
+  @override
+  Future<void> upsertClassJoinRequest(ClassJoinRequestCloudEvent event) async {
+    if (!isAvailable ||
+        event.classCode.trim().isEmpty ||
+        event.learnerFirebaseUid.trim().isEmpty) {
+      return;
+    }
+    final classCode = AppRepository.normalizeClassCode(event.classCode);
+    final learnerUid = event.learnerFirebaseUid.trim();
+    final docId = '${classCode}_$learnerUid';
+    final payload = event.toFirestoreMap()
+      ..['classCode'] = classCode
+      ..['requestedAt'] = Timestamp.fromDate(event.requestedAt.toUtc());
+    if (event.respondedAt != null) {
+      payload['respondedAt'] =
+          Timestamp.fromDate(event.respondedAt!.toUtc());
+    }
+    await FirebaseFirestore.instance
+        .collection(joinRequestCollectionName)
+        .doc(docId)
+        .set(payload);
+  }
+
+  @override
+  Future<List<RemoteClassJoinRequest>> getClassJoinRequestsForTeacher(
+    String teacherFirebaseUid,
+  ) async {
+    if (!isAvailable || teacherFirebaseUid.trim().isEmpty) return const [];
+    final snapshot = await FirebaseFirestore.instance
+        .collection(joinRequestCollectionName)
+        .where('teacherFirebaseUid', isEqualTo: teacherFirebaseUid.trim())
+        .get();
+    return snapshot.docs.map(_joinRequestFromDocument).toList();
+  }
+
+  @override
+  Future<List<RemoteClassJoinRequest>> getClassJoinRequestsForLearner(
+    String learnerFirebaseUid,
+  ) async {
+    if (!isAvailable || learnerFirebaseUid.trim().isEmpty) return const [];
+    final snapshot = await FirebaseFirestore.instance
+        .collection(joinRequestCollectionName)
+        .where('learnerFirebaseUid', isEqualTo: learnerFirebaseUid.trim())
+        .get();
+    return snapshot.docs.map(_joinRequestFromDocument).toList();
+  }
+
+  @override
+  Stream<List<RemoteClassJoinRequest>> watchClassJoinRequestsForTeacher(
+    String teacherFirebaseUid,
+  ) {
+    if (!isAvailable || teacherFirebaseUid.trim().isEmpty) {
+      return const Stream.empty();
+    }
+    return FirebaseFirestore.instance
+        .collection(joinRequestCollectionName)
+        .where('teacherFirebaseUid', isEqualTo: teacherFirebaseUid.trim())
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs.map(_joinRequestFromDocument).toList(),
+        );
+  }
+
+  @override
+  Stream<List<RemoteClassJoinRequest>> watchClassJoinRequestsForLearner(
+    String learnerFirebaseUid,
+  ) {
+    if (!isAvailable || learnerFirebaseUid.trim().isEmpty) {
+      return const Stream.empty();
+    }
+    return FirebaseFirestore.instance
+        .collection(joinRequestCollectionName)
+        .where('learnerFirebaseUid', isEqualTo: learnerFirebaseUid.trim())
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs.map(_joinRequestFromDocument).toList(),
+        );
   }
 
   @override
@@ -564,6 +644,17 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
         profile.profileCode!,
       );
     }
+    final address = profile.address?.trim();
+    if (address != null && address.isNotEmpty) {
+      payload['address'] = address;
+    }
+    if (profile.age != null) {
+      payload['age'] = profile.age;
+    }
+    final gradeLevel = profile.gradeLevel?.trim();
+    if (gradeLevel != null && gradeLevel.isNotEmpty) {
+      payload['gradeLevel'] = gradeLevel;
+    }
     await FirebaseFirestore.instance
         .collection(userProfileCollectionName)
         .doc(profile.firebaseUid.trim())
@@ -648,6 +739,9 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       profileCode: data['profileCode'] as String?,
       language: data['language'] as String?,
       ttsSpeed: (data['ttsSpeed'] as num?)?.toDouble(),
+      address: data['address'] as String?,
+      age: (data['age'] as num?)?.toInt(),
+      gradeLevel: data['gradeLevel'] as String?,
     );
   }
 
@@ -1163,6 +1257,28 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     if (raw is Timestamp) return raw.toDate().toLocal();
     if (raw is String) return DateTime.parse(raw).toLocal();
     return DateTime.now();
+  }
+
+  RemoteClassJoinRequest _joinRequestFromDocument(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    final data = doc.data();
+    return RemoteClassJoinRequest(
+      classId: data['classId'] as int? ?? 0,
+      classCode: (data['classCode'] as String?) ?? '',
+      className: (data['className'] as String?) ?? '',
+      teacherFirebaseUid: (data['teacherFirebaseUid'] as String?) ?? '',
+      teacherUserId: data['teacherUserId'] as int? ?? 0,
+      learnerUserId: data['learnerUserId'] as int? ?? 0,
+      learnerName: (data['learnerName'] as String?) ?? '',
+      learnerFirebaseUid: (data['learnerFirebaseUid'] as String?) ?? '',
+      status: (data['status'] as String?) ?? 'pending',
+      requestedAt: _readTimestamp(data['requestedAt']),
+      respondedAt: data['respondedAt'] == null
+          ? null
+          : _readTimestamp(data['respondedAt']),
+      remoteId: doc.id,
+    );
   }
 
   RemoteClassEnrollment _enrollmentFromDocument(

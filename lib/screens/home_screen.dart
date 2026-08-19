@@ -11,6 +11,7 @@ import '../core/utils/speak_feedback.dart';
 import '../providers/app_state.dart';
 import '../services/stt_service.dart';
 import '../widgets/add_category_dialog.dart';
+import '../widgets/category_grid_card.dart';
 import '../widgets/category_icon.dart';
 import '../widgets/edit_phrase_dialog.dart';
 import '../widgets/learner_scaffold.dart';
@@ -159,6 +160,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final lang = app.language;
     final userName = app.welcomeFirstName(lang);
     final denseGrid = AppSpacing.phraseGridIsDense(context);
+    final categoryColumns = AppSpacing.categoryGridColumns(context);
+    final parentCategory = app.selectedTopLevelCategory;
+    final parentCategoryLabel = parentCategory != null
+        ? app.localizedCategoryName(parentCategory)
+        : AppStrings.customCategory(lang);
     final highlightController = _textController;
     if (highlightController is HighlightingTextController) {
       final (start, end) =
@@ -249,10 +255,10 @@ class _HomeScreenState extends State<HomeScreen> {
               controller: _categoryScroll,
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              itemCount: app.categories.length,
+              itemCount: app.topLevelCategories.length,
               separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
               itemBuilder: (context, i) {
-                final cat = app.categories[i];
+                final cat = app.topLevelCategories[i];
                 final active = cat.key == app.selectedCategoryKey;
                 return FilterChip(
                   key: ValueKey('cat_${cat.key}_${lang.name}_${app.languageRevision}'),
@@ -426,7 +432,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ),
                           FilledButton.icon(
-                            onPressed: () async {
+                            onPressed: app.showingSubcategoryPicker
+                                ? null
+                                : () async {
                               final text = _textController.text.trim();
                               if (text.isEmpty) return;
                               final image = _attachedImagePath;
@@ -487,70 +495,160 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-          PhraseSectionHeader(
-            category: app.selectedCategory,
-            categoryLabel: app.selectedCategory != null
-                ? app.localizedCategoryName(app.selectedCategory!)
-                : AppStrings.customCategory(lang),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-            child: GridView.builder(
-              key: ValueKey('phrases_${lang.name}_${app.languageRevision}_${app.selectedCategoryKey}'),
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: AppSpacing.phraseGridDelegate(context),
-              itemCount: app.phrasesForCategory.length,
-              itemBuilder: (context, i) {
-                final phrase = app.phrasesForCategory[i];
-                return PhraseCard(
-                  key: ValueKey('phrase_${phrase.id}_${lang.name}_${app.languageRevision}'),
-                  phrase: phrase,
-                  dense: denseGrid,
-                  isFavorite: app.isFavorite(phrase),
-                  onTap: () => _appendPhrase(app.localizedPhraseText(phrase)),
-                  onSpeak: () =>
-                      _appendPhrase(app.localizedPhraseText(phrase), speak: true),
-                  onFavorite: () => app.toggleFavorite(phrase),
-                  onEdit: () async {
-                    if (phrase.isBuiltin) return;
-                    final result = await EditPhraseDialog.show(
-                      context,
-                      initialText: app.localizedPhraseText(phrase),
-                      initialImagePath: phrase.imagePath,
-                      title: AppStrings.editPhrase(lang),
-                    );
-                    if (result == null || !mounted) return;
-                    await app.updatePhrase(
-                      phrase,
-                      text: result.text,
-                      imagePath: result.imagePath,
-                      clearImage: result.clearImage,
-                    );
-                  },
-                  onDelete: () async {
-                    final confirm = await showDialog<bool>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        content: Text(AppStrings.deletePhrase(lang)),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx, false),
-                            child: Text(AppStrings.cancel(lang)),
-                          ),
-                          FilledButton(
-                            onPressed: () => Navigator.pop(ctx, true),
-                            child: Text(AppStrings.delete(lang)),
-                          ),
-                        ],
-                      ),
-                    );
-                    if (confirm == true) await app.deletePhrase(phrase);
-                  },
-                );
-              },
+          if (app.showingSubcategoryPicker) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.md,
+                AppSpacing.lg,
+                AppSpacing.xs,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    parentCategoryLabel,
+                    style: GoogleFonts.poppins(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: theme.textMain,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    AppStrings.chooseSubcategoryHint(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: theme.textMain.withValues(alpha: 0.75),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+              child: GridView.builder(
+                key: ValueKey(
+                  'subcats_${lang.name}_${app.languageRevision}_${app.selectedCategoryKey}',
+                ),
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: categoryColumns,
+                  mainAxisSpacing: AppSpacing.sm,
+                  crossAxisSpacing: AppSpacing.sm,
+                  childAspectRatio: categoryColumns >= 5 ? 0.92 : 0.82,
+                ),
+                itemCount: app.subcategoriesForSelected.length,
+                itemBuilder: (context, i) {
+                  final sub = app.subcategoriesForSelected[i];
+                  return CategoryGridCard(
+                    category: sub,
+                    label: app.localizedCategoryName(sub),
+                    theme: theme,
+                    selected: false,
+                    onTap: () => app.selectSubcategory(sub.key),
+                  );
+                },
+              ),
+            ),
+          ] else ...[
+            if (app.selectedSubcategoryKey != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  AppSpacing.md,
+                  AppSpacing.lg,
+                  0,
+                ),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: app.clearSubcategorySelection,
+                    icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                    label: Text(AppStrings.backToSubcategories(lang)),
+                    style: TextButton.styleFrom(
+                      foregroundColor: theme.bgAccent,
+                      padding: EdgeInsets.zero,
+                      textStyle: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            PhraseSectionHeader(
+              category: app.selectedCategory,
+              categoryLabel: app.selectedCategory != null
+                  ? app.localizedCategoryName(app.selectedCategory!)
+                  : AppStrings.customCategory(lang),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+              child: GridView.builder(
+                key: ValueKey(
+                  'phrases_${lang.name}_${app.languageRevision}_${app.effectivePhraseCategoryKey}',
+                ),
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: AppSpacing.phraseGridDelegate(context),
+                itemCount: app.phrasesForCategory.length,
+                itemBuilder: (context, i) {
+                  final phrase = app.phrasesForCategory[i];
+                  return PhraseCard(
+                    key: ValueKey(
+                      'phrase_${phrase.id}_${lang.name}_${app.languageRevision}',
+                    ),
+                    phrase: phrase,
+                    dense: denseGrid,
+                    isFavorite: app.isFavorite(phrase),
+                    onTap: () => _appendPhrase(app.localizedPhraseText(phrase)),
+                    onSpeak: () => _appendPhrase(
+                      app.localizedPhraseText(phrase),
+                      speak: true,
+                    ),
+                    onFavorite: () => app.toggleFavorite(phrase),
+                    onEdit: () async {
+                      if (phrase.isBuiltin) return;
+                      final result = await EditPhraseDialog.show(
+                        context,
+                        initialText: app.localizedPhraseText(phrase),
+                        initialImagePath: phrase.imagePath,
+                        title: AppStrings.editPhrase(lang),
+                      );
+                      if (result == null || !mounted) return;
+                      await app.updatePhrase(
+                        phrase,
+                        text: result.text,
+                        imagePath: result.imagePath,
+                        clearImage: result.clearImage,
+                      );
+                    },
+                    onDelete: () async {
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          content: Text(AppStrings.deletePhrase(lang)),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx, false),
+                              child: Text(AppStrings.cancel(lang)),
+                            ),
+                            FilledButton(
+                              onPressed: () => Navigator.pop(ctx, true),
+                              child: Text(AppStrings.delete(lang)),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirm == true) await app.deletePhrase(phrase);
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
         ],
         ),
       ),

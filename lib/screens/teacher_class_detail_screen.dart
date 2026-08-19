@@ -14,7 +14,7 @@ import '../providers/app_state.dart';
 import '../widgets/localized_content_text.dart';
 import '../widgets/class_color_card.dart';
 import '../widgets/create_lesson_dialog.dart';
-import '../widgets/edit_class_dialog.dart';
+import '../widgets/code_qr_sheet.dart';
 import '../widgets/taptalk_result_dialog.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/student_count_badge.dart';
@@ -185,29 +185,6 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
     ).then((_) => _load());
   }
 
-  Future<void> _editClassName() async {
-    final app = context.read<AppState>();
-    final lang = app.language;
-    final updated = await EditClassDialog.show(
-      context,
-      classId: widget.classId,
-      initialName: app.localizedContent(_className),
-    );
-    if (!mounted || updated != true) return;
-    setState(() {
-      final refreshed = app.teacherClasses
-          .where((c) => c.id == widget.classId)
-          .map((c) => c.name)
-          .toList();
-      if (refreshed.isNotEmpty) _className = refreshed.first;
-    });
-    await TapTalkResultDialog.showSuccess(
-      context,
-      title: AppStrings.classUpdatedTitle(lang),
-      message: AppStrings.classUpdated(lang),
-    );
-  }
-
   Future<void> _copyCode() async {
     final lang = context.read<AppState>().language;
     await Clipboard.setData(ClipboardData(text: widget.classCode));
@@ -216,6 +193,17 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
       context,
       title: AppStrings.copiedTitle(lang),
       message: AppStrings.copied(lang),
+    );
+  }
+
+  void _showClassQr() {
+    final lang = context.read<AppState>().language;
+    CodeQrSheet.show(
+      context,
+      title: AppStrings.showQrCode(lang),
+      code: widget.classCode,
+      subtitle: AppStrings.classCodeHint(lang),
+      shareMessage: AppStrings.shareClassCodeMessage(lang, widget.classCode),
     );
   }
 
@@ -237,6 +225,10 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
       titleBadge: StudentCountBadge(
         count: _studentCount,
         accent: theme.bgAccent,
+      ),
+      headerTrailing: _HeaderQrButton(
+        accent: theme.bgAccent,
+        onTap: _showClassQr,
       ),
       currentRoute: AppRoute.teacherMyClasses,
       showBackButton: true,
@@ -260,7 +252,6 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
                 className: _className,
                 classCode: widget.classCode,
                 onCopyCode: _copyCode,
-                onEditClassName: _editClassName,
               ),
               const SizedBox(height: AppSpacing.lg),
               Text(
@@ -334,14 +325,12 @@ class _ClassHeaderBanner extends StatelessWidget {
     required this.className,
     required this.classCode,
     required this.onCopyCode,
-    required this.onEditClassName,
   });
 
   final int classId;
   final String className;
   final String classCode;
   final VoidCallback onCopyCode;
-  final VoidCallback onEditClassName;
 
   @override
   Widget build(BuildContext context) {
@@ -368,56 +357,44 @@ class _ClassHeaderBanner extends StatelessWidget {
           ),
           Padding(
             padding: const EdgeInsets.all(AppSpacing.md),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: LocalizedContentText(
-                              className,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.poppins(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          InkWell(
-                            onTap: onEditClassName,
-                            borderRadius: BorderRadius.circular(10),
-                            child: Container(
-                              padding: const EdgeInsets.all(6),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.18),
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                  color: Colors.white.withValues(alpha: 0.25),
-                                ),
-                              ),
-                              child: const Icon(
-                                Icons.edit_outlined,
-                                size: 16,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ],
+                LocalizedContentText(
+                  className,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.poppins(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                InkWell(
+                  onTap: onCopyCode,
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                      vertical: AppSpacing.xs,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colors.badgeBg,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.28),
                       ),
-                      const SizedBox(height: 6),
-                      _ClassCodeChip(
-                        code: classCode,
-                        colors: colors,
-                        onCopy: onCopyCode,
+                    ),
+                    child: Text(
+                      classCode,
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                        letterSpacing: 0.5,
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ],
@@ -429,55 +406,37 @@ class _ClassHeaderBanner extends StatelessWidget {
   }
 }
 
-class _ClassCodeChip extends StatelessWidget {
-  const _ClassCodeChip({
-    required this.code,
-    required this.colors,
-    required this.onCopy,
+class _HeaderQrButton extends StatelessWidget {
+  const _HeaderQrButton({
+    required this.accent,
+    required this.onTap,
   });
 
-  final String code;
-  final ClassColorScheme colors;
-  final VoidCallback onCopy;
+  final Color accent;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.sm,
-        vertical: AppSpacing.xs,
+    return Material(
+      color: Color.alphaBlend(
+        Colors.white.withValues(alpha: 0.55),
+        accent,
       ),
-      decoration: BoxDecoration(
-        color: colors.badgeBg,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            code,
-            style: GoogleFonts.poppins(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: Colors.white,
-              letterSpacing: 0.5,
-            ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: const SizedBox(
+          width: 36,
+          height: 36,
+          child: Icon(
+            Icons.qr_code_2_rounded,
+            size: 20,
+            color: Colors.white,
           ),
-          const SizedBox(width: 4),
-          InkWell(
-            onTap: onCopy,
-            borderRadius: BorderRadius.circular(6),
-            child: Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.22),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Icon(Icons.copy_rounded, size: 14, color: Colors.white),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

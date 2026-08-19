@@ -26,6 +26,7 @@ import '../models/phrase_first_use.dart';
 import '../models/child_lesson_progress.dart';
 import '../models/phrase_usage_stat.dart';
 import '../models/class_lesson.dart';
+import '../models/class_join_request.dart';
 import '../models/lesson_phrase.dart';
 import '../models/teacher_alert_result.dart';
 import '../models/teacher_class_student.dart';
@@ -806,6 +807,17 @@ class AppRepository {
     if (profile.ttsSpeed != null) {
       await updateUserSettings(userId, ttsSpeed: profile.ttsSpeed);
     }
+    final remoteAddress = profile.address?.trim() ?? '';
+    if (remoteAddress.isNotEmpty) {
+      await updateUserSettings(userId, address: remoteAddress);
+    }
+    if (profile.age != null) {
+      await updateUserSettings(userId, age: profile.age);
+    }
+    final remoteGrade = profile.gradeLevel?.trim() ?? '';
+    if (remoteGrade.isNotEmpty) {
+      await updateUserSettings(userId, gradeLevel: remoteGrade);
+    }
     return findUserById(userId);
   }
 
@@ -855,6 +867,10 @@ class AppRepository {
     double? ttsSpeed,
     String? profileCode,
     String? firstName,
+    String? address,
+    int? age,
+    bool clearAge = false,
+    String? gradeLevel,
   }) async {
     final db = await _dbHelper.database;
     final user = await findUserById(userId);
@@ -868,6 +884,13 @@ class AppRepository {
     if (ttsSpeed != null) settings['tts_speed'] = ttsSpeed;
     if (profileCode != null) settings['profile_code'] = profileCode;
     if (firstName != null) settings['first_name'] = firstName.trim();
+    if (address != null) settings['address'] = address.trim();
+    if (clearAge) {
+      settings.remove('age');
+    } else if (age != null) {
+      settings['age'] = age;
+    }
+    if (gradeLevel != null) settings['grade_level'] = gradeLevel.trim();
     await db.update(
       'users',
       {'settings_json': jsonEncode(settings)},
@@ -959,6 +982,17 @@ class AppRepository {
         'category_key': key,
         'category_name': name,
         'icon_key': icon,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
+
+    for (final (key, name, parentKey, icon)
+        in DefaultBuiltinContent.defaultSubcategories) {
+      await db.insert('categories', {
+        'user_id': userId,
+        'category_key': key,
+        'category_name': name,
+        'icon_key': icon,
+        'parent_category_key': parentKey,
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
     }
 
@@ -1057,6 +1091,15 @@ class AppRepository {
         .where((category) => !obsoleteKeys.contains(category.key))
         .toList();
     categories.sort((a, b) {
+      if (a.isTopLevel && !b.isTopLevel) return -1;
+      if (!a.isTopLevel && b.isTopLevel) return 1;
+      if (!a.isTopLevel && !b.isTopLevel) {
+        final parentCompare =
+            (a.parentKey ?? '').compareTo(b.parentKey ?? '');
+        if (parentCompare != 0) return parentCompare;
+        return DefaultBuiltinContent.subcategoryOrderIndex(a.key)
+            .compareTo(DefaultBuiltinContent.subcategoryOrderIndex(b.key));
+      }
       final order = DefaultBuiltinContent.categoryOrderIndex(a.key)
           .compareTo(DefaultBuiltinContent.categoryOrderIndex(b.key));
       if (order != 0) return order;
@@ -3311,6 +3354,244 @@ class AppRepository {
       where: 'learner_user_id = ? AND class_id = ?',
       whereArgs: [learnerUserId, classId],
     );
+  }
+
+  ClassJoinRequest _joinRequestFromRow(Map<String, Object?> row) {
+    return ClassJoinRequest(
+      id: row['id'] as int,
+      learnerUserId: row['learner_user_id'] as int,
+      classId: row['class_id'] as int,
+      classCode: row['class_code'] as String,
+      className: row['class_name'] as String,
+      teacherUserId: row['teacher_user_id'] as int,
+      learnerName: row['learner_name'] as String,
+      learnerFirebaseUid: row['learner_firebase_uid'] as String?,
+      teacherFirebaseUid: row['teacher_firebase_uid'] as String?,
+      status: ClassJoinRequest.statusFromString(row['status'] as String?),
+      requestedAt: DateTime.fromMillisecondsSinceEpoch(
+        row['requested_at'] as int,
+      ),
+      respondedAt: row['responded_at'] == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(row['responded_at'] as int),
+      remoteId: row['remote_id'] as String?,
+    );
+  }
+
+  Future<ClassJoinRequest?> findJoinRequest({
+    required int learnerUserId,
+    required int classId,
+  }) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'class_join_requests',
+      where: 'learner_user_id = ? AND class_id = ?',
+      whereArgs: [learnerUserId, classId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return _joinRequestFromRow(rows.first);
+  }
+
+  Future<ClassJoinRequest?> findJoinRequestById(int requestId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'class_join_requests',
+      where: 'id = ?',
+      whereArgs: [requestId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return _joinRequestFromRow(rows.first);
+  }
+
+  Future<ClassJoinRequest> upsertJoinRequest({
+    required int learnerUserId,
+    required int classId,
+    required String classCode,
+    required String className,
+    required int teacherUserId,
+    required String learnerName,
+    required ClassJoinRequestStatus status,
+    required DateTime requestedAt,
+    String? learnerFirebaseUid,
+    String? teacherFirebaseUid,
+    DateTime? respondedAt,
+    String? remoteId,
+  }) async {
+    final db = await _dbHelper.database;
+    final existing = await findJoinRequest(
+      learnerUserId: learnerUserId,
+      classId: classId,
+    );
+    final payload = {
+      'learner_user_id': learnerUserId,
+      'class_id': classId,
+      'class_code': normalizeClassCode(classCode),
+      'class_name': className,
+      'teacher_user_id': teacherUserId,
+      'learner_name': learnerName,
+      'learner_firebase_uid': learnerFirebaseUid,
+      'teacher_firebase_uid': teacherFirebaseUid,
+      'status': ClassJoinRequest.statusToString(status),
+      'requested_at': requestedAt.millisecondsSinceEpoch,
+      'responded_at': respondedAt?.millisecondsSinceEpoch,
+      'remote_id': remoteId,
+    };
+    if (existing == null) {
+      final id = await db.insert('class_join_requests', payload);
+      final created = await findJoinRequestById(id);
+      return created!;
+    }
+    await db.update(
+      'class_join_requests',
+      payload,
+      where: 'id = ?',
+      whereArgs: [existing.id],
+    );
+    return (await findJoinRequestById(existing.id))!;
+  }
+
+  Future<void> updateJoinRequestStatus({
+    required int requestId,
+    required ClassJoinRequestStatus status,
+    DateTime? respondedAt,
+  }) async {
+    final db = await _dbHelper.database;
+    await db.update(
+      'class_join_requests',
+      {
+        'status': ClassJoinRequest.statusToString(status),
+        'responded_at': (respondedAt ?? DateTime.now()).millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [requestId],
+    );
+  }
+
+  Future<List<ClassJoinRequest>> getPendingJoinRequestsForTeacher(
+    int teacherUserId,
+  ) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'class_join_requests',
+      where: 'teacher_user_id = ? AND status = ?',
+      whereArgs: [teacherUserId, ClassJoinRequest.statusToString(
+        ClassJoinRequestStatus.pending,
+      )],
+      orderBy: 'requested_at DESC',
+    );
+    return rows.map(_joinRequestFromRow).toList();
+  }
+
+  Future<int> countPendingJoinRequestsForTeacher(int teacherUserId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery(
+      '''
+      SELECT COUNT(*) AS c
+      FROM class_join_requests
+      WHERE teacher_user_id = ? AND status = ?
+      ''',
+      [
+        teacherUserId,
+        ClassJoinRequest.statusToString(ClassJoinRequestStatus.pending),
+      ],
+    );
+    return (rows.first['c'] as int?) ?? 0;
+  }
+
+  Future<void> mergeRemoteJoinRequestsForTeacher({
+    required int teacherUserId,
+    required List<RemoteClassJoinRequest> requests,
+  }) async {
+    for (final remote in requests) {
+      final code = normalizeClassCode(remote.classCode);
+      if (!isValidClassCodeFormat(code)) continue;
+      final classRow = await findClassByCode(code);
+      if (classRow == null) continue;
+      if ((classRow['teacher_user_id'] as int?) != teacherUserId) continue;
+      final classId = classRow['id'] as int;
+      final learnerUid = remote.learnerFirebaseUid.trim();
+      if (learnerUid.isEmpty) continue;
+
+      var learner = await findUserByFirebaseUid(learnerUid);
+      if (learner == null) {
+        final stubId = await ensureUserStubFromFirebase(
+          firebaseUid: learnerUid,
+          role: 'learner',
+          displayName: remote.learnerName.trim().isEmpty
+              ? 'Learner'
+              : remote.learnerName.trim(),
+        );
+        learner = await findUserById(stubId);
+      }
+      if (learner == null) continue;
+
+      final remoteId = remote.remoteId ?? '${code}_$learnerUid';
+      await upsertJoinRequest(
+        learnerUserId: learner.id,
+        classId: classId,
+        classCode: code,
+        className: remote.className,
+        teacherUserId: teacherUserId,
+        learnerName: remote.learnerName.trim().isEmpty
+            ? learner.fullName
+            : remote.learnerName.trim(),
+        status: ClassJoinRequest.statusFromString(remote.status),
+        requestedAt: remote.requestedAt,
+        learnerFirebaseUid: learnerUid,
+        teacherFirebaseUid: remote.teacherFirebaseUid,
+        respondedAt: remote.respondedAt,
+        remoteId: remoteId,
+      );
+
+      if (remote.status == ClassJoinRequest.statusToString(
+            ClassJoinRequestStatus.accepted,
+          ) &&
+          !await isLearnerEnrolled(learner.id, classId)) {
+        await enrollLearnerInClass(learner.id, classId);
+      }
+    }
+  }
+
+  Future<void> mergeRemoteJoinRequestsForLearner({
+    required int learnerUserId,
+    required List<RemoteClassJoinRequest> requests,
+  }) async {
+    for (final remote in requests) {
+      final code = normalizeClassCode(remote.classCode);
+      if (!isValidClassCodeFormat(code)) continue;
+      var classRow = await findClassByCode(code);
+      classRow ??= await findClassById(remote.classId);
+      if (classRow == null) continue;
+      final classId = classRow['id'] as int;
+      final teacherUserId = classRow['teacher_user_id'] as int? ?? 0;
+      if (teacherUserId <= 0) continue;
+
+      final remoteId = remote.remoteId ??
+          '${code}_${remote.learnerFirebaseUid.trim()}';
+      await upsertJoinRequest(
+        learnerUserId: learnerUserId,
+        classId: classId,
+        classCode: code,
+        className: remote.className,
+        teacherUserId: teacherUserId,
+        learnerName: remote.learnerName,
+        status: ClassJoinRequest.statusFromString(remote.status),
+        requestedAt: remote.requestedAt,
+        learnerFirebaseUid: remote.learnerFirebaseUid,
+        teacherFirebaseUid: remote.teacherFirebaseUid,
+        respondedAt: remote.respondedAt,
+        remoteId: remoteId,
+      );
+
+      if (remote.status == ClassJoinRequest.statusToString(
+            ClassJoinRequestStatus.accepted,
+          ) &&
+          !await isLearnerEnrolled(learnerUserId, classId)) {
+        await enrollLearnerInClass(learnerUserId, classId);
+      }
+    }
   }
 
   Future<List<TeacherClassStudent>> getTeacherClassStudents(

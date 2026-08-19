@@ -20,6 +20,8 @@ class NotificationSyncService {
   StreamSubscription<List<RemoteParentNotification>>? _parentSubscription;
   StreamSubscription<List<RemoteClassEnrollment>>? _learnerEnrollmentSubscription;
   StreamSubscription<List<RemoteClassEnrollment>>? _teacherEnrollmentSubscription;
+  StreamSubscription<List<RemoteClassJoinRequest>>? _teacherJoinRequestSubscription;
+  StreamSubscription<List<RemoteClassJoinRequest>>? _learnerJoinRequestSubscription;
   StreamSubscription<List<RemoteParentChildLink>>? _parentChildLinkSubscription;
   StreamSubscription<List<RemoteTeacherClass>>? _teacherClassSubscription;
   StreamSubscription<List<RemoteTeacherAlert>>? _teacherAlertSubscription;
@@ -35,6 +37,8 @@ class NotificationSyncService {
   void Function()? _onParentNotificationsChanged;
   void Function()? _onLearnerEnrollmentsChanged;
   void Function(List<RemoteClassEnrollment>)? _onTeacherEnrollmentsChanged;
+  void Function(List<RemoteClassJoinRequest>)? _onTeacherJoinRequestsChanged;
+  void Function(List<RemoteClassJoinRequest>)? _onLearnerJoinRequestsChanged;
   void Function()? _onParentChildLinksChanged;
   void Function(List<RemoteTeacherClass>)? _onTeacherClassesChanged;
   void Function()? _onTeacherAlertsChanged;
@@ -281,6 +285,79 @@ class NotificationSyncService {
       classCode: classCode,
       learnerFirebaseUid: learnerFirebaseUid,
     );
+  }
+
+  Future<void> syncClassJoinRequest({
+    required ClassJoinRequestCloudEvent event,
+  }) async {
+    if (!_cloud.isAvailable) return;
+    await _cloud.upsertClassJoinRequest(event);
+  }
+
+  Future<List<RemoteClassJoinRequest>> getJoinRequestsForTeacherFromCloud(
+    String teacherFirebaseUid,
+  ) async {
+    if (!_cloud.isAvailable || teacherFirebaseUid.trim().isEmpty) {
+      return const [];
+    }
+    return _cloud.getClassJoinRequestsForTeacher(teacherFirebaseUid);
+  }
+
+  Future<List<RemoteClassJoinRequest>> getJoinRequestsForLearnerFromCloud(
+    String learnerFirebaseUid,
+  ) async {
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) {
+      return const [];
+    }
+    return _cloud.getClassJoinRequestsForLearner(learnerFirebaseUid);
+  }
+
+  Future<void> startTeacherJoinRequestSync({
+    required String teacherFirebaseUid,
+    required void Function(List<RemoteClassJoinRequest>) onChanged,
+  }) async {
+    await stopTeacherJoinRequestSync();
+    _onTeacherJoinRequestsChanged = onChanged;
+    await _cloud.initialize();
+    if (!_cloud.isAvailable || teacherFirebaseUid.trim().isEmpty) return;
+    _teacherJoinRequestSubscription = _cloud
+        .watchClassJoinRequestsForTeacher(teacherFirebaseUid)
+        .listen(
+      (items) => _onTeacherJoinRequestsChanged?.call(items),
+      onError: (Object e, StackTrace st) {
+        debugPrint('Teacher join request sync error: $e\n$st');
+      },
+    );
+  }
+
+  Future<void> stopTeacherJoinRequestSync() async {
+    await _teacherJoinRequestSubscription?.cancel();
+    _teacherJoinRequestSubscription = null;
+    _onTeacherJoinRequestsChanged = null;
+  }
+
+  Future<void> startLearnerJoinRequestSync({
+    required String learnerFirebaseUid,
+    required void Function(List<RemoteClassJoinRequest>) onChanged,
+  }) async {
+    await stopLearnerJoinRequestSync();
+    _onLearnerJoinRequestsChanged = onChanged;
+    await _cloud.initialize();
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return;
+    _learnerJoinRequestSubscription = _cloud
+        .watchClassJoinRequestsForLearner(learnerFirebaseUid)
+        .listen(
+      (items) => _onLearnerJoinRequestsChanged?.call(items),
+      onError: (Object e, StackTrace st) {
+        debugPrint('Learner join request sync error: $e\n$st');
+      },
+    );
+  }
+
+  Future<void> stopLearnerJoinRequestSync() async {
+    await _learnerJoinRequestSubscription?.cancel();
+    _learnerJoinRequestSubscription = null;
+    _onLearnerJoinRequestsChanged = null;
   }
 
   Future<List<TeacherClassStudent>> getTeacherClassStudentsFromCloud(

@@ -145,6 +145,7 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
       if (app.teacherClasses.isEmpty) {
         await _refresh();
       }
+      await app.refreshPendingJoinRequests();
     });
   }
 
@@ -172,22 +173,40 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
               96,
             ),
             children: [
-              Text(
-                AppStrings.myClasses(lang),
-                style: GoogleFonts.poppins(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  color: theme.textMain,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xs),
-              Text(
-                AppStrings.teacherMyClassesSubtitle(lang),
-                style: GoogleFonts.poppins(
-                  fontSize: 13,
-                  color: theme.textMain.withValues(alpha: 0.65),
-                  height: 1.35,
-                ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          AppStrings.myClasses(lang),
+                          style: GoogleFonts.poppins(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                            color: theme.textMain,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      _ViewRequestsButton(
+                        count: app.pendingJoinRequestCount,
+                        onPressed: () =>
+                            app.setRoute(AppRoute.teacherJoinRequests),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    AppStrings.teacherMyClassesSubtitle(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      color: theme.textMain.withValues(alpha: 0.65),
+                      height: 1.35,
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: AppSpacing.lg),
               if (classes.isEmpty)
@@ -302,6 +321,48 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ViewRequestsButton extends StatelessWidget {
+  const _ViewRequestsButton({
+    required this.count,
+    required this.onPressed,
+  });
+
+  final int count;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final app = context.watch<AppState>();
+    final lang = app.language;
+    final theme = app.theme;
+
+    return FilledButton(
+      onPressed: onPressed,
+      style: FilledButton.styleFrom(
+        backgroundColor: theme.bgAccent,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+      ),
+      child: Text(
+        count > 0
+            ? '${AppStrings.viewRequests(lang)} ($count)'
+            : AppStrings.viewRequests(lang),
+        style: GoogleFonts.poppins(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          height: 1.2,
+        ),
       ),
     );
   }

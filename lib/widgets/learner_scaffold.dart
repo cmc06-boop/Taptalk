@@ -19,6 +19,7 @@ class LearnerScaffold extends StatelessWidget {
     this.showBottomNav = true,
     this.showBackButton = false,
     this.onBack,
+    this.headerTrailing,
   });
 
   final String title;
@@ -30,6 +31,7 @@ class LearnerScaffold extends StatelessWidget {
   final bool showBottomNav;
   final bool showBackButton;
   final VoidCallback? onBack;
+  final Widget? headerTrailing;
 
   bool _forMeShowsBottomNav(AppRoute route) {
     return route == AppRoute.home ||
@@ -59,6 +61,7 @@ class LearnerScaffold extends StatelessWidget {
                   titleBadge: titleBadge,
                   showBackButton: showBackButton,
                   onBack: onBack,
+                  trailingAction: headerTrailing,
                   onMenu: showBackButton ? null : () => app.toggleDrawer(),
                   showProfile:
                       !isParent && !isTeacher && !showBackButton,

@@ -40,6 +40,38 @@ abstract final class DefaultBuiltinContent {
     'technology',
   ];
 
+  /// Subcategories for Food and Drinks (key, name, parent key, icon key).
+  static const defaultSubcategories =
+      <(String key, String name, String parentKey, String iconKey)>[
+    ('food_fruits', 'Fruits', 'food', 'food_fruits'),
+    ('food_vegetables', 'Vegetables', 'food', 'food_vegetables'),
+    ('food_dessert', 'Dessert', 'food', 'food_dessert'),
+    ('food_meals', 'Meals', 'food', 'food_meals'),
+    ('drinks_hot', 'Hot Drinks', 'drinks', 'drinks_hot'),
+    ('drinks_cold', 'Cold Drinks', 'drinks', 'drinks_cold'),
+    ('drinks_dairy', 'Milk & Yogurt', 'drinks', 'drinks_dairy'),
+  ];
+
+  static const subcategoryDisplayOrder = <String>[
+    'food_fruits',
+    'food_vegetables',
+    'food_dessert',
+    'food_meals',
+    'drinks_hot',
+    'drinks_cold',
+    'drinks_dairy',
+  ];
+
+  static const parentCategoriesWithSubcategories = {'food', 'drinks'};
+
+  static bool hasSubcategories(String key) =>
+      parentCategoriesWithSubcategories.contains(key);
+
+  static int subcategoryOrderIndex(String key) {
+    final index = subcategoryDisplayOrder.indexOf(key);
+    return index >= 0 ? index : subcategoryDisplayOrder.length;
+  }
+
   static int categoryOrderIndex(String key) {
     final index = categoryDisplayOrder.indexOf(key);
     return index >= 0 ? index : categoryDisplayOrder.length;
@@ -103,18 +135,18 @@ abstract final class DefaultBuiltinContent {
     ('White', 'colors', 'Colors/White.jpg'),
     ('Yellow', 'colors', 'Colors/Yellow.png'),
     // Drinks
-    ('Coffee', 'drinks', 'Drinks/Coffee.jpg'),
-    ('Coke', 'drinks', 'Drinks/Coke.jpg'),
-    ('Cold Water', 'drinks', 'Drinks/Cold Water.webp'),
-    ('Delight', 'drinks', 'Drinks/Delight.jpg'),
-    ('Dutch Mill', 'drinks', 'Drinks/Dutch Mill.jpg'),
-    ('Hot Water', 'drinks', 'Drinks/Hot Water.jpg'),
-    ('Milk', 'drinks', 'Drinks/Milk.jpg'),
-    ('Milo', 'drinks', 'Drinks/Milo.jpg'),
-    ('Royal', 'drinks', 'Drinks/Royal.jpg'),
-    ('Sprite', 'drinks', 'Drinks/Sprite.jpg'),
-    ('Warm Water', 'drinks', 'Drinks/Warm Water.jpg'),
-    ('Yakult', 'drinks', 'Drinks/Yakult.jpg'),
+    ('Coffee', 'drinks_hot', 'Drinks/Coffee.jpg'),
+    ('Coke', 'drinks_cold', 'Drinks/Coke.jpg'),
+    ('Cold Water', 'drinks_cold', 'Drinks/Cold Water.webp'),
+    ('Delight', 'drinks_cold', 'Drinks/Delight.jpg'),
+    ('Dutch Mill', 'drinks_dairy', 'Drinks/Dutch Mill.jpg'),
+    ('Hot Water', 'drinks_hot', 'Drinks/Hot Water.jpg'),
+    ('Milk', 'drinks_dairy', 'Drinks/Milk.jpg'),
+    ('Milo', 'drinks_hot', 'Drinks/Milo.jpg'),
+    ('Royal', 'drinks_cold', 'Drinks/Royal.jpg'),
+    ('Sprite', 'drinks_cold', 'Drinks/Sprite.jpg'),
+    ('Warm Water', 'drinks_hot', 'Drinks/Warm Water.jpg'),
+    ('Yakult', 'drinks_dairy', 'Drinks/Yakult.jpg'),
     // Family
     ('Baby', 'family', 'Family/Baby.jpg'),
     ('Brother', 'family', 'Family/Brother.jpg'),
@@ -140,36 +172,36 @@ abstract final class DefaultBuiltinContent {
     ('I Feel Sick', 'feelings', 'Feelings/I Feel Sick.jpeg'),
     ('Too Loud Noisy', 'feelings', 'Feelings/Too Loud Noisy.png'),
     // Foods
-    ('Apple', 'food', 'Foods/Apple.jpg'),
-    ('Banana', 'food', 'Foods/Banana.jpg'),
-    ('Bread', 'food', 'Foods/Bread.jpg'),
-    ('Broccoli', 'food', 'Foods/Broccoli.jpg'),
-    ('Cake', 'food', 'Foods/Cake.jpg'),
-    ('Carrots', 'food', 'Foods/Carrots.jpg'),
-    ('Chicken Adobo', 'food', 'Foods/Chicken Adobo.jpg'),
-    ('Chocolate', 'food', 'Foods/Chocolate.jpg'),
-    ('Donuts', 'food', 'Foods/Donuts.jpg'),
-    ('Egg', 'food', 'Foods/Egg.jpg'),
-    ('Eggplant', 'food', 'Foods/Eggplant.jpg'),
-    ('Fish Sinigang', 'food', 'Foods/Fish Sinigang.jpg'),
-    ('Fried Chicken', 'food', 'Foods/Fried Chicken.jpg'),
-    ('Fries', 'food', 'Foods/Fries.jpg'),
-    ('Grapes', 'food', 'Foods/Grapes.jpg'),
-    ('Hot Dog', 'food', 'Foods/Hot Dog.jpg'),
-    ('Ice Cream', 'food', 'Foods/Ice Cream.jpg'),
-    ('Mango', 'food', 'Foods/Mango.jpg'),
-    ('Orange', 'food', 'Foods/Orange.jpg'),
-    ('Pineaplle', 'food', 'Foods/Pineaplle.jpg'),
-    ('Pizza', 'food', 'Foods/Pizza.jpg'),
-    ('Pork Adobo', 'food', 'Foods/Pork Adobo.jpg'),
-    ('Pork Sinigang', 'food', 'Foods/Pork Sinigang.jpg'),
-    ('Potato', 'food', 'Foods/Potato.jpg'),
-    ('Rice', 'food', 'Foods/Rice.jpg'),
-    ('Sandwich', 'food', 'Foods/Sandwich.jpg'),
-    ('Shrimp', 'food', 'Foods/Shrimp.jpg'),
-    ('Spaghetti', 'food', 'Foods/Spaghetti.webp'),
-    ('Squash', 'food', 'Foods/Squash.jpg'),
-    ('Watermelon', 'food', 'Foods/Watermelon.jpg'),
+    ('Apple', 'food_fruits', 'Foods/Apple.jpg'),
+    ('Banana', 'food_fruits', 'Foods/Banana.jpg'),
+    ('Bread', 'food_meals', 'Foods/Bread.jpg'),
+    ('Broccoli', 'food_vegetables', 'Foods/Broccoli.jpg'),
+    ('Cake', 'food_dessert', 'Foods/Cake.jpg'),
+    ('Carrots', 'food_vegetables', 'Foods/Carrots.jpg'),
+    ('Chicken Adobo', 'food_meals', 'Foods/Chicken Adobo.jpg'),
+    ('Chocolate', 'food_dessert', 'Foods/Chocolate.jpg'),
+    ('Donuts', 'food_dessert', 'Foods/Donuts.jpg'),
+    ('Egg', 'food_meals', 'Foods/Egg.jpg'),
+    ('Eggplant', 'food_vegetables', 'Foods/Eggplant.jpg'),
+    ('Fish Sinigang', 'food_meals', 'Foods/Fish Sinigang.jpg'),
+    ('Fried Chicken', 'food_meals', 'Foods/Fried Chicken.jpg'),
+    ('Fries', 'food_meals', 'Foods/Fries.jpg'),
+    ('Grapes', 'food_fruits', 'Foods/Grapes.jpg'),
+    ('Hot Dog', 'food_meals', 'Foods/Hot Dog.jpg'),
+    ('Ice Cream', 'food_dessert', 'Foods/Ice Cream.jpg'),
+    ('Mango', 'food_fruits', 'Foods/Mango.jpg'),
+    ('Orange', 'food_fruits', 'Foods/Orange.jpg'),
+    ('Pineaplle', 'food_fruits', 'Foods/Pineaplle.jpg'),
+    ('Pizza', 'food_meals', 'Foods/Pizza.jpg'),
+    ('Pork Adobo', 'food_meals', 'Foods/Pork Adobo.jpg'),
+    ('Pork Sinigang', 'food_meals', 'Foods/Pork Sinigang.jpg'),
+    ('Potato', 'food_vegetables', 'Foods/Potato.jpg'),
+    ('Rice', 'food_meals', 'Foods/Rice.jpg'),
+    ('Sandwich', 'food_meals', 'Foods/Sandwich.jpg'),
+    ('Shrimp', 'food_meals', 'Foods/Shrimp.jpg'),
+    ('Spaghetti', 'food_meals', 'Foods/Spaghetti.webp'),
+    ('Squash', 'food_vegetables', 'Foods/Squash.jpg'),
+    ('Watermelon', 'food_fruits', 'Foods/Watermelon.jpg'),
     // Greetings
     ('Excuse me', 'greetings', 'Greetings/Excuse me.png'),
     ('Good Morning', 'greetings', 'Greetings/Good Morning.png'),

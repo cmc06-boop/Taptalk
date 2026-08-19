@@ -109,6 +109,85 @@ class RemoteClassEnrollment {
   final String? teacherName;
 }
 
+class ClassJoinRequestCloudEvent {
+  const ClassJoinRequestCloudEvent({
+    required this.classId,
+    required this.classCode,
+    required this.className,
+    required this.teacherFirebaseUid,
+    required this.teacherUserId,
+    required this.learnerUserId,
+    required this.learnerName,
+    required this.learnerFirebaseUid,
+    required this.status,
+    required this.requestedAt,
+    this.respondedAt,
+    this.teacherName,
+  });
+
+  final int classId;
+  final String classCode;
+  final String className;
+  final String teacherFirebaseUid;
+  final int teacherUserId;
+  final int learnerUserId;
+  final String learnerName;
+  final String learnerFirebaseUid;
+  final String status;
+  final DateTime requestedAt;
+  final DateTime? respondedAt;
+  final String? teacherName;
+
+  String get remoteId => '${classCode.trim()}_${learnerFirebaseUid.trim()}';
+
+  Map<String, Object?> toFirestoreMap() => {
+        'classId': classId,
+        'classCode': classCode,
+        'className': className,
+        'teacherFirebaseUid': teacherFirebaseUid.trim(),
+        'teacherUserId': teacherUserId,
+        'learnerUserId': learnerUserId,
+        'learnerName': learnerName,
+        'learnerFirebaseUid': learnerFirebaseUid.trim(),
+        'status': status,
+        'requestedAt': requestedAt.toUtc().toIso8601String(),
+        if (respondedAt != null)
+          'respondedAt': respondedAt!.toUtc().toIso8601String(),
+        if (teacherName != null && teacherName!.trim().isNotEmpty)
+          'teacherName': teacherName!.trim(),
+      };
+}
+
+class RemoteClassJoinRequest {
+  const RemoteClassJoinRequest({
+    required this.classId,
+    required this.classCode,
+    required this.className,
+    required this.teacherFirebaseUid,
+    required this.teacherUserId,
+    required this.learnerUserId,
+    required this.learnerName,
+    required this.learnerFirebaseUid,
+    required this.status,
+    required this.requestedAt,
+    this.respondedAt,
+    this.remoteId,
+  });
+
+  final int classId;
+  final String classCode;
+  final String className;
+  final String teacherFirebaseUid;
+  final int teacherUserId;
+  final int learnerUserId;
+  final String learnerName;
+  final String learnerFirebaseUid;
+  final String status;
+  final DateTime requestedAt;
+  final DateTime? respondedAt;
+  final String? remoteId;
+}
+
 class RemoteTeacherClass {
   const RemoteTeacherClass({
     required this.classCode,
@@ -320,6 +399,9 @@ class RemoteUserProfile {
     this.profileCode,
     this.language,
     this.ttsSpeed,
+    this.address,
+    this.age,
+    this.gradeLevel,
   });
 
   final String firebaseUid;
@@ -331,6 +413,9 @@ class RemoteUserProfile {
   final String? profileCode;
   final String? language;
   final double? ttsSpeed;
+  final String? address;
+  final int? age;
+  final String? gradeLevel;
 }
 
 /// Phrase tap / history event synced for cross-device monitoring.
@@ -552,6 +637,24 @@ abstract class CloudNotificationBackend {
     String learnerFirebaseUid,
   );
 
+  Future<void> upsertClassJoinRequest(ClassJoinRequestCloudEvent event);
+
+  Future<List<RemoteClassJoinRequest>> getClassJoinRequestsForTeacher(
+    String teacherFirebaseUid,
+  );
+
+  Future<List<RemoteClassJoinRequest>> getClassJoinRequestsForLearner(
+    String learnerFirebaseUid,
+  );
+
+  Stream<List<RemoteClassJoinRequest>> watchClassJoinRequestsForTeacher(
+    String teacherFirebaseUid,
+  );
+
+  Stream<List<RemoteClassJoinRequest>> watchClassJoinRequestsForLearner(
+    String learnerFirebaseUid,
+  );
+
   Future<void> appendLearnerActivity(LearnerActivityCloudEvent event);
 
   Future<List<RemoteLearnerActivity>> getLearnerActivities({
@@ -744,6 +847,33 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
     String learnerFirebaseUid,
   ) async =>
       const [];
+
+  @override
+  Future<void> upsertClassJoinRequest(ClassJoinRequestCloudEvent event) async {}
+
+  @override
+  Future<List<RemoteClassJoinRequest>> getClassJoinRequestsForTeacher(
+    String teacherFirebaseUid,
+  ) async =>
+      const [];
+
+  @override
+  Future<List<RemoteClassJoinRequest>> getClassJoinRequestsForLearner(
+    String learnerFirebaseUid,
+  ) async =>
+      const [];
+
+  @override
+  Stream<List<RemoteClassJoinRequest>> watchClassJoinRequestsForTeacher(
+    String teacherFirebaseUid,
+  ) =>
+      const Stream.empty();
+
+  @override
+  Stream<List<RemoteClassJoinRequest>> watchClassJoinRequestsForLearner(
+    String learnerFirebaseUid,
+  ) =>
+      const Stream.empty();
 
   @override
   Future<void> appendLearnerActivity(LearnerActivityCloudEvent event) async {}

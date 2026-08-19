@@ -147,6 +147,14 @@ abstract final class AppStrings {
       ? 'Pumili ng kategorya para makita ang mga parirala.'
       : 'Choose a category to see phrases.';
 
+  static String chooseSubcategoryHint(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Pumili ng uri para makita ang mga parirala.'
+      : 'Choose a type to see phrases.';
+
+  static String backToSubcategories(AppLanguage lang) => lang == AppLanguage.filipino
+      ? '← Bumalik sa mga uri'
+      : '← Back to types';
+
   static String addCategoryShort(AppLanguage lang) =>
       lang == AppLanguage.filipino ? '+ Idagdag' : '+ Add';
 
@@ -673,6 +681,11 @@ abstract final class AppStrings {
           ? 'Lahat ng alert na ipinadala mo sa mga magulang.'
           : 'All alerts you sent to parents.';
 
+  static String recentLessonsSubtitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Lahat ng aralin na ginawa mo, mula sa pinakabago.'
+          : 'All lessons you created, newest first.';
+
   static String noRecentAlerts(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Walang alert pa. Lalabas dito ang mga alert na ipinadala mo sa magulang.'
       : 'No alerts yet. Alerts you send to parents will appear here.';
@@ -1015,6 +1028,19 @@ abstract final class AppStrings {
   static String emailAddress(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Email Address'
       : 'Email Address';
+
+  static String address(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Tirahan' : 'Address';
+
+  static String age(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Edad' : 'Age';
+
+  static String gradeLevel(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Antas / Grade level' : 'Grade level';
+
+  static String invalidAge(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Maglagay ng wastong edad (1–120).'
+      : 'Enter a valid age (1–120).';
 
   static String profileCode(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'PROFILE CODE' : 'PROFILE CODE';
@@ -1387,6 +1413,57 @@ abstract final class AppStrings {
       ? 'Ilagay ang class code (hal. CLS-AB12CD34)'
       : 'Enter class code (e.g. CLS-AB12CD34)';
 
+  static String scanQrCode(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'I-scan ang QR code' : 'Scan QR code';
+
+  static String showQrCode(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Ipakita ang QR code' : 'Show QR code';
+
+  static String qrScanHint(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Itutok ang camera sa QR code ng klase o profile.'
+      : 'Point the camera at the class or profile QR code.';
+
+  static String qrCodeNotRecognized(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Hindi nakilalang QR code. Subukang muli.'
+      : 'Unrecognized QR code. Please try again.';
+
+  static String cameraPermissionRequired(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Kailangan ng camera permission para mag-scan ng QR code.'
+      : 'Camera permission is required to scan QR codes.';
+
+  static String qrScanNotSupported(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Hindi available ang QR scan sa device na ito.'
+      : 'QR scanning is not available on this device.';
+
+  static String enterCodeManually(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Ilagay ang code nang manual'
+      : 'Enter code manually';
+
+  static String shareCode(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'I-share ang code' : 'Share code';
+
+  static String qrShareHint(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'I-scan ang QR o i-share ang code sa iba.'
+      : 'Scan the QR or share the code with others.';
+
+  static String qrScanClassHint(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Itutok ang camera sa QR code ng klase ng guro.'
+      : "Point the camera at your teacher's class QR code.";
+
+  static String qrScanProfileHint(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Itutok ang camera sa QR code ng profile ng learner.'
+      : "Point the camera at the learner's profile QR code.";
+
+  static String shareClassCodeMessage(AppLanguage lang, String code) =>
+      lang == AppLanguage.filipino
+          ? 'Sumali sa klase ko sa TapTalk gamit ang code: $code'
+          : 'Join my TapTalk class with code: $code';
+
+  static String shareProfileCodeMessage(AppLanguage lang, String code) =>
+      lang == AppLanguage.filipino
+          ? 'I-link ang TapTalk account ko gamit ang profile code: $code'
+          : 'Link my TapTalk account with profile code: $code';
+
   static String noEnrolledClasses(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Wala ka pang naka-enroll na klase. Pindutin ang + para sumali gamit ang class code.'
       : 'No classes enrolled yet. Tap + to join with a class code.';
@@ -1439,4 +1516,64 @@ abstract final class AppStrings {
   static String classCodeHint(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Ibahagi ang code na ito sa mga mag-aaral para makapag-enroll sila sa iyong klase.'
       : 'Share this code with learners so they can enroll in your class.';
+
+  static String viewRequests(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Tingnan ang mga request' : 'View requests';
+
+  static String joinRequests(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Mga join request' : 'Join requests';
+
+  static String joinRequestsSubtitle(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Tingnan kung sino ang gustong sumali sa iyong klase.'
+      : 'See who wants to join your classes.';
+
+  static String noJoinRequests(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Walang pending na join request sa ngayon.'
+      : 'No pending join requests right now.';
+
+  static String joinRequestSentTitle(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Naipadala ang request'
+      : 'Request sent';
+
+  static String joinRequestSent(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Hintayin ang pag-apruba ng guro bago ka makapasok sa klase.'
+      : 'Wait for your teacher to approve before you can join the class.';
+
+  static String joinRequestAlreadyPending(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'May pending request ka na para sa klaseng ito.'
+          : 'You already have a pending request for this class.';
+
+  static String signInOnlineToJoinClass(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Kailangan ng online sign-in para mag-request na sumali sa klase.'
+          : 'Online sign-in is required to request joining a class.';
+
+  static String acceptRequest(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Tanggapin' : 'Accept';
+
+  static String rejectRequest(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Tanggihan' : 'Reject';
+
+  static String joinRequestAcceptedTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Tinanggap ang request' : 'Request accepted';
+
+  static String joinRequestAccepted(AppLanguage lang, String learnerName) =>
+      lang == AppLanguage.filipino
+          ? 'Si $learnerName ay miyembro na ng klase.'
+          : '$learnerName is now in the class.';
+
+  static String joinRequestRejectedTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Tinanggihan ang request' : 'Request rejected';
+
+  static String joinRequestRejected(AppLanguage lang, String learnerName) =>
+      lang == AppLanguage.filipino
+          ? 'Tinanggihan ang request ni $learnerName.'
+          : 'Rejected $learnerName\'s request.';
+
+  static String subjectLabel(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Subject' : 'Subject';
+
+  static String learnerNameLabel(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Mag-aaral' : 'Learner';
 }

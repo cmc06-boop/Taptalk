@@ -276,7 +276,7 @@ class _ListCard extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Container(
-          height: 98,
+          height: 112,
           width: double.infinity,
           decoration: BoxDecoration(
             gradient: colors.gradient,
@@ -325,11 +325,13 @@ class _ListCard extends StatelessWidget {
                             const SizedBox(height: 6),
                             Text(
                               subtitle!,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                               style: GoogleFonts.poppins(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w500,
                                 color: Colors.white.withValues(alpha: 0.82),
-                                height: 1.2,
+                                height: 1.25,
                               ),
                             ),
                           ],

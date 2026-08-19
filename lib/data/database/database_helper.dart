@@ -5,6 +5,8 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import '../default_builtin_content.dart';
+
 class DatabaseHelper {
   DatabaseHelper._();
   static final DatabaseHelper instance = DatabaseHelper._();
@@ -28,7 +30,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 19,
+      version: 21,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE users (
@@ -49,6 +51,7 @@ class DatabaseHelper {
             category_key TEXT NOT NULL,
             category_name TEXT NOT NULL,
             icon_key TEXT DEFAULT 'custom',
+            parent_category_key TEXT,
             UNIQUE(user_id, category_key)
           )
         ''');
@@ -93,6 +96,7 @@ class DatabaseHelper {
         );
         await _createParentChildrenTable(db);
         await _createClassTables(db);
+        await _createJoinRequestTable(db);
         await _createParentNotificationsTable(db);
         await _createLessonTables(db);
       },
@@ -220,6 +224,14 @@ class DatabaseHelper {
         }
         if (oldVersion < 19) {
           await _purgeAppSessionHistoryMarkers(db);
+        }
+        if (oldVersion < 20) {
+          await _createJoinRequestTable(db);
+        }
+        if (oldVersion < 21) {
+          await _ensureCategoryParentColumn(db);
+          await _seedSubcategoriesForAllUsers(db);
+          await _migrateFoodDrinkPhrasesToSubcategories(db);
         }
       },
     );
@@ -369,6 +381,74 @@ class DatabaseHelper {
         UNIQUE(learner_user_id, class_id)
       )
     ''');
+  }
+
+  Future<void> _ensureCategoryParentColumn(Database db) async {
+    final columns = await db.rawQuery('PRAGMA table_info(categories)');
+    final hasColumn =
+        columns.any((col) => col['name'] == 'parent_category_key');
+    if (hasColumn) return;
+    await db.execute(
+      'ALTER TABLE categories ADD COLUMN parent_category_key TEXT',
+    );
+  }
+
+  Future<void> _seedSubcategoriesForAllUsers(Database db) async {
+    final users = await db.query('users');
+    for (final user in users) {
+      final userId = user['id'] as int;
+      for (final (key, name, parentKey, icon) in DefaultBuiltinContent.defaultSubcategories) {
+        await db.insert('categories', {
+          'user_id': userId,
+          'category_key': key,
+          'category_name': name,
+          'icon_key': icon,
+          'parent_category_key': parentKey,
+        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
+    }
+  }
+
+  Future<void> _migrateFoodDrinkPhrasesToSubcategories(Database db) async {
+    for (final entry in DefaultBuiltinContent.defaultPhrases) {
+      final text = entry.$1;
+      final categoryKey = entry.$2;
+      if (!categoryKey.startsWith('food_') && !categoryKey.startsWith('drinks_')) {
+        continue;
+      }
+      await db.update(
+        'phrases',
+        {'category_key': categoryKey},
+        where:
+            'phrase_text = ? AND category_key IN (?, ?) AND is_builtin = 1',
+        whereArgs: [text, 'food', 'drinks'],
+      );
+    }
+  }
+
+  Future<void> _createJoinRequestTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS class_join_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        learner_user_id INTEGER NOT NULL,
+        class_id INTEGER NOT NULL,
+        class_code TEXT NOT NULL,
+        class_name TEXT NOT NULL,
+        teacher_user_id INTEGER NOT NULL,
+        learner_name TEXT NOT NULL,
+        learner_firebase_uid TEXT,
+        teacher_firebase_uid TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        requested_at INTEGER NOT NULL,
+        responded_at INTEGER,
+        remote_id TEXT,
+        UNIQUE(learner_user_id, class_id)
+      )
+    ''');
+    await db.execute(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_class_join_requests_remote_id '
+      'ON class_join_requests(remote_id) WHERE remote_id IS NOT NULL',
+    );
   }
 
   Future<void> _backfillTeacherClasses(Database db) async {
