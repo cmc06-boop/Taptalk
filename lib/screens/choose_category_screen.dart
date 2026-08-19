@@ -9,31 +9,11 @@ import '../widgets/add_category_dialog.dart';
 import '../widgets/category_grid_card.dart';
 import '../widgets/taptalk_shell.dart';
 
-class ChooseCategoryScreen extends StatefulWidget {
+class ChooseCategoryScreen extends StatelessWidget {
   const ChooseCategoryScreen({super.key});
 
-  @override
-  State<ChooseCategoryScreen> createState() => _ChooseCategoryScreenState();
-}
-
-class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
-  static const _continueBlack = Colors.black;
-
-  String? _selected;
-
-  @override
-  void initState() {
-    super.initState();
-    final app = context.read<AppState>();
-    _selected = app.topLevelCategories.isNotEmpty
-        ? app.topLevelCategories.first.key
-        : null;
-  }
-
-  Future<void> _showAddCategoryDialog() async {
-    final selectedKey = await AddCategoryDialog.show(context);
-    if (!mounted || selectedKey == null) return;
-    setState(() => _selected = selectedKey);
+  Future<void> _showAddCategoryDialog(BuildContext context) async {
+    await AddCategoryDialog.show(context);
   }
 
   @override
@@ -67,7 +47,7 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
                   ),
                 ),
                 TextButton(
-                  onPressed: _showAddCategoryDialog,
+                  onPressed: () => _showAddCategoryDialog(context),
                   style: TextButton.styleFrom(
                     backgroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(
@@ -127,7 +107,12 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
           const SizedBox(height: AppSpacing.md),
           Expanded(
             child: GridView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+              padding: EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                0,
+                AppSpacing.lg,
+                AppSpacing.lg + MediaQuery.paddingOf(context).bottom,
+              ),
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: categoryColumns,
                 mainAxisSpacing: AppSpacing.sm,
@@ -140,43 +125,9 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
                 return CategoryGridCard(
                   category: cat,
                   label: app.localizedCategoryName(cat),
-                  theme: theme,
-                  selected: _selected == cat.key,
-                  onTap: () => setState(() => _selected = cat.key),
+                  onTap: () => app.completeCategorySelection(cat.key),
                 );
               },
-            ),
-          ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              AppSpacing.lg,
-              AppSpacing.lg,
-              AppSpacing.lg + MediaQuery.paddingOf(context).bottom,
-            ),
-            child: SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: _selected == null
-                    ? null
-                    : () => app.completeCategorySelection(_selected!),
-                style: FilledButton.styleFrom(
-                  backgroundColor: _continueBlack,
-                  disabledBackgroundColor: _continueBlack.withValues(alpha: 0.4),
-                  minimumSize: const Size(double.infinity, 50),
-                  padding: const EdgeInsets.symmetric(vertical: 0),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: Text(
-                  AppStrings.continueLabel(lang).replaceAll('→', '').trimRight(),
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
             ),
           ),
         ],

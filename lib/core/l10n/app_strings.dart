@@ -1439,6 +1439,14 @@ abstract final class AppStrings {
       ? 'Ilagay ang code nang manual'
       : 'Enter code manually';
 
+  static String uploadQrImage(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Mag-upload ng QR image'
+      : 'Upload QR image';
+
+  static String noQrFoundInImage(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Walang nakitang QR code sa larawan.'
+      : 'No QR code found in the image.';
+
   static String shareCode(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'I-share ang code' : 'Share code';
 

@@ -489,10 +489,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 ),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: theme.textMain,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.sm,
-                            vertical: AppSpacing.sm,
-                          ),
+                          padding: const EdgeInsets.all(6),
                           minimumSize: Size.zero,
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           side: BorderSide(
@@ -504,7 +501,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         child: Icon(
                           Icons.qr_code_2_rounded,
-                          size: 18,
+                          size: 24,
                           color: theme.textMain.withValues(alpha: 0.85),
                         ),
                       ),

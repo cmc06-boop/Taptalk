@@ -160,7 +160,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final lang = app.language;
     final userName = app.welcomeFirstName(lang);
     final denseGrid = AppSpacing.phraseGridIsDense(context);
-    final categoryColumns = AppSpacing.categoryGridColumns(context);
     final parentCategory = app.selectedTopLevelCategory;
     final parentCategoryLabel = parentCategory != null
         ? app.localizedCategoryName(parentCategory)
@@ -533,56 +532,27 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: categoryColumns,
-                  mainAxisSpacing: AppSpacing.sm,
-                  crossAxisSpacing: AppSpacing.sm,
-                  childAspectRatio: categoryColumns >= 5 ? 0.92 : 0.82,
-                ),
+                gridDelegate: AppSpacing.phraseGridDelegate(context),
                 itemCount: app.subcategoriesForSelected.length,
                 itemBuilder: (context, i) {
                   final sub = app.subcategoriesForSelected[i];
                   return CategoryGridCard(
                     category: sub,
                     label: app.localizedCategoryName(sub),
-                    theme: theme,
-                    selected: false,
                     onTap: () => app.selectSubcategory(sub.key),
                   );
                 },
               ),
             ),
           ] else ...[
-            if (app.selectedSubcategoryKey != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.lg,
-                  AppSpacing.md,
-                  AppSpacing.lg,
-                  0,
-                ),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: app.clearSubcategorySelection,
-                    icon: const Icon(Icons.arrow_back_rounded, size: 18),
-                    label: Text(AppStrings.backToSubcategories(lang)),
-                    style: TextButton.styleFrom(
-                      foregroundColor: theme.bgAccent,
-                      padding: EdgeInsets.zero,
-                      textStyle: GoogleFonts.poppins(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
             PhraseSectionHeader(
               category: app.selectedCategory,
               categoryLabel: app.selectedCategory != null
                   ? app.localizedCategoryName(app.selectedCategory!)
                   : AppStrings.customCategory(lang),
+              onBack: app.selectedSubcategoryKey != null
+                  ? app.clearSubcategorySelection
+                  : null,
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),

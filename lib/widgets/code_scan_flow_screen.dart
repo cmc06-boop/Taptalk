@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
@@ -183,6 +184,56 @@ class _CodeScanFlowScreenState extends State<CodeScanFlowScreen> {
     await _completeWithCode(code);
   }
 
+  Future<void> _pickQrFromGallery() async {
+    if (_busy) return;
+    final lang = context.read<AppState>().language;
+    final picked =
+        await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (picked == null || !mounted) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      final result = await _controller.analyzeImage(picked.path);
+      if (!mounted) return;
+      if (result == null || result.barcodes.isEmpty) {
+        setState(() {
+          _busy = false;
+          _error = AppStrings.noQrFoundInImage(lang);
+        });
+        return;
+      }
+      for (final barcode in result.barcodes) {
+        final raw = barcode.rawValue?.trim();
+        if (raw == null || raw.isEmpty) continue;
+        final code = _extractCode(raw);
+        if (code == null) {
+          setState(() {
+            _busy = false;
+            _error = AppStrings.qrCodeNotRecognized(lang);
+          });
+          return;
+        }
+        _handled = true;
+        await _completeWithCode(code);
+        return;
+      }
+      setState(() {
+        _busy = false;
+        _error = AppStrings.noQrFoundInImage(lang);
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = AppStrings.noQrFoundInImage(lang);
+      });
+    }
+  }
+
   Future<void> _toggleTorch() async {
     await _controller.toggleTorch();
     if (!mounted) return;
@@ -288,29 +339,64 @@ class _CodeScanFlowScreenState extends State<CodeScanFlowScreen> {
                     AppSpacing.lg,
                     AppSpacing.lg + MediaQuery.paddingOf(context).bottom,
                   ),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: _busy ? null : _openManualEntry,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: const Color(0xFF1A1A1A),
-                        disabledBackgroundColor: Colors.white.withValues(alpha: 0.55),
-                        disabledForegroundColor: const Color(0xFF1A1A1A).withValues(alpha: 0.45),
-                        elevation: 0,
-                        minimumSize: const Size.fromHeight(52),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
+                  child: Column(
+                    children: [
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: _busy ? null : _pickQrFromGallery,
+                          icon: const Icon(Icons.image_outlined, size: 20),
+                          label: Text(
+                            AppStrings.uploadQrImage(lang),
+                            style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                            ),
+                          ),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: const Color(0xFF1A1A1A),
+                            disabledBackgroundColor:
+                                Colors.white.withValues(alpha: 0.55),
+                            disabledForegroundColor:
+                                const Color(0xFF1A1A1A).withValues(alpha: 0.45),
+                            elevation: 0,
+                            minimumSize: const Size.fromHeight(52),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
                         ),
                       ),
-                      child: Text(
-                        AppStrings.enterCodeManually(lang),
-                        style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 15,
+                      const SizedBox(height: AppSpacing.sm),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(
+                          onPressed: _busy ? null : _openManualEntry,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(
+                              color: Colors.white54,
+                              width: 1.5,
+                            ),
+                            disabledForegroundColor:
+                                Colors.white.withValues(alpha: 0.45),
+                            elevation: 0,
+                            minimumSize: const Size.fromHeight(52),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: Text(
+                            AppStrings.enterCodeManually(lang),
+                            style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                   ),
                 ),
               ],

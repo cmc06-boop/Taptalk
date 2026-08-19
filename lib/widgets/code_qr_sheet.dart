@@ -111,10 +111,10 @@ class CodeQrSheet extends StatelessWidget {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              AppSpacing.lg,
-              AppSpacing.lg,
               AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.sm,
             ),
             decoration: BoxDecoration(
               color: Colors.white,
@@ -144,7 +144,7 @@ class CodeQrSheet extends StatelessWidget {
                         data: code,
                         version: QrVersions.auto,
                         size: 220,
-                        padding: EdgeInsets.zero,
+                        padding: const EdgeInsets.all(6),
                         backgroundColor: Colors.white,
                         eyeStyle: QrEyeStyle(
                           eyeShape: QrEyeShape.square,
