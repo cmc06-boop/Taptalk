@@ -1,6 +1,13 @@
 import 'package:flutter/material.dart';
 
-/// Circular logo matching the web prototype (black circle + green glow).
+abstract final class TapTalkBrandAssets {
+  static const logoIcon = 'assets/images/Logo/Logo Icon.png';
+  static const textIcon = 'assets/images/Logo/Text Icon.png';
+  static const fullLogo = 'assets/images/Logo/Full logo.png';
+}
+
+/// App mark from [assets/images/Logo/Logo Icon.png] — square crop over a
+/// separate blurred glow circle.
 class TapTalkLogo extends StatelessWidget {
   const TapTalkLogo({super.key, this.size = 100});
 
@@ -8,31 +15,96 @@ class TapTalkLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: Colors.black,
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF5BB88A).withValues(alpha: 0.48),
-            blurRadius: 28,
-            spreadRadius: 2,
+    final glowSize = size * 1.06;
+    final radius = size * 0.18;
+
+    return SizedBox(
+      width: glowSize,
+      height: glowSize,
+      child: Stack(
+        alignment: Alignment.center,
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: glowSize,
+            height: glowSize,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [
+                  const Color(0xFF3ECF8E).withValues(alpha: 0.55),
+                  const Color(0xFF7CFF6B).withValues(alpha: 0.32),
+                  const Color(0xFF5BB88A).withValues(alpha: 0.12),
+                  const Color(0xFFB3E6CC).withValues(alpha: 0.0),
+                ],
+                stops: const [0.0, 0.32, 0.62, 1],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF3ECF8E).withValues(alpha: 0.28),
+                  blurRadius: 14,
+                  spreadRadius: 0,
+                ),
+              ],
+            ),
           ),
-          BoxShadow(
-            color: const Color(0xFFB3E6CC).withValues(alpha: 0.45),
-            blurRadius: 42,
+          ClipRRect(
+            borderRadius: BorderRadius.circular(radius),
+            child: Image.asset(
+              TapTalkBrandAssets.logoIcon,
+              width: size,
+              height: size,
+              fit: BoxFit.cover,
+              filterQuality: FilterQuality.high,
+            ),
           ),
         ],
       ),
-      child: Center(
-        child: Icon(
-          Icons.record_voice_over_rounded,
-          color: const Color(0xFF8EE66B),
-          size: size * 0.5,
-        ),
+    );
+  }
+}
+
+/// Wordmark from [assets/images/Logo/Text Icon.png].
+class TapTalkWordmark extends StatelessWidget {
+  const TapTalkWordmark({
+    super.key,
+    this.height = 44,
+    this.maxWidth = 220,
+  });
+
+  final double height;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth, maxHeight: height),
+      child: Image.asset(
+        TapTalkBrandAssets.textIcon,
+        height: height,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
       ),
+    );
+  }
+}
+
+/// Combined icon + wordmark from [assets/images/Logo/Full logo.png].
+class TapTalkFullLogo extends StatelessWidget {
+  const TapTalkFullLogo({
+    super.key,
+    this.width = 240,
+  });
+
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
+    return Image.asset(
+      TapTalkBrandAssets.fullLogo,
+      width: width,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.high,
     );
   }
 }

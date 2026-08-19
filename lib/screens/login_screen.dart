@@ -79,7 +79,8 @@ class _LoginScreenState extends State<LoginScreen> {
         builder: (context, constraints) {
           final isWide = constraints.maxWidth >= 500;
           final compactHeight = constraints.maxHeight < 760;
-          final headerHeight = isWide ? 180.0 : (compactHeight ? 150.0 : 190.0);
+          final headerHeight = isWide ? 268.0 : (compactHeight ? 232.0 : 286.0);
+          final sheetOverlap = isWide ? 34.0 : 50.0;
           final logoSize = compactHeight ? 70.0 : 86.0;
           final contentHorizontal = isWide ? 36.0 : 24.0;
           final contentTop = compactHeight ? 16.0 : 22.0;
@@ -97,27 +98,18 @@ class _LoginScreenState extends State<LoginScreen> {
                     colors: [Color(0xFF3ECF8E), Color(0xFFB3E6CC)],
                   ),
                 ),
-                alignment: Alignment.center,
-                child: Text(
-                  'TapTalk',
-                  style: GoogleFonts.poppins(
-                    fontSize: compactHeight ? 34 : 38,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                    letterSpacing: 0.4,
-                    shadows: [
-                      Shadow(
-                        color: Color(0x22000000),
-                        blurRadius: 6,
-                        offset: Offset(0, 2),
-                      ),
-                    ],
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: EdgeInsets.only(bottom: sheetOverlap + 6),
+                  child: TapTalkWordmark(
+                    height: compactHeight ? 152 : 178,
+                    maxWidth: compactHeight ? 440 : 480,
                   ),
                 ),
               ),
               Expanded(
                 child: Transform.translate(
-                  offset: Offset(0, isWide ? -34 : -50),
+                  offset: Offset(0, -sheetOverlap),
                   child: Material(
                     color: Colors.white,
                     borderRadius: const BorderRadius.vertical(
@@ -139,7 +131,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             Center(child: TapTalkLogo(size: logoSize)),
-                            SizedBox(height: sectionGap),
+                            SizedBox(height: compactHeight ? 10 : 12),
                             Text(
                               AppStrings.loginTitle(lang),
                               textAlign: TextAlign.center,

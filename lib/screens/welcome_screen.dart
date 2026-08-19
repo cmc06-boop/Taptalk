@@ -57,7 +57,8 @@ class _WelcomeScreenState extends State<WelcomeScreen>
           final headerHeight = isWide
               ? screenH * 0.42
               : (compactHeight ? screenH * 0.46 : screenH * 0.52);
-          final headerLogoSize = compactHeight ? 52.0 : 60.0;
+          final headerLogoWidth = (constraints.maxWidth * (isWide ? 0.34 : 0.52))
+              .clamp(176.0, 248.0);
           final contentHorizontal = isWide ? 36.0 : 24.0;
           final contentTop = compactHeight ? 68.0 : 80.0;
           final textBlockGap = compactHeight ? 10.0 : 14.0;
@@ -96,30 +97,8 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                       size: Size(constraints.maxWidth, headerHeight),
                     ),
                     Align(
-                      alignment: Alignment.center,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          TapTalkLogo(size: headerLogoSize),
-                          SizedBox(height: compactHeight ? 12 : 16),
-                          Text(
-                            'TapTalk',
-                            style: GoogleFonts.poppins(
-                              fontSize: compactHeight ? 42 : 48,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white,
-                              letterSpacing: 0.4,
-                              shadows: const [
-                                Shadow(
-                                  color: Color(0x22000000),
-                                  blurRadius: 6,
-                                  offset: Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
+                      alignment: const Alignment(0, -0.08),
+                      child: TapTalkFullLogo(width: headerLogoWidth),
                     ),
                   ],
                 ),

@@ -71,6 +71,7 @@ flutter:
     - assets/images/Technology/
     - assets/images/Transportation/
     - "assets/images/Category Cards/"
+    - "assets/images/Logo/"
   fonts:
     - family: Poppins
       fonts:

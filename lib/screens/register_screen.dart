@@ -159,7 +159,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         builder: (context, constraints) {
           final isWide = constraints.maxWidth >= 500;
           final compactHeight = constraints.maxHeight < 820;
-          final headerHeight = isWide ? 176.0 : (compactHeight ? 130.0 : 170.0);
+          final headerHeight = isWide ? 256.0 : (compactHeight ? 214.0 : 258.0);
+          final sheetOverlap = isWide ? 34.0 : 42.0;
           final logoSize = compactHeight ? 64.0 : 80.0;
           final contentHorizontal = isWide ? 36.0 : 24.0;
           final contentTop = compactHeight ? 12.0 : 18.0;
@@ -185,20 +186,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       child: SizedBox.expand(),
                     ),
-                    Text(
-                      'TapTalk',
-                      style: GoogleFonts.poppins(
-                        fontSize: compactHeight ? 34 : 38,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                        letterSpacing: 0.4,
-                        shadows: const [
-                          Shadow(
-                            color: Color(0x22000000),
-                            blurRadius: 6,
-                            offset: Offset(0, 2),
-                          ),
-                        ],
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Padding(
+                        padding: EdgeInsets.only(bottom: sheetOverlap + 6),
+                        child: TapTalkWordmark(
+                          height: compactHeight ? 144 : 168,
+                          maxWidth: compactHeight ? 420 : 460,
+                        ),
                       ),
                     ),
                     Positioned(
@@ -215,7 +210,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
               Expanded(
                 child: Transform.translate(
-                  offset: Offset(0, isWide ? -34 : -42),
+                  offset: Offset(0, -sheetOverlap),
                   child: Material(
                     color: Colors.white,
                     borderRadius: const BorderRadius.vertical(
@@ -240,7 +235,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             Center(child: TapTalkLogo(size: logoSize)),
-                            SizedBox(height: sectionGap),
+                            SizedBox(height: compactHeight ? 10 : 12),
                             Text(
                               AppStrings.signUp(lang),
                               textAlign: TextAlign.center,
