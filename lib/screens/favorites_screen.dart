@@ -86,16 +86,16 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     setState(() => _removedFavoriteKeys.add(favorite.dedupeKey));
     await app.deletePhrase(phrase);
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    final snackBar = messenger.showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 5),
-          content: const Text('Phrase deleted'),
+          content: const Text('Deleting phrase in 5 seconds'),
           action: SnackBarAction(
             label: 'Undo',
-            onPressed: () async {
-              await app.restorePhrase(phrase, restoreFavorite: true);
+            onPressed: () {
+              unawaited(app.restorePhrase(phrase, restoreFavorite: true));
               if (mounted) {
                 setState(() => _removedFavoriteKeys.remove(favorite.dedupeKey));
               }
@@ -103,6 +103,11 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
           ),
         ),
       );
+    await Future<void>.delayed(const Duration(seconds: 5));
+    snackBar.close();
+    if (mounted) {
+      setState(() => _removedFavoriteKeys.remove(favorite.dedupeKey));
+    }
   }
 
   @override

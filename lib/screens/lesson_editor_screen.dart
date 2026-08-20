@@ -120,30 +120,37 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
       ),
     );
     if (confirm != true || !mounted) return;
-    setState(() => _phrases = _phrases.where((p) => p.id != phrase.id).toList());
     try {
-      await context.read<AppState>().deleteLessonPhrase(phrase.id);
-      if (!mounted) return;
       final app = context.read<AppState>();
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
+      setState(() => _phrases = _phrases.where((p) => p.id != phrase.id).toList());
+      await app.deleteLessonPhrase(phrase.id);
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      final snackBar = messenger.showSnackBar(
           SnackBar(
             duration: const Duration(seconds: 5),
-            content: const Text('Phrase deleted'),
+            content: const Text('Deleting phrase in 5 seconds'),
             action: SnackBarAction(
               label: 'Undo',
-              onPressed: () async {
-                await app.addLessonPhrase(
-                  widget.lessonId,
-                  phrase.text,
-                  imagePath: phrase.imagePath,
+              onPressed: () {
+                unawaited(
+                  app
+                      .addLessonPhrase(
+                        widget.lessonId,
+                        phrase.text,
+                        imagePath: phrase.imagePath,
+                      )
+                      .then((_) {
+                        if (mounted) _load();
+                      }),
                 );
-                if (mounted) await _load();
               },
             ),
           ),
         );
+      await Future<void>.delayed(const Duration(seconds: 5));
+      snackBar.close();
     } catch (_) {
       if (!mounted) return;
       await _load();

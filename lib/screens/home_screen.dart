@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -510,21 +512,27 @@ class _HomeScreenState extends State<HomeScreen> {
                         final wasFavorite = app.isFavorite(phrase);
                         await app.deletePhrase(phrase);
                         if (!context.mounted) return;
-                        ScaffoldMessenger.of(context)
-                          ..hideCurrentSnackBar()
-                          ..showSnackBar(
+                        final messenger = ScaffoldMessenger.of(context);
+                        messenger.hideCurrentSnackBar();
+                        final snackBar = messenger.showSnackBar(
                             SnackBar(
                               duration: const Duration(seconds: 5),
-                              content: const Text('Phrase deleted'),
+                              content: const Text('Deleting phrase in 5 seconds'),
                               action: SnackBarAction(
                                 label: 'Undo',
-                                onPressed: () => app.restorePhrase(
-                                  phrase,
-                                  restoreFavorite: wasFavorite,
-                                ),
+                                onPressed: () {
+                                  unawaited(
+                                    app.restorePhrase(
+                                      phrase,
+                                      restoreFavorite: wasFavorite,
+                                    ),
+                                  );
+                                },
                               ),
                             ),
                           );
+                        await Future<void>.delayed(const Duration(seconds: 5));
+                        snackBar.close();
                       }
                     },
                   );

@@ -60,19 +60,25 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
     });
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentSnackBar();
-    final closed = await messenger
-        .showSnackBar(
+    var undone = false;
+    final snackBar = messenger.showSnackBar(
           SnackBar(
             duration: const Duration(seconds: 5),
-            content: Text(deleting.length == 1 ? 'Category deleted' : '${deleting.length} categories deleted'),
-            action: SnackBarAction(label: 'Undo', onPressed: () {}),
+            content: Text(deleting.length == 1 ? 'Deleting category in 5 seconds' : 'Deleting ${deleting.length} categories in 5 seconds'),
+            action: SnackBarAction(
+              label: 'Undo',
+              onPressed: () {
+                undone = true;
+                if (mounted) {
+                  setState(() => _pendingDeletedKeys.removeAll(deleting));
+                }
+              },
+            ),
           ),
-        )
-        .closed;
-    if (closed == SnackBarClosedReason.action) {
-      if (mounted) {
-        setState(() => _pendingDeletedKeys.removeAll(deleting));
-      }
+        );
+    await Future<void>.delayed(const Duration(seconds: 5));
+    snackBar.close();
+    if (undone) {
       return;
     }
     await app.deleteCustomCategories(deleting);
