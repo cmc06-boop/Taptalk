@@ -11,11 +11,13 @@ class PanelCard extends StatelessWidget {
     required this.child,
     this.margin,
     this.padding,
+    this.borderRadius = AppSpacing.radiusLg,
   });
 
   final Widget child;
   final EdgeInsetsGeometry? margin;
   final EdgeInsetsGeometry? padding;
+  final double borderRadius;
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +36,7 @@ class PanelCard extends StatelessWidget {
           ),
       decoration: BoxDecoration(
         color: theme.bgMid,
-        borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+        borderRadius: BorderRadius.circular(borderRadius),
         boxShadow: [
           BoxShadow(
             color: theme.bgAccent.withValues(alpha: 0.14),

@@ -177,7 +177,26 @@ class _HomeScreenState extends State<HomeScreen> {
       },
       child: LearnerScaffold(
       title: headerLabel,
+      titleWidget: SizedBox(
+        height: 85,
+        child: Center(
+          child: Text(
+            headerLabel,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.poppins(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: theme.textMain,
+            ),
+          ),
+        ),
+      ),
       currentRoute: AppRoute.home,
+      headerContentHeight: 85,
+      headerBottomSpacing: 0,
+      bodyTopOffset: -4,
       onMicTap: _toggleMic,
       micActive: _listening,
       body: RefreshIndicator(
@@ -227,6 +246,12 @@ class _HomeScreenState extends State<HomeScreen> {
             )
           else ...[
           PanelCard(
+            margin: const EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              0,
+              AppSpacing.lg,
+              AppSpacing.sm,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [

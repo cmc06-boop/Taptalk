@@ -124,6 +124,8 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
       title: AppStrings.appName(lang),
       titleWidget: const TapTalkHeaderWordmark(),
       currentRoute: AppRoute.favorites,
+      headerBottomSpacing: 0,
+      bodyTopOffset: -4,
       onMicTap: () => app.setRoute(AppRoute.home),
       body: RefreshIndicator(
         onRefresh: _refresh,

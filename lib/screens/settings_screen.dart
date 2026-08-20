@@ -38,6 +38,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       title: AppStrings.appName(lang),
       titleWidget: const TapTalkHeaderWordmark(),
       currentRoute: AppRoute.settings,
+      headerBottomSpacing: 0,
+      bodyTopOffset: -4,
       showBottomNav: true,
       body: ListView(
         padding: const EdgeInsets.only(bottom: AppSpacing.xxl),

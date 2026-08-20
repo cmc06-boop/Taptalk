@@ -227,6 +227,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       title: AppStrings.appName(lang),
       titleWidget: const TapTalkHeaderWordmark(),
       currentRoute: AppRoute.profile,
+      headerBottomSpacing: 0,
+      bodyTopOffset: -4,
       showBottomNav: true,
       body: ListView(
         padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
@@ -234,7 +236,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(
               AppSpacing.lg,
-              AppSpacing.sm,
+              0,
               AppSpacing.lg,
               0,
             ),

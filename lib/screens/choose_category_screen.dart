@@ -29,6 +29,8 @@ class ChooseCategoryScreen extends StatelessWidget {
       title: AppStrings.appName(lang),
       titleWidget: const TapTalkHeaderWordmark(),
       currentRoute: AppRoute.chooseCategory,
+      headerBottomSpacing: 0,
+      bodyTopOffset: -4,
       body: Stack(
         children: [
           RefreshIndicator(
@@ -39,6 +41,7 @@ class ChooseCategoryScreen extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 96),
               children: [
                 PanelCard(
+                  borderRadius: 14,
                   margin: const EdgeInsets.fromLTRB(
                     AppSpacing.lg,
                     0,

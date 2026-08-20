@@ -66,11 +66,7 @@ class TapTalkLogo extends StatelessWidget {
 
 /// Wordmark from [assets/images/Logo/Text Icon.png].
 class TapTalkWordmark extends StatelessWidget {
-  const TapTalkWordmark({
-    super.key,
-    this.height = 44,
-    this.maxWidth = 220,
-  });
+  const TapTalkWordmark({super.key, this.height = 44, this.maxWidth = 220});
 
   final double height;
   final double maxWidth;
@@ -96,18 +92,15 @@ class TapTalkHeaderWordmark extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Transform.translate(
-      offset: const Offset(0, -16),
-      child: const TapTalkWordmark(height: 72, maxWidth: 340),
+      offset: const Offset(0, -2),
+      child: const TapTalkWordmark(height: 85, maxWidth: 405),
     );
   }
 }
 
 /// Combined icon + wordmark from [assets/images/Logo/Full logo.png].
 class TapTalkFullLogo extends StatelessWidget {
-  const TapTalkFullLogo({
-    super.key,
-    this.width = 240,
-  });
+  const TapTalkFullLogo({super.key, this.width = 240});
 
   final double width;
 

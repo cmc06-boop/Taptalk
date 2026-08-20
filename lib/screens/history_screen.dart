@@ -144,6 +144,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
       title: AppStrings.appName(lang),
       titleWidget: const TapTalkHeaderWordmark(),
       currentRoute: AppRoute.history,
+      headerBottomSpacing: 0,
+      bodyTopOffset: -4,
       body: RefreshIndicator(
         onRefresh: _refresh,
         color: theme.bgAccent,
