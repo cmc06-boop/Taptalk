@@ -117,9 +117,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     return LearnerScaffold(
       title: AppStrings.notifications(lang),
       currentRoute: AppRoute.notifications,
-      showBackButton: true,
       showBottomNav: false,
-      onBack: () => app.setRoute(AppRoute.home),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

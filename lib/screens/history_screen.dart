@@ -11,6 +11,7 @@ import '../data/models/history_model.dart';
 import '../data/repositories/app_repository.dart';
 import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
+import '../widgets/taptalk_logo.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -141,6 +142,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     return LearnerScaffold(
       title: AppStrings.appName(lang),
+      titleWidget: const TapTalkHeaderWordmark(),
       currentRoute: AppRoute.history,
       body: RefreshIndicator(
         onRefresh: _refresh,

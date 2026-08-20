@@ -7,7 +7,9 @@ import '../core/l10n/app_strings.dart';
 import '../providers/app_state.dart';
 import '../widgets/add_category_dialog.dart';
 import '../widgets/category_grid_card.dart';
-import '../widgets/taptalk_shell.dart';
+import '../widgets/learner_scaffold.dart';
+import '../widgets/panel_card.dart';
+import '../widgets/taptalk_logo.dart';
 
 class ChooseCategoryScreen extends StatelessWidget {
   const ChooseCategoryScreen({super.key});
@@ -21,113 +23,104 @@ class ChooseCategoryScreen extends StatelessWidget {
     final app = context.watch<AppState>();
     final lang = app.language;
     final theme = app.theme;
-    final name = app.user?.fullName ?? AppStrings.defaultLearnerName(lang);
-    final categoryColumns = AppSpacing.categoryGridColumns(context);
+    final name = app.welcomeFirstName(lang);
 
-    return TapTalkShell(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+    return LearnerScaffold(
+      title: AppStrings.appName(lang),
+      titleWidget: const TapTalkHeaderWordmark(),
+      currentRoute: AppRoute.chooseCategory,
+      body: Stack(
         children: [
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              AppSpacing.md + MediaQuery.paddingOf(context).top,
-              AppSpacing.lg,
-              AppSpacing.sm,
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          RefreshIndicator(
+            onRefresh: () => app.refreshLearnerCollections(),
+            color: theme.bgAccent,
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.only(bottom: 96),
               children: [
-                Text(
-                  AppStrings.chooseCategoryTitle(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: theme.textMain,
+                PanelCard(
+                  margin: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    0,
+                    AppSpacing.lg,
+                    AppSpacing.md,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        AppStrings.welcomeUser(name, lang),
+                        style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: theme.textMain,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.xs),
+                      Text(
+                        AppStrings.chooseCategorySub(lang),
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          color: theme.textMain.withValues(alpha: 0.75),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                TextButton(
-                  onPressed: () => _showAddCategoryDialog(context),
-                  style: TextButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.md,
-                      vertical: AppSpacing.xs,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(999),
-                      side: BorderSide(
-                        color: theme.bgAccent.withValues(alpha: 0.35),
-                      ),
-                    ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    AppSpacing.xs,
+                    AppSpacing.lg,
+                    0,
                   ),
-                  child: Text(
-                    AppStrings.addCategoryShort(lang),
-                    style: GoogleFonts.poppins(
-                      fontWeight: FontWeight.w700,
-                      color: theme.bgAccent,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        AppStrings.chooseCategoryTitle(lang),
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: theme.textMain,
+                          height: 1.1,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      GridView.builder(
+                        key: ValueKey(
+                          'cats_${lang.name}_${app.languageRevision}_${app.topLevelCategories.length}',
+                        ),
+                        padding: EdgeInsets.zero,
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate: AppSpacing.phraseGridDelegate(context),
+                        itemCount: app.topLevelCategories.length,
+                        itemBuilder: (context, i) {
+                          final cat = app.topLevelCategories[i];
+                          return CategoryGridCard(
+                            category: cat,
+                            label: app.localizedCategoryName(cat),
+                            selected: cat.key == app.selectedCategoryKey,
+                            onTap: () => app.completeCategorySelection(cat.key),
+                          );
+                        },
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-            child: Container(
-              padding: const EdgeInsets.all(AppSpacing.md),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                border: Border.all(color: const Color(0xFFE9EEF2)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    AppStrings.hiUser(name, lang),
-                    style: GoogleFonts.poppins(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: theme.textMain,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    AppStrings.chooseCategorySub(lang),
-                    style: GoogleFonts.poppins(
-                      fontSize: 13,
-                      color: theme.textMain.withValues(alpha: 0.75),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Expanded(
-            child: GridView.builder(
-              padding: EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                0,
-                AppSpacing.lg,
-                AppSpacing.lg + MediaQuery.paddingOf(context).bottom,
-              ),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: categoryColumns,
-                mainAxisSpacing: AppSpacing.sm,
-                crossAxisSpacing: AppSpacing.sm,
-                childAspectRatio: categoryColumns >= 5 ? 0.92 : 0.82,
-              ),
-              itemCount: app.topLevelCategories.length,
-              itemBuilder: (context, i) {
-                final cat = app.topLevelCategories[i];
-                return CategoryGridCard(
-                  category: cat,
-                  label: app.localizedCategoryName(cat),
-                  onTap: () => app.completeCategorySelection(cat.key),
-                );
-              },
+          Positioned(
+            right: AppSpacing.lg,
+            bottom: AppSpacing.md,
+            child: FloatingActionButton(
+              onPressed: () => _showAddCategoryDialog(context),
+              backgroundColor: theme.bgAccent,
+              foregroundColor: Colors.white,
+              tooltip: AppStrings.addCategoryShort(lang),
+              child: const Icon(Icons.add_rounded),
             ),
           ),
         ],

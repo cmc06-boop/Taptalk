@@ -7,11 +7,12 @@ import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../providers/app_state.dart';
 
-bool _isForMeRoute(AppRoute route) {
+bool _isForMeRoute(AppRoute route, {bool includeCategories = false}) {
   return route == AppRoute.home ||
       route == AppRoute.favorites ||
       route == AppRoute.history ||
-      route == AppRoute.settings;
+      route == AppRoute.settings ||
+      (includeCategories && route == AppRoute.chooseCategory);
 }
 
 Widget _settingsDrawerItem({
@@ -34,36 +35,28 @@ class SourceDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
+    if (!app.drawerOpen) return const SizedBox.shrink();
+
     final theme = app.theme;
     final lang = app.language;
 
     return Stack(
+      fit: StackFit.expand,
       children: [
-        IgnorePointer(
-          ignoring: !app.drawerOpen,
-          child: AnimatedOpacity(
-            duration: AppSpacing.drawerAnimation,
-            curve: Curves.easeOutCubic,
-            opacity: app.drawerOpen ? 1 : 0,
-            child: GestureDetector(
-              onTap: () => app.toggleDrawer(false),
-              child: Container(color: Colors.black.withValues(alpha: 0.18)),
-            ),
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => app.toggleDrawer(false),
+            child: Container(color: Colors.black.withValues(alpha: 0.18)),
           ),
         ),
         Align(
           alignment: Alignment.centerLeft,
-          child: IgnorePointer(
-            ignoring: !app.drawerOpen,
-            child: AnimatedSlide(
-              duration: AppSpacing.drawerAnimation,
-              curve: Curves.easeOutCubic,
-              offset: app.drawerOpen ? Offset.zero : const Offset(-1.04, 0),
-              child: AnimatedOpacity(
-                duration: AppSpacing.drawerAnimation,
-                curve: Curves.easeOutCubic,
-                opacity: app.drawerOpen ? 1 : 0,
-                child: SizedBox(
+          child: AnimatedSlide(
+            duration: AppSpacing.drawerAnimation,
+            curve: Curves.easeOutCubic,
+            offset: Offset.zero,
+            child: SizedBox(
                   height: MediaQuery.sizeOf(context).height,
                   width: 238,
                   child: Container(
@@ -121,8 +114,12 @@ class SourceDrawer extends StatelessWidget {
                               theme: theme,
                               icon: Icons.person_outline,
                               label: AppStrings.forMe(lang),
-                              active: _isForMeRoute(app.route),
-                              onTap: () => app.setRoute(AppRoute.home),
+                              active: _isForMeRoute(
+                                app.route,
+                                includeCategories: true,
+                              ),
+                              onTap: () =>
+                                  app.setRoute(AppRoute.chooseCategory),
                             ),
                             _DrawerItem(
                               theme: theme,
@@ -144,6 +141,13 @@ class SourceDrawer extends StatelessWidget {
                               app: app,
                             ),
                           ] else if (app.user?.isLearner ?? false) ...[
+                            _DrawerItem(
+                              theme: theme,
+                              icon: Icons.grid_view_rounded,
+                              label: AppStrings.chooseCategoryTitle(lang),
+                              active: app.route == AppRoute.chooseCategory,
+                              onTap: () => app.setRoute(AppRoute.chooseCategory),
+                            ),
                             _DrawerItem(
                               theme: theme,
                               icon: Icons.person_outline,
@@ -176,8 +180,12 @@ class SourceDrawer extends StatelessWidget {
                               theme: theme,
                               icon: Icons.person_outline,
                               label: AppStrings.forMe(lang),
-                              active: _isForMeRoute(app.route),
-                              onTap: () => app.setRoute(AppRoute.home),
+                              active: _isForMeRoute(
+                                app.route,
+                                includeCategories: true,
+                              ),
+                              onTap: () =>
+                                  app.setRoute(AppRoute.chooseCategory),
                             ),
                             _DrawerItem(
                               theme: theme,
@@ -233,11 +241,9 @@ class SourceDrawer extends StatelessWidget {
                     ),
                   ),
                 ),
-                ),
               ),
             ),
           ),
-        ),
       ],
     );
   }

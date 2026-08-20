@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
+import '../core/navigation/route_transitions.dart';
 import '../core/l10n/app_strings.dart';
 import '../providers/app_state.dart';
 import '../widgets/class_color_card.dart';
@@ -61,7 +62,7 @@ class _TeacherMonitoringScreenState extends State<TeacherMonitoringScreen> {
   void _openClass(({int id, String name, String code}) teacherClass) {
     Navigator.of(context)
         .push(
-          MaterialPageRoute<void>(
+          taptalkPageRoute<void>(
             builder: (_) => TeacherClassMonitoringScreen(
               classId: teacherClass.id,
               className: teacherClass.name,

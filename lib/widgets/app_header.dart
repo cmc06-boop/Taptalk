@@ -10,30 +10,28 @@ class AppHeader extends StatelessWidget {
     super.key,
     required this.title,
     this.titleBadge,
+    this.titleWidget,
     this.onMenu,
-    this.onBack,
     this.onProfile,
     this.onNotifications,
     this.onAlerts,
     this.showProfile = true,
     this.showNotifications = false,
     this.showAlerts = false,
-    this.showBackButton = false,
     this.notificationBadgeCount = 0,
     this.trailingAction,
   });
 
   final String title;
   final Widget? titleBadge;
+  final Widget? titleWidget;
   final VoidCallback? onMenu;
-  final VoidCallback? onBack;
   final VoidCallback? onProfile;
   final VoidCallback? onNotifications;
   final VoidCallback? onAlerts;
   final bool showProfile;
   final bool showNotifications;
   final bool showAlerts;
-  final bool showBackButton;
   final int notificationBadgeCount;
   final Widget? trailingAction;
 
@@ -53,30 +51,32 @@ class AppHeader extends StatelessWidget {
       ),
       child: Row(
         children: [
-          _CircleIconButton(
-            icon: showBackButton ? Icons.arrow_back_rounded : Icons.menu_rounded,
-            onTap: showBackButton
-                ? (onBack ?? () => Navigator.maybePop(context))
-                : onMenu,
-            accent: theme.bgAccent,
-          ),
+          if (onMenu != null)
+            _CircleIconButton(
+              icon: Icons.menu_rounded,
+              onTap: onMenu,
+              accent: theme.bgAccent,
+            )
+          else
+            const SizedBox(width: 36),
           Expanded(
             child: Center(
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Flexible(
-                    child: Text(
-                      title,
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: theme.textMain,
-                      ),
-                    ),
+                    child: titleWidget ??
+                        Text(
+                          title,
+                          textAlign: TextAlign.center,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: theme.textMain,
+                          ),
+                        ),
                   ),
                   if (titleBadge != null) ...[
                     const SizedBox(width: 8),

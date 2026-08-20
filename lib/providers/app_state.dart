@@ -1,6 +1,7 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
@@ -10,7 +11,7 @@ import '../core/utils/auth_validation.dart';
 import '../core/utils/phrase_image_storage.dart';
 import '../core/l10n/content_localization.dart';
 import '../data/models/category_model.dart';
-import '../core/constants/app_spacing.dart';
+import '../core/navigation/route_transitions.dart';
 import '../core/constants/monitoring_constants.dart';
 export '../core/constants/child_usage_period.dart';
 import '../core/constants/child_usage_period.dart';
@@ -22,7 +23,6 @@ import '../data/models/vocabulary_growth_summary.dart';
 import '../core/constants/tts_speed_options.dart';
 import '../core/theme/theme_tokens.dart';
 import '../data/database/database_helper.dart';
-import '../data/default_builtin_content.dart';
 import '../data/models/favorite_model.dart';
 import '../data/models/history_model.dart';
 import '../data/models/enrolled_class_model.dart';
@@ -75,6 +75,19 @@ enum AppRoute {
   teacherJoinRequests,
 }
 
+typedef AppScreenBuilder = Widget Function(AppRoute route);
+
+class _AppNavigatorObserver extends NavigatorObserver {
+  _AppNavigatorObserver(this._app);
+
+  final AppState _app;
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _app.handleNavigatorPop(route);
+  }
+}
+
 class AppState extends ChangeNotifier with WidgetsBindingObserver {
   AppState() {
     WidgetsBinding.instance.addObserver(this);
@@ -83,6 +96,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   final AppRepository _repo = AppRepository(DatabaseHelper.instance);
+  final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+  late final NavigatorObserver navigatorObserver = _AppNavigatorObserver(this);
+  AppScreenBuilder? _screenBuilder;
   final TtsService tts = TtsService();
   final DeviceSmsService _deviceSms = DeviceSmsService();
   late final NotificationSyncService _notificationSync = NotificationSyncService(
@@ -93,6 +109,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   bool _loading = true;
   UserModel? _user;
   AppRoute _route = AppRoute.welcome;
+  final List<AppRoute> _pageStack = [AppRoute.welcome];
   TapTalkThemeToken _theme = TapTalkThemes.appDefault;
   AppLanguage _language = AppLanguage.english;
   int _languageRevision = 0;
@@ -100,6 +117,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   String _selectedCategoryKey = 'feelings';
   String? _selectedSubcategoryKey;
   bool _drawerOpen = false;
+  bool _routeChanging = false;
+  DateTime? _lastSubcategoryBackAt;
   bool _isSpeaking = false;
   String _speakingText = '';
   int _spokenWordStart = -1;
@@ -159,6 +178,98 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   bool get loading => _loading;
   UserModel? get user => _user;
   AppRoute get route => _route;
+  List<AppRoute> get pageStack => List.unmodifiable(_pageStack);
+  bool get canPopRoute =>
+      _pageStack.length > 1 ||
+      (_route == AppRoute.home && _selectedSubcategoryKey != null);
+
+  void clearRouteHistory() => _resetNavigationStack(_route);
+
+  void _resetNavigationStack(AppRoute route) {
+    _pageStack
+      ..clear()
+      ..add(route);
+    _route = route;
+  }
+
+  void bindScreenBuilder(AppScreenBuilder builder) => _screenBuilder = builder;
+
+  Route<void> _pageRoute(AppRoute route) {
+    final builder = _screenBuilder;
+    assert(builder != null, 'Call bindScreenBuilder before navigating.');
+    return taptalkPageRoute<void>(
+      settings: RouteSettings(name: route.name),
+      builder: (_) => builder!(route),
+    );
+  }
+
+  Future<void> handleSystemBack() async {
+    if (_drawerOpen) {
+      _drawerOpen = false;
+      notifyListeners();
+      return;
+    }
+
+    if (_route == AppRoute.home && _selectedSubcategoryKey != null) {
+      clearSubcategorySelection();
+      return;
+    }
+
+    final justReturnedToSubcategories = _lastSubcategoryBackAt != null &&
+        DateTime.now().difference(_lastSubcategoryBackAt!) <
+            const Duration(milliseconds: 400);
+    if (justReturnedToSubcategories && _route == AppRoute.home) {
+      return;
+    }
+
+    if (_pageStack.length > 1) {
+      await popRoute();
+      return;
+    }
+
+    final nav = navigatorKey.currentState;
+    if (nav != null && nav.canPop()) {
+      nav.pop();
+      return;
+    }
+
+    await SystemNavigator.pop();
+  }
+
+  /// Keeps [_pageStack] aligned when a route is popped without [popRoute].
+  void handleNavigatorPop(Route<dynamic> route) {
+    if (_routeChanging) return;
+    if (_pageStack.length <= 1) return;
+    if (route.settings.name != _pageStack.last.name) return;
+    _pageStack.removeLast();
+    _route = _pageStack.last;
+    if (_route == AppRoute.chooseCategory) {
+      _selectedSubcategoryKey = null;
+    }
+    _scheduleRouteRefresh(_route);
+    notifyListeners();
+  }
+
+  bool _isShowing(AppRoute route) {
+    final nav = navigatorKey.currentState;
+    if (nav == null) return _route == route;
+    String? name;
+    nav.popUntil((current) {
+      name = current.settings.name;
+      return true;
+    });
+    return name == route.name;
+  }
+
+  Future<void> _waitForRouteIdle() async {
+    var spins = 0;
+    while (_routeChanging && spins < 80) {
+      await Future<void>.delayed(Duration.zero);
+      spins++;
+    }
+    if (_routeChanging) _routeChanging = false;
+  }
+
   TapTalkThemeToken get theme => _theme;
   AppLanguage get language => _language;
   int get languageRevision => _languageRevision;
@@ -170,8 +281,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       _selectedSubcategoryKey ?? _selectedCategoryKey;
 
   bool get showingSubcategoryPicker =>
-      DefaultBuiltinContent.hasSubcategories(_selectedCategoryKey) &&
-      _selectedSubcategoryKey == null;
+      subcategoriesForSelected.isNotEmpty && _selectedSubcategoryKey == null;
 
   List<CategoryModel> get topLevelCategories =>
       categories.where((c) => c.isTopLevel).toList();
@@ -523,15 +633,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           await refreshTeacherClasses(cloudSyncInBackground: true);
           await _routeUserAfterOnboardingChecks();
         } else {
-          _route = AppRoute.login;
+          _resetNavigationStack(AppRoute.login);
         }
       }
     } catch (e, st) {
       debugPrint('TapTalk init failed: $e\n$st');
-      if (_user == null) _route = AppRoute.welcome;
+      if (_user == null) _resetNavigationStack(AppRoute.welcome);
     } finally {
       if (_user == null) {
-        _route = AppRoute.welcome;
+        _resetNavigationStack(AppRoute.welcome);
       }
       _loading = false;
       notifyListeners();
@@ -1152,20 +1262,20 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       languageDone = true;
     }
     if (!languageDone) {
-      _route = AppRoute.chooseLanguage;
+      _resetNavigationStack(AppRoute.chooseLanguage);
       return;
     }
     if (_user!.isLearner) {
       if (_user!.needsTheme) {
-        _route = AppRoute.chooseTheme;
+        _resetNavigationStack(AppRoute.chooseTheme);
         return;
       }
       await _ensureStarterData();
-      _route = AppRoute.chooseCategory;
+      _resetNavigationStack(AppRoute.chooseCategory);
     } else if (_user!.isParent) {
-      _route = AppRoute.home;
+      _resetNavigationStack(AppRoute.myChild);
     } else if (_user!.isTeacher) {
-      _route = AppRoute.teacherDashboard;
+      _resetNavigationStack(AppRoute.teacherDashboard);
     }
   }
 
@@ -1177,7 +1287,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _favorites = [];
     _history = [];
     _selectedCategoryKey = 'feelings';
-    _selectedSubcategoryKey = null;
     _selectedSubcategoryKey = null;
     _profileCode = '';
     _enrolledClasses = [];
@@ -1621,20 +1730,101 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await _refreshLearnerCollections();
   }
 
-  Future<void> setRoute(AppRoute route) async {
-    if (_drawerOpen) {
-      _drawerOpen = false;
-      notifyListeners();
-      await Future<void>.delayed(AppSpacing.drawerAnimation);
+  Future<void> _popUntil(AppRoute target) async {
+    final nav = navigatorKey.currentState;
+    while (_pageStack.length > 1 && _pageStack.last != target) {
+      if (nav != null && nav.canPop()) {
+        nav.pop();
+      }
+      _pageStack.removeLast();
     }
-    if (_route == route) return;
-    _route = route;
+    _route = _pageStack.last;
+  }
+
+  void _scheduleRouteRefresh(AppRoute route) {
     if (route == AppRoute.favorites && _user != null) {
-      await refreshFavoritesFromCloud();
+      unawaited(refreshFavoritesFromCloud());
     } else if (_isPersonalBoardRoute(route) && _user != null) {
-      await _refreshPersonalBoard();
+      unawaited(_refreshPersonalBoard());
     }
-    notifyListeners();
+  }
+
+  Future<void> setRoute(AppRoute route, {bool replace = false}) async {
+    await _waitForRouteIdle();
+    _routeChanging = true;
+    try {
+      if (_drawerOpen) {
+        _drawerOpen = false;
+        notifyListeners();
+      }
+      if (_route == route && !replace && _isShowing(route)) return;
+
+      final nav = navigatorKey.currentState;
+
+      if (replace) {
+        _resetNavigationStack(route);
+        if (nav != null) {
+          await nav.pushAndRemoveUntil(_pageRoute(route), (_) => false);
+        }
+        _scheduleRouteRefresh(route);
+        notifyListeners();
+        return;
+      }
+
+      if (route == AppRoute.chooseCategory) {
+        _selectedSubcategoryKey = null;
+      }
+
+      if (_pageStack.contains(route)) {
+        await _popUntil(route);
+        _scheduleRouteRefresh(route);
+        notifyListeners();
+        return;
+      }
+
+      _pageStack.add(route);
+      _route = route;
+      if (nav != null) {
+        await nav.push(_pageRoute(route));
+      }
+      _scheduleRouteRefresh(route);
+      notifyListeners();
+    } finally {
+      _routeChanging = false;
+    }
+  }
+
+  Future<bool> popRoute() async {
+    await _waitForRouteIdle();
+    _routeChanging = true;
+    try {
+      if (_drawerOpen) {
+        _drawerOpen = false;
+      }
+      if (_route == AppRoute.home && _selectedSubcategoryKey != null) {
+        clearSubcategorySelection();
+        notifyListeners();
+        return true;
+      }
+      if (_pageStack.length <= 1) return false;
+
+      final nav = navigatorKey.currentState;
+      if (nav != null && nav.canPop()) {
+        nav.pop();
+      }
+      if (_pageStack.length > 1) {
+        _pageStack.removeLast();
+        _route = _pageStack.last;
+      }
+      if (_route == AppRoute.chooseCategory) {
+        _selectedSubcategoryKey = null;
+      }
+      _scheduleRouteRefresh(_route);
+      notifyListeners();
+      return true;
+    } finally {
+      _routeChanging = false;
+    }
   }
 
   void toggleDrawer([bool? open]) {
@@ -1643,9 +1833,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void selectCategory(String key) {
-    if (key == _selectedCategoryKey &&
-        DefaultBuiltinContent.hasSubcategories(key) &&
-        _selectedSubcategoryKey != null) {
+    if (key == _selectedCategoryKey && _selectedSubcategoryKey != null) {
       _selectedSubcategoryKey = null;
     } else {
       _selectedCategoryKey = key;
@@ -1662,6 +1850,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   void clearSubcategorySelection() {
     if (_selectedSubcategoryKey == null) return;
     _selectedSubcategoryKey = null;
+    _lastSubcategoryBackAt = DateTime.now();
     notifyListeners();
   }
 
@@ -1876,7 +2065,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (_user!.isLearner || _user!.isParent || _user!.isTeacher) {
       await _routeUserAfterOnboardingChecks();
     } else {
-      _route = AppRoute.login;
+      _resetNavigationStack(AppRoute.login);
       notifyListeners();
       return AppStrings.parentTeacherComingSoon(_language);
     }
@@ -2018,17 +2207,17 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       _theme = TapTalkThemes.appDefault;
       await _setLanguageOnboardingDone(_user!.id, false);
       await _setCategoryOnboardingDone(_user!.id, false);
-      _route = AppRoute.chooseLanguage;
+      _resetNavigationStack(AppRoute.chooseLanguage);
     } else if (role == 'parent') {
       _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
       await _setLanguageOnboardingDone(_user!.id, false);
-      _route = AppRoute.chooseLanguage;
+      _resetNavigationStack(AppRoute.chooseLanguage);
     } else if (role == 'teacher') {
       _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
       await _setLanguageOnboardingDone(_user!.id, false);
-      _route = AppRoute.chooseLanguage;
+      _resetNavigationStack(AppRoute.chooseLanguage);
     } else {
-      _route = AppRoute.login;
+      _resetNavigationStack(AppRoute.login);
     }
 
     notifyListeners();
@@ -2163,7 +2352,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _resetAccountSession();
     _theme = TapTalkThemes.appDefault;
     _resetSpeechTracking();
-    _route = AppRoute.welcome;
+    _resetNavigationStack(AppRoute.welcome);
     _drawerOpen = false;
     notifyListeners();
   }
@@ -2174,29 +2363,46 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       await _setLanguageOnboardingDone(_user!.id, true);
     }
     if (_user?.isLearner ?? false) {
-      _route = AppRoute.chooseTheme;
+      await setRoute(AppRoute.chooseTheme, replace: true);
     } else if (_user?.isParent ?? false) {
-      _route = AppRoute.home;
+      await setRoute(AppRoute.myChild, replace: true);
     } else if (_user?.isTeacher ?? false) {
-      _route = AppRoute.teacherDashboard;
+      await setRoute(AppRoute.teacherDashboard, replace: true);
+    } else {
+      notifyListeners();
     }
-    notifyListeners();
   }
 
   Future<void> completeThemeSelection(String themeKey) async {
     await setTheme(themeKey);
-    _route = AppRoute.chooseCategory;
-    notifyListeners();
+    await setRoute(AppRoute.chooseCategory, replace: true);
   }
 
   Future<void> completeCategorySelection(String categoryKey) async {
     selectCategory(categoryKey);
     if (_user != null) {
-      await _setCategoryOnboardingDone(_user!.id, true);
-      await _refreshPersonalBoard();
+      unawaited(_setCategoryOnboardingDone(_user!.id, true));
     }
-    _route = AppRoute.home;
-    notifyListeners();
+    if (_isShowing(AppRoute.home)) {
+      notifyListeners();
+      return;
+    }
+
+    await _waitForRouteIdle();
+    _routeChanging = true;
+    try {
+      if (_pageStack.isNotEmpty && _pageStack.last == AppRoute.home) {
+        _pageStack.removeLast();
+        _route = _pageStack.last;
+      }
+      _pageStack.add(AppRoute.home);
+      _route = AppRoute.home;
+      await navigatorKey.currentState?.push(_pageRoute(AppRoute.home));
+      _scheduleRouteRefresh(AppRoute.home);
+      notifyListeners();
+    } finally {
+      _routeChanging = false;
+    }
   }
 
   Future<String?> addCategory(String name) async {

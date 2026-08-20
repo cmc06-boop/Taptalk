@@ -88,8 +88,6 @@ class _TeacherJoinRequestsScreenState extends State<TeacherJoinRequestsScreen> {
     return LearnerScaffold(
       title: AppStrings.joinRequests(lang),
       currentRoute: AppRoute.teacherJoinRequests,
-      showBackButton: true,
-      onBack: () => app.setRoute(AppRoute.teacherMyClasses),
       showBottomNav: false,
       body: RefreshIndicator(
         onRefresh: () => app.refreshPendingJoinRequests(

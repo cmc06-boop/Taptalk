@@ -33,11 +33,13 @@ class CategoryGridCard extends StatelessWidget {
     required this.category,
     required this.label,
     required this.onTap,
+    this.selected = false,
   });
 
   final CategoryModel category;
   final String label;
   final VoidCallback onTap;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
@@ -60,10 +62,15 @@ class CategoryGridCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: theme.bgMid,
             borderRadius: BorderRadius.circular(cardRadius),
+            border: selected
+                ? Border.all(color: theme.bgAccent, width: 2.5)
+                : null,
             boxShadow: [
               BoxShadow(
-                color: theme.textMain.withValues(alpha: 0.10),
-                blurRadius: 14,
+                color: selected
+                    ? theme.bgAccent.withValues(alpha: 0.28)
+                    : theme.textMain.withValues(alpha: 0.10),
+                blurRadius: selected ? 16 : 14,
                 offset: const Offset(0, 5),
               ),
             ],

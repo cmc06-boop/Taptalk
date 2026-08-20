@@ -12,32 +12,31 @@ class LearnerScaffold extends StatelessWidget {
     super.key,
     required this.title,
     this.titleBadge,
+    this.titleWidget,
     required this.body,
     required this.currentRoute,
     this.onMicTap,
     this.micActive = false,
     this.showBottomNav = true,
-    this.showBackButton = false,
-    this.onBack,
     this.headerTrailing,
   });
 
   final String title;
   final Widget? titleBadge;
+  final Widget? titleWidget;
   final Widget body;
   final AppRoute currentRoute;
   final VoidCallback? onMicTap;
   final bool micActive;
   final bool showBottomNav;
-  final bool showBackButton;
-  final VoidCallback? onBack;
   final Widget? headerTrailing;
 
   bool _forMeShowsBottomNav(AppRoute route) {
     return route == AppRoute.home ||
         route == AppRoute.favorites ||
         route == AppRoute.history ||
-        route == AppRoute.settings;
+        route == AppRoute.settings ||
+        route == AppRoute.chooseCategory;
   }
 
   @override
@@ -59,14 +58,12 @@ class LearnerScaffold extends StatelessWidget {
                 AppHeader(
                   title: title,
                   titleBadge: titleBadge,
-                  showBackButton: showBackButton,
-                  onBack: onBack,
+                  titleWidget: titleWidget,
+                  onMenu: () => app.toggleDrawer(),
                   trailingAction: headerTrailing,
-                  onMenu: showBackButton ? null : () => app.toggleDrawer(),
-                  showProfile:
-                      !isParent && !isTeacher && !showBackButton,
-                  showAlerts: isTeacher && !showBackButton,
-                  showNotifications: isParent && !showBackButton,
+                  showProfile: !isParent && !isTeacher,
+                  showAlerts: isTeacher,
+                  showNotifications: isParent,
                   notificationBadgeCount: app.unreadNotificationCount,
                   onNotifications: () => app.setRoute(AppRoute.notifications),
                   onAlerts: () => app.setRoute(AppRoute.teacherMonitoring),
@@ -93,7 +90,7 @@ class LearnerScaffold extends StatelessWidget {
                   ),
               ],
             ),
-            const SourceDrawer(),
+            Positioned.fill(child: const SourceDrawer()),
           ],
         ),
     );

@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
+import '../core/navigation/route_transitions.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/utils/code_qr_utils.dart';
 import '../providers/app_state.dart';
@@ -77,7 +78,7 @@ class CodeScanFlowScreen extends StatefulWidget {
     if (!context.mounted) return false;
 
     final result = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
+      taptalkPageRoute(
         builder: (_) => CodeScanFlowScreen(
           kind: kind,
           title: title,
@@ -268,11 +269,7 @@ class _CodeScanFlowScreenState extends State<CodeScanFlowScreen> {
                   ),
                   child: Row(
                     children: [
-                      IconButton(
-                        onPressed: _busy ? null : () => Navigator.pop(context),
-                        icon: const Icon(Icons.arrow_back_rounded),
-                        color: Colors.white,
-                      ),
+                      const SizedBox(width: 48),
                       Expanded(
                         child: Text(
                           widget.title,

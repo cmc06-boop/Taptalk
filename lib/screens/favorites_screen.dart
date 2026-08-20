@@ -13,6 +13,7 @@ import '../providers/app_state.dart';
 import '../widgets/category_icon.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/phrase_card.dart';
+import '../widgets/taptalk_logo.dart';
 
 class FavoritesScreen extends StatefulWidget {
   const FavoritesScreen({super.key});
@@ -121,6 +122,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
 
     return LearnerScaffold(
       title: AppStrings.appName(lang),
+      titleWidget: const TapTalkHeaderWordmark(),
       currentRoute: AppRoute.favorites,
       onMicTap: () => app.setRoute(AppRoute.home),
       body: RefreshIndicator(

@@ -10,14 +10,11 @@ import '../core/l10n/app_strings.dart';
 import '../core/utils/speak_feedback.dart';
 import '../providers/app_state.dart';
 import '../services/stt_service.dart';
-import '../widgets/add_category_dialog.dart';
 import '../widgets/category_grid_card.dart';
-import '../widgets/category_icon.dart';
 import '../widgets/edit_phrase_dialog.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/panel_card.dart';
 import '../widgets/phrase_card.dart';
-import '../widgets/phrase_section_header.dart';
 import '../widgets/highlighting_text_controller.dart';
 import '../widgets/tts_speed_selector.dart';
 
@@ -30,7 +27,6 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _textController = HighlightingTextController();
-  final _categoryScroll = ScrollController();
   final _undoStack = <String>[];
   final SttService _stt = SttService();
   bool _listening = false;
@@ -52,7 +48,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _stt.cancel();
     _textController.dispose();
-    _categoryScroll.dispose();
     super.dispose();
   }
 
@@ -145,10 +140,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _showAddCategoryDialog() async {
-    await AddCategoryDialog.show(context);
-  }
-
   Future<void> _refresh() async {
     await context.read<AppState>().refreshLearnerCollections();
   }
@@ -158,12 +149,15 @@ class _HomeScreenState extends State<HomeScreen> {
     final app = context.watch<AppState>();
     final theme = app.theme;
     final lang = app.language;
-    final userName = app.welcomeFirstName(lang);
     final denseGrid = AppSpacing.phraseGridIsDense(context);
     final parentCategory = app.selectedTopLevelCategory;
-    final parentCategoryLabel = parentCategory != null
-        ? app.localizedCategoryName(parentCategory)
-        : AppStrings.customCategory(lang);
+    final headerLabel = app.showingSubcategoryPicker
+        ? (parentCategory != null
+            ? app.localizedCategoryName(parentCategory)
+            : AppStrings.customCategory(lang))
+        : (app.selectedCategory != null
+            ? app.localizedCategoryName(app.selectedCategory!)
+            : AppStrings.customCategory(lang));
     final highlightController = _textController;
     if (highlightController is HighlightingTextController) {
       final (start, end) =
@@ -175,8 +169,14 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    return LearnerScaffold(
-      title: AppStrings.appName(lang),
+    return PopScope(
+      canPop: app.selectedSubcategoryKey == null,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        app.clearSubcategorySelection();
+      },
+      child: LearnerScaffold(
+      title: headerLabel,
       currentRoute: AppRoute.home,
       onMicTap: _toggleMic,
       micActive: _listening,
@@ -188,101 +188,44 @@ class _HomeScreenState extends State<HomeScreen> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
         children: [
-          PanelCard(
-            margin: const EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              0,
-              AppSpacing.lg,
-              AppSpacing.sm,
+          if (app.showingSubcategoryPicker)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.md,
+                AppSpacing.lg,
+                AppSpacing.sm,
+              ),
+              child: Text(
+                AppStrings.chooseSubcategoryHint(lang),
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  color: theme.textMain.withValues(alpha: 0.75),
+                ),
+              ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  AppStrings.welcomeUser(userName, lang),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.poppins(
-                    fontSize: 22,
-                    color: theme.textMain,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  AppStrings.welcomeSub(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    color: theme.textMain.withValues(alpha: 0.78),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-            child: Wrap(
-              spacing: AppSpacing.sm,
-              runSpacing: AppSpacing.xs,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              alignment: WrapAlignment.spaceBetween,
-              children: [
-                Text(
-                  AppStrings.categories(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                    color: theme.textMain,
-                  ),
-                ),
-                TextButton(
-                  onPressed: _showAddCategoryDialog,
-                  child: Text(
-                    AppStrings.addCategoryShort(lang),
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          SizedBox(
-            height: 48,
-            child: ListView.separated(
-              controller: _categoryScroll,
-              scrollDirection: Axis.horizontal,
+          if (app.showingSubcategoryPicker)
+            Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              itemCount: app.topLevelCategories.length,
-              separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
-              itemBuilder: (context, i) {
-                final cat = app.topLevelCategories[i];
-                final active = cat.key == app.selectedCategoryKey;
-                return FilterChip(
-                  key: ValueKey('cat_${cat.key}_${lang.name}_${app.languageRevision}'),
-                  selected: active,
-                  showCheckmark: false,
-                  avatar: CategoryIcon(
-                    category: cat,
-                    size: 16,
-                    color: active ? Colors.white : cat.accentColor,
-                  ),
-                  label: Text(app.localizedCategoryName(cat)),
-                  labelStyle: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: active ? FontWeight.w700 : FontWeight.w600,
-                    color: active ? Colors.white : theme.textMain,
-                  ),
-                  selectedColor: theme.bgAccent,
-                  backgroundColor: Colors.white.withValues(alpha: 0.65),
-                  side: BorderSide(color: theme.bgMid, width: 1.5),
-                  onSelected: (_) => app.selectCategory(cat.key),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: AppSpacing.sm),
+              child: GridView.builder(
+                key: ValueKey(
+                  'subcats_${lang.name}_${app.languageRevision}_${app.selectedCategoryKey}',
+                ),
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: AppSpacing.phraseGridDelegate(context),
+                itemCount: app.subcategoriesForSelected.length,
+                itemBuilder: (context, i) {
+                  final sub = app.subcategoriesForSelected[i];
+                  return CategoryGridCard(
+                    category: sub,
+                    label: app.localizedCategoryName(sub),
+                    onTap: () => app.selectSubcategory(sub.key),
+                  );
+                },
+              ),
+            )
+          else ...[
           PanelCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -494,66 +437,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-          if (app.showingSubcategoryPicker) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.md,
-                AppSpacing.lg,
-                AppSpacing.xs,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    parentCategoryLabel,
-                    style: GoogleFonts.poppins(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: theme.textMain,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    AppStrings.chooseSubcategoryHint(lang),
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      color: theme.textMain.withValues(alpha: 0.75),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: GridView.builder(
-                key: ValueKey(
-                  'subcats_${lang.name}_${app.languageRevision}_${app.selectedCategoryKey}',
-                ),
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: AppSpacing.phraseGridDelegate(context),
-                itemCount: app.subcategoriesForSelected.length,
-                itemBuilder: (context, i) {
-                  final sub = app.subcategoriesForSelected[i];
-                  return CategoryGridCard(
-                    category: sub,
-                    label: app.localizedCategoryName(sub),
-                    onTap: () => app.selectSubcategory(sub.key),
-                  );
-                },
-              ),
-            ),
-          ] else ...[
-            PhraseSectionHeader(
-              category: app.selectedCategory,
-              categoryLabel: app.selectedCategory != null
-                  ? app.localizedCategoryName(app.selectedCategory!)
-                  : AppStrings.customCategory(lang),
-              onBack: app.selectedSubcategoryKey != null
-                  ? app.clearSubcategorySelection
-                  : null,
-            ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
               child: GridView.builder(
@@ -621,6 +504,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ],
         ),
+      ),
       ),
     );
   }

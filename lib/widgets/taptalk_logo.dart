@@ -89,6 +89,19 @@ class TapTalkWordmark extends StatelessWidget {
   }
 }
 
+/// Compact wordmark for the app header bar.
+class TapTalkHeaderWordmark extends StatelessWidget {
+  const TapTalkHeaderWordmark({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform.translate(
+      offset: const Offset(0, -16),
+      child: const TapTalkWordmark(height: 72, maxWidth: 340),
+    );
+  }
+}
+
 /// Combined icon + wordmark from [assets/images/Logo/Full logo.png].
 class TapTalkFullLogo extends StatelessWidget {
   const TapTalkFullLogo({

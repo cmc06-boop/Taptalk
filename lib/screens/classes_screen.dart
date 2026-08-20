@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
+import '../core/navigation/route_transitions.dart';
 import '../core/l10n/app_strings.dart';
 import '../data/models/enrolled_class_model.dart';
 import '../providers/app_state.dart';
@@ -95,7 +96,7 @@ class _ClassesScreenState extends State<ClassesScreen> {
 
   void _openClass(BuildContext context, EnrolledClassModel enrolled) {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      taptalkPageRoute<void>(
         builder: (_) => LearnerClassDetailScreen(
           enrolledClass: enrolled,
         ),

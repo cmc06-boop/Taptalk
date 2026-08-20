@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
+import '../core/navigation/route_transitions.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../data/models/linked_child_model.dart';
@@ -43,7 +44,7 @@ class _MyChildScreenState extends State<MyChildScreen> {
 
   void _openMonitoring(BuildContext context, LinkedChildModel child) {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      taptalkPageRoute<void>(
         builder: (_) => ChildMonitoringScreen(
           learner: MonitoredLearner.fromLinkedChild(child),
         ),

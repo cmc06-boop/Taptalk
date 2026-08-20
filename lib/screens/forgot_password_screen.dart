@@ -75,7 +75,13 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     final app = context.watch<AppState>();
     final lang = app.language;
 
-    return TapTalkShell(
+    return PopScope(
+      canPop: _step == _ForgotStep.enterEmail,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        setState(() => _step = _ForgotStep.enterEmail);
+      },
+      child: TapTalkShell(
       coloredHeader: true,
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -137,25 +143,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: IconButton(
-                              onPressed: _busy
-                                  ? null
-                                  : () {
-                                      if (_step == _ForgotStep.checkEmail) {
-                                        setState(() {
-                                          _step = _ForgotStep.enterEmail;
-                                          _error = null;
-                                        });
-                                      } else {
-                                        app.setRoute(AppRoute.login);
-                                      }
-                                    },
-                              icon: const Icon(Icons.arrow_back_rounded),
-                              color: const Color(0xFF2F5E48),
-                            ),
-                          ),
                           if (isCheckEmail) ...[
                             const SizedBox(height: AppSpacing.md),
                             Center(
@@ -265,6 +252,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
           );
         },
       ),
+    ),
     );
   }
 

@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
+import '../core/navigation/route_transitions.dart';
 import '../core/l10n/app_strings.dart';
 import '../data/models/teacher_recent_lesson.dart';
 import '../providers/app_state.dart';
@@ -78,7 +79,7 @@ class _TeacherRecentLessonsScreenState
 
     Navigator.of(context)
         .push(
-          MaterialPageRoute<void>(
+          taptalkPageRoute<void>(
             builder: (_) => LessonEditorScreen(
               lessonId: lesson.id,
               classId: lesson.classId,
@@ -104,9 +105,7 @@ class _TeacherRecentLessonsScreenState
     return LearnerScaffold(
       title: AppStrings.recentLessons(lang),
       currentRoute: AppRoute.teacherRecentLessons,
-      showBackButton: true,
       showBottomNav: false,
-      onBack: () => app.setRoute(AppRoute.teacherDashboard),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

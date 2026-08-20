@@ -14,6 +14,7 @@ import '../widgets/password_strength_hint.dart';
 import '../widgets/panel_card.dart';
 import '../widgets/code_qr_sheet.dart';
 import '../widgets/taptalk_result_dialog.dart';
+import '../widgets/taptalk_logo.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -224,6 +225,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     return LearnerScaffold(
       title: AppStrings.appName(lang),
+      titleWidget: const TapTalkHeaderWordmark(),
       currentRoute: AppRoute.profile,
       showBottomNav: true,
       body: ListView(

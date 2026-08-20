@@ -87,9 +87,7 @@ class _TeacherAlertHistoryScreenState extends State<TeacherAlertHistoryScreen> {
     return LearnerScaffold(
       title: AppStrings.alertHistory(lang),
       currentRoute: AppRoute.teacherAlertHistory,
-      showBackButton: true,
       showBottomNav: false,
-      onBack: () => app.setRoute(AppRoute.teacherDashboard),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

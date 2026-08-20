@@ -184,7 +184,6 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
     return LearnerScaffold(
       title: displayLessonTitle,
       currentRoute: AppRoute.teacherMyClasses,
-      showBackButton: true,
       showBottomNav: false,
       body: ListView(
         padding: const EdgeInsets.only(bottom: AppSpacing.xxl),

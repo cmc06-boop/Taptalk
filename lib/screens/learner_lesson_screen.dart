@@ -103,7 +103,6 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
     return LearnerScaffold(
       title: displayLessonTitle,
       currentRoute: AppRoute.classes,
-      showBackButton: true,
       showBottomNav: false,
       body: ListView(
         padding: const EdgeInsets.only(bottom: AppSpacing.xxl),

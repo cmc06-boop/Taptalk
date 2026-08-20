@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
+import 'core/navigation/route_transitions.dart';
 import 'providers/app_state.dart';
 import 'screens/choose_category_screen.dart';
 import 'screens/choose_language_screen.dart';
@@ -31,12 +34,18 @@ class TapTalkApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
-      create: (_) => AppState(),
+      create: (_) {
+        final app = AppState();
+        app.bindScreenBuilder(buildScreen);
+        return app;
+      },
       child: Consumer<AppState>(
         builder: (context, app, _) {
           final theme = app.theme;
           return MaterialApp(
             key: ValueKey('lang_${app.language.name}_${app.languageRevision}'),
+            navigatorKey: app.navigatorKey,
+            navigatorObservers: [app.navigatorObserver],
             title: 'TapTalk',
             debugShowCheckedModeBanner: false,
             themeMode: ThemeMode.light,
@@ -46,6 +55,7 @@ class TapTalkApp extends StatelessWidget {
               colorScheme: theme.colorScheme,
               scaffoldBackgroundColor: theme.bgLight,
               canvasColor: theme.bgLight,
+              pageTransitionsTheme: tapTalkPageTransitionsTheme,
               textTheme: GoogleFonts.poppinsTextTheme(),
               filledButtonTheme: FilledButtonThemeData(
                 style: FilledButton.styleFrom(
@@ -56,9 +66,16 @@ class TapTalkApp extends StatelessWidget {
               ),
             ),
             builder: (context, child) {
-              return ColoredBox(
-                color: theme.bgLight,
-                child: child ?? const SizedBox.shrink(),
+              return PopScope(
+                canPop: false,
+                onPopInvokedWithResult: (didPop, _) {
+                  if (didPop) return;
+                  unawaited(app.handleSystemBack());
+                },
+                child: ColoredBox(
+                  color: theme.bgLight,
+                  child: child ?? const SizedBox.shrink(),
+                ),
               );
             },
             home: app.loading
@@ -68,14 +85,14 @@ class TapTalkApp extends StatelessWidget {
                       child: CircularProgressIndicator(color: theme.bgAccent),
                     ),
                   )
-                : _buildScreen(app.route),
+                : buildScreen(app.pageStack.first),
           );
         },
       ),
     );
   }
 
-  Widget _buildScreen(AppRoute route) {
+  static Widget buildScreen(AppRoute route) {
     switch (route) {
       case AppRoute.welcome:
         return const WelcomeScreen();

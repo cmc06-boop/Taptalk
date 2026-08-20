@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
+import '../core/navigation/route_transitions.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/utils/live_refresh.dart';
 import '../core/theme/theme_tokens.dart';
@@ -77,7 +78,7 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
   Future<void> _openLesson(ClassLesson lesson) async {
     await Navigator.of(context)
         .push(
-          MaterialPageRoute<void>(
+          taptalkPageRoute<void>(
             builder: (_) => LearnerLessonScreen(
               lessonId: lesson.id,
               classId: widget.enrolledClass.classId,
@@ -109,7 +110,6 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
     return LearnerScaffold(
       title: displayClassName,
       currentRoute: AppRoute.classes,
-      showBackButton: true,
       showBottomNav: false,
       body: RefreshIndicator(
         onRefresh: () => _load(userRefresh: true),

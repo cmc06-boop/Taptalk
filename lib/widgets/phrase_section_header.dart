@@ -36,15 +36,18 @@ class PhraseSectionHeader extends StatelessWidget {
       child: Row(
         children: [
           if (onBack != null) ...[
-            GestureDetector(
-              onTap: onBack,
-              behavior: HitTestBehavior.opaque,
-              child: Padding(
-                padding: const EdgeInsets.only(right: AppSpacing.sm),
-                child: Icon(
-                  Icons.arrow_back_rounded,
-                  size: 22,
-                  color: theme.textMain,
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onBack,
+                customBorder: const CircleBorder(),
+                child: Padding(
+                  padding: const EdgeInsets.only(right: AppSpacing.sm),
+                  child: Icon(
+                    Icons.arrow_back_rounded,
+                    size: 22,
+                    color: theme.textMain,
+                  ),
                 ),
               ),
             ),

@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
+import '../core/navigation/route_transitions.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/utils/live_refresh.dart';
 import '../core/theme/theme_tokens.dart';
@@ -157,7 +158,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
 
     Navigator.of(context)
         .push(
-          MaterialPageRoute<void>(
+          taptalkPageRoute<void>(
             builder: (_) => LessonEditorScreen(
               lessonId: lesson.id,
               classId: lesson.classId,

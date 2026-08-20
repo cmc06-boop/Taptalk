@@ -621,7 +621,6 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
     return LearnerScaffold(
       title: widget.learner.fullName,
       currentRoute: widget.currentRoute,
-      showBackButton: true,
       showBottomNav: false,
       body: RefreshIndicator(
         onRefresh: _refreshFromCloud,

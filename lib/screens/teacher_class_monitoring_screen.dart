@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
+import '../core/navigation/route_transitions.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../data/models/monitored_learner.dart';
@@ -93,7 +94,7 @@ class _TeacherClassMonitoringScreenState
 
   void _openMonitoring(TeacherClassStudent student) {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      taptalkPageRoute<void>(
         builder: (_) => ChildMonitoringScreen(
           learner: MonitoredLearner.fromTeacherStudent(student),
           currentRoute: AppRoute.teacherMonitoring,
@@ -424,9 +425,7 @@ class _TeacherClassMonitoringScreenState
         accent: theme.bgAccent,
       ),
       currentRoute: AppRoute.teacherMonitoring,
-      showBackButton: true,
       showBottomNav: false,
-      onBack: () => Navigator.of(context).pop(),
       body: RefreshIndicator(
         onRefresh: _onRefresh,
         child: ListView(

@@ -196,15 +196,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                       ),
                     ),
-                    Positioned(
-                      left: 4,
-                      top: 0,
-                      child: IconButton(
-                        onPressed: () => app.setRoute(AppRoute.welcome),
-                        icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-                        tooltip: MaterialLocalizations.of(context).backButtonTooltip,
-                      ),
-                    ),
                   ],
                 ),
               ),
