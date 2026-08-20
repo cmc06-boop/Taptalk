@@ -67,6 +67,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        title: const Text('Are you sure?'),
         content: Text(AppStrings.deletePhrase(lang)),
         actions: [
           TextButton(
@@ -85,14 +86,23 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     setState(() => _removedFavoriteKeys.add(favorite.dedupeKey));
     await app.deletePhrase(phrase);
     if (!mounted) return;
-
-    final stillFavorite = context
-        .read<AppState>()
-        .favorites
-        .any((f) => f.dedupeKey == favorite.dedupeKey);
-    if (!stillFavorite) {
-      setState(() => _removedFavoriteKeys.remove(favorite.dedupeKey));
-    }
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 5),
+          content: const Text('Phrase deleted'),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () async {
+              await app.restorePhrase(phrase, restoreFavorite: true);
+              if (mounted) {
+                setState(() => _removedFavoriteKeys.remove(favorite.dedupeKey));
+              }
+            },
+          ),
+        ),
+      );
   }
 
   @override

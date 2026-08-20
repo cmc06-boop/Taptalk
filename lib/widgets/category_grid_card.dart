@@ -10,8 +10,28 @@ import '../providers/app_state.dart';
 /// Returns null if no custom image exists for that key.
 String? _categoryCardImagePath(String key) {
   const map = <String, String>{
+    'emotions': 'assets/images/Category Cards/Emotions.png',
     'food': 'assets/images/Category Cards/Food.png',
     'drinks': 'assets/images/Category Cards/Drinks.png',
+    'school': 'assets/images/Category Cards/School.png',
+    'questions': 'assets/images/Category Cards/Questions.png',
+    'health_safety': 'assets/images/Category Cards/Health & Safety.png',
+    'family': 'assets/images/Category Cards/Family.png',
+    'activities': 'assets/images/Category Cards/Activities.png',
+    'greetings': 'assets/images/Category Cards/Greetings.png',
+    'animals': 'assets/images/Category Cards/Animals.png',
+    'colors': 'assets/images/Category Cards/Colors.png',
+    'places': 'assets/images/Category Cards/Places.png',
+    'transportation': 'assets/images/Category Cards/Transportation.png',
+    'technology': 'assets/images/Category Cards/Technology.png',
+    'alphabets': 'assets/images/Category Cards/Alphabets.png',
+    'body_parts': 'assets/images/Category Cards/Body Parts.png',
+    'dates': 'assets/images/Category Cards/Dates.png',
+    'home': 'assets/images/Category Cards/Home .png',
+    'numbers': 'assets/images/Category Cards/Numbers.png',
+    'phrases': 'assets/images/Category Cards/Phrases.png',
+    'dates_days': 'assets/images/Category Cards/Days.png',
+    'dates_months': 'assets/images/Category Cards/Months.png',
     'food_fruits': 'assets/images/Category Cards/Fruits.png',
     'food_vegetables': 'assets/images/Category Cards/Vegetable.png',
     'food_dessert': 'assets/images/Category Cards/Dessert.png',
@@ -34,12 +54,24 @@ class CategoryGridCard extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.selected = false,
+    this.onDelete,
+    this.onEdit,
+    this.selectionMode = false,
+    this.multiSelected = false,
+    this.onSelectionToggle,
+    this.customStyle = false,
   });
 
   final CategoryModel category;
   final String label;
   final VoidCallback onTap;
   final bool selected;
+  final VoidCallback? onDelete;
+  final VoidCallback? onEdit;
+  final bool selectionMode;
+  final bool multiSelected;
+  final VoidCallback? onSelectionToggle;
+  final bool customStyle;
 
   @override
   Widget build(BuildContext context) {
@@ -49,6 +81,18 @@ class CategoryGridCard extends StatelessWidget {
     const cardRadius = AppSpacing.radiusLg;
     const edgePad = AppSpacing.sm;
 
+    if (customStyle) {
+      return _CustomCategoryCard(
+        category: category,
+        label: label,
+        onTap: selectionMode ? onSelectionToggle : onTap,
+        onDelete: selectionMode ? null : onDelete,
+        onEdit: selectionMode ? null : onEdit,
+        selectionMode: selectionMode,
+        selected: multiSelected,
+      );
+    }
+
     return Material(
       color: theme.bgMid,
       elevation: 0,
@@ -56,7 +100,7 @@ class CategoryGridCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(cardRadius),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: onTap,
+        onTap: selectionMode ? onSelectionToggle : onTap,
         borderRadius: BorderRadius.circular(cardRadius),
         child: Ink(
           decoration: BoxDecoration(
@@ -97,19 +141,27 @@ class CategoryGridCard extends StatelessWidget {
                 const SizedBox(height: AppSpacing.xs),
                 SizedBox(
                   height: 32,
-                  child: Center(
-                    child: Text(
+                  child: Row(
+                    children: [
+                    Expanded(child: Center(child: Text(
                       label,
                       textAlign: TextAlign.center,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.poppins(
-                        fontSize: 11,
+                        fontSize: 17,
                         fontWeight: FontWeight.w800,
                         color: theme.textMain,
                         height: 1.12,
                       ),
-                    ),
+                    ))),
+                    if (selectionMode)
+                      Icon(
+                        multiSelected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+                        size: 21,
+                        color: multiSelected ? theme.bgAccent : theme.textMain.withValues(alpha: 0.55),
+                      )
+                  ],
                   ),
                 ),
               ],
@@ -117,6 +169,238 @@ class CategoryGridCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _CustomCategoryCard extends StatelessWidget {
+  const _CustomCategoryCard({
+    required this.category,
+    required this.label,
+    required this.onTap,
+    required this.onDelete,
+    required this.onEdit,
+    required this.selectionMode,
+    required this.selected,
+  });
+
+  final CategoryModel category;
+  final String label;
+  final VoidCallback? onTap;
+  final VoidCallback? onDelete;
+  final VoidCallback? onEdit;
+  final bool selectionMode;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = context.watch<AppState>().theme;
+    final accent = theme.bgAccent;
+    final gradient = LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [
+        accent,
+        Color.alphaBlend(Colors.white.withValues(alpha: 0.24), accent),
+      ],
+    );
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: gradient,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: selected
+                  ? Colors.white
+                  : accent.withValues(alpha: 0.42),
+              width: selected ? 2.5 : 1.1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: accent.withValues(alpha: 0.22),
+                blurRadius: 14,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Stack(
+            clipBehavior: Clip.antiAlias,
+            children: [
+              const Positioned.fill(child: _CustomCategoryBubbleDecor()),
+              Padding(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Center(
+                  child: Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                      height: 1.2,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: 7,
+                top: 7,
+                child: selectionMode
+                    ? Icon(
+                        selected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+                        color: Colors.white,
+                        size: 25,
+                      )
+                    : _CategoryMoreButton(onEdit: onEdit, onDelete: onDelete),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryMoreButton extends StatelessWidget {
+  const _CategoryMoreButton({this.onEdit, this.onDelete});
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<String>(
+      tooltip: 'Category actions',
+      padding: EdgeInsets.zero,
+      color: Colors.white,
+      icon: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.9), shape: BoxShape.circle),
+        child: const Icon(Icons.more_vert_rounded, size: 18, color: Color(0xFF5C3D2E)),
+      ),
+      onSelected: (value) {
+        if (value == 'edit') onEdit?.call();
+        if (value == 'delete') onDelete?.call();
+      },
+      itemBuilder: (_) => [
+        PopupMenuItem<String>(
+          value: 'edit',
+          enabled: onEdit != null,
+          child: const Row(
+            children: [
+              Icon(Icons.edit_outlined, size: 18, color: Color(0xFF5C3D2E)),
+              SizedBox(width: 8),
+              Text('Edit', style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF5C3D2E))),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'delete',
+          enabled: onDelete != null,
+          child: const Row(
+            children: [
+              Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFD64545)),
+              SizedBox(width: 8),
+              Text('Delete', style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFD64545))),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CustomCategoryBubbleDecor extends StatelessWidget {
+  const _CustomCategoryBubbleDecor();
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final height = constraints.maxHeight;
+        Widget bubble(double size, double alpha) => Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.white.withValues(alpha: alpha),
+          ),
+        );
+
+        return Stack(
+          clipBehavior: Clip.antiAlias,
+          children: [
+            Positioned(
+              right: -width * 0.14,
+              top: -height * 0.10,
+              child: bubble(width * 0.58, 0.16),
+            ),
+            Positioned(
+              left: -width * 0.18,
+              bottom: -height * 0.13,
+              child: bubble(width * 0.52, 0.13),
+            ),
+            Positioned(
+              left: width * 0.08,
+              top: height * 0.12,
+              child: bubble(width * 0.24, 0.18),
+            ),
+            Positioned(
+              right: width * 0.11,
+              bottom: height * 0.16,
+              child: bubble(width * 0.28, 0.15),
+            ),
+            Positioned(
+              left: width * 0.42,
+              top: height * 0.38,
+              child: bubble(width * 0.18, 0.12),
+            ),
+            Positioned(
+              right: width * 0.35,
+              top: height * 0.08,
+              child: bubble(width * 0.11, 0.17),
+            ),
+            Positioned(
+              left: width * 0.18,
+              bottom: height * 0.34,
+              child: bubble(width * 0.16, 0.14),
+            ),
+            Positioned(
+              right: width * 0.04,
+              top: height * 0.46,
+              child: bubble(width * 0.15, 0.18),
+            ),
+            Positioned(
+              left: width * 0.54,
+              bottom: height * 0.06,
+              child: bubble(width * 0.13, 0.16),
+            ),
+            Positioned(
+              left: width * 0.04,
+              top: height * 0.48,
+              child: bubble(width * 0.10, 0.19),
+            ),
+            Positioned(
+              right: width * 0.25,
+              bottom: height * 0.40,
+              child: bubble(width * 0.09, 0.13),
+            ),
+            Positioned(
+              left: width * 0.68,
+              top: height * 0.22,
+              child: bubble(width * 0.08, 0.18),
+            ),
+          ],
+        );
+      },
     );
   }
 }

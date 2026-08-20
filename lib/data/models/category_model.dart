@@ -12,14 +12,19 @@ class CategoryModel {
 
   static const _builtinIconKeys = <String>{
     'activities',
+    'alphabets',
     'animals',
+    'body_parts',
     'colors',
+    'dates',
+    'dates_days',
+    'dates_months',
     'drinks',
     'drinks_cold',
     'drinks_dairy',
     'drinks_hot',
     'family',
-    'feelings',
+    'emotions',
     'food',
     'food_dessert',
     'food_fruits',
@@ -27,10 +32,13 @@ class CategoryModel {
     'food_vegetables',
     'greetings',
     'health_safety',
+    'home',
     'hobbies',
     'needs',
+    'numbers',
     'places',
-    'responses',
+    'phrases',
+    'questions',
     'school',
     'technology',
     'transportation',
@@ -55,7 +63,7 @@ class CategoryModel {
 
   IconData get icon {
     switch (resolvedIconKey) {
-      case 'feelings':
+      case 'emotions':
         return Icons.sentiment_satisfied_alt_rounded;
       case 'food':
         return Icons.restaurant_rounded;
@@ -77,23 +85,39 @@ class CategoryModel {
         return Icons.local_drink_rounded;
       case 'activities':
         return Icons.celebration_rounded;
+      case 'alphabets':
+        return Icons.abc_rounded;
       case 'animals':
         return Icons.pets_rounded;
+      case 'body_parts':
+        return Icons.accessibility_new_rounded;
       case 'colors':
         return Icons.palette_rounded;
+      case 'dates':
+        return Icons.calendar_month_rounded;
+      case 'dates_days':
+        return Icons.today_rounded;
+      case 'dates_months':
+        return Icons.date_range_rounded;
       case 'family':
         return Icons.family_restroom_rounded;
       case 'greetings':
         return Icons.waving_hand_rounded;
       case 'health_safety':
         return Icons.health_and_safety_rounded;
+      case 'home':
+        return Icons.home_rounded;
       case 'hobbies':
         return Icons.interests_rounded;
       case 'needs':
         return Icons.pan_tool_alt_rounded;
+      case 'numbers':
+        return Icons.pin_rounded;
       case 'places':
         return Icons.location_on_rounded;
-      case 'responses':
+      case 'phrases':
+        return Icons.record_voice_over_rounded;
+      case 'questions':
         return Icons.forum_rounded;
       case 'school':
         return Icons.school_rounded;
@@ -111,7 +135,7 @@ class CategoryModel {
         ? key
         : (_builtinIconKeys.contains(resolvedIconKey) ? resolvedIconKey : key);
     switch (paletteKey) {
-      case 'feelings':
+      case 'emotions':
         return const Color(0xFF4A90D9);
       case 'food':
         return const Color(0xFFE85D5D);
@@ -133,23 +157,39 @@ class CategoryModel {
         return const Color(0xFF9B59D4);
       case 'activities':
         return const Color(0xFFF5B942);
+      case 'alphabets':
+        return const Color(0xFF5C6BC0);
       case 'animals':
         return const Color(0xFF5BB88A);
+      case 'body_parts':
+        return const Color(0xFF26A69A);
       case 'colors':
         return const Color(0xFFE91E8C);
+      case 'dates':
+        return const Color(0xFF7E57C2);
+      case 'dates_days':
+        return const Color(0xFF5C6BC0);
+      case 'dates_months':
+        return const Color(0xFF7E57C2);
       case 'family':
         return const Color(0xFFFF7043);
       case 'greetings':
         return const Color(0xFF26A69A);
       case 'health_safety':
         return const Color(0xFFEF5350);
+      case 'home':
+        return const Color(0xFFFF7043);
       case 'hobbies':
         return const Color(0xFF8D6E63);
       case 'needs':
         return const Color(0xFF42A5F5);
+      case 'numbers':
+        return const Color(0xFF29B6F6);
       case 'places':
         return const Color(0xFF66BB6A);
-      case 'responses':
+      case 'phrases':
+        return const Color(0xFF26A69A);
+      case 'questions':
         return const Color(0xFF7E57C2);
       case 'school':
         return const Color(0xFFFFA726);

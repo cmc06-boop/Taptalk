@@ -116,14 +116,15 @@ class PhraseCard extends StatelessWidget {
                             iconSize: dense ? 14 : 17,
                           ),
                         ),
-                      if (canEdit)
+                      if (canEdit || canDelete)
                         Positioned(
                           top: dense ? 4 : 6,
                           right: dense ? 4 : 6,
                           child: _PhraseMoreButton(
                             size: dense ? 22 : 28,
                             iconSize: dense ? 14 : 17,
-                            onEdit: onEdit!,
+                            onEdit: canEdit ? onEdit : null,
+                            onDelete: canDelete ? onDelete : null,
                           ),
                         ),
                     ],
@@ -160,12 +161,8 @@ class PhraseCard extends StatelessWidget {
                   height: actionHeight,
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      final sideCount = (showDelete ? 1 : 0);
-                      final gap = AppSpacing.xs;
-                      final sideWidth =
-                          sideCount * actionHeight + (sideCount > 0 ? sideCount * gap : 0);
-                      final speakWidth = constraints.maxWidth - sideWidth;
-                      final iconOnlySpeak = dense || sideCount > 0 || speakWidth < 72;
+                      final speakWidth = constraints.maxWidth;
+                      final iconOnlySpeak = dense || speakWidth < 72;
                       final speakStyle = FilledButton.styleFrom(
                         backgroundColor: theme.bgAccent,
                         foregroundColor: Colors.white,
@@ -212,16 +209,6 @@ class PhraseCard extends StatelessWidget {
                                     ),
                                   ),
                           ),
-                          if (canDelete) ...[
-                            SizedBox(width: gap),
-                            _PhraseActionButton(
-                              icon: Icons.delete_outline_rounded,
-                              size: actionHeight,
-                              iconSize: dense ? 15 : 18,
-                              radius: dense ? 8 : AppSpacing.radiusSm,
-                              onTap: onDelete,
-                            ),
-                          ],
                         ],
                       );
                     },
@@ -236,54 +223,18 @@ class PhraseCard extends StatelessWidget {
   }
 }
 
-class _PhraseActionButton extends StatelessWidget {
-  const _PhraseActionButton({
-    required this.icon,
-    required this.size,
-    required this.iconSize,
-    required this.radius,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final double size;
-  final double iconSize;
-  final double radius;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(radius),
-      elevation: 0,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(radius),
-        child: SizedBox(
-          width: size,
-          height: size,
-          child: Icon(
-            icon,
-            size: iconSize,
-            color: const Color(0xFF5C3D2E),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _PhraseMoreButton extends StatelessWidget {
   const _PhraseMoreButton({
     required this.size,
     required this.iconSize,
-    required this.onEdit,
+    this.onEdit,
+    this.onDelete,
   });
 
   final double size;
   final double iconSize;
-  final VoidCallback onEdit;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -311,7 +262,7 @@ class _PhraseMoreButton extends StatelessWidget {
             context: context,
             position: position,
             items: [
-              PopupMenuItem<String>(
+              if (onEdit != null) PopupMenuItem<String>(
                 value: 'edit',
                 child: Row(
                   children: [
@@ -328,9 +279,20 @@ class _PhraseMoreButton extends StatelessWidget {
                   ],
                 ),
               ),
+              if (onDelete != null) PopupMenuItem<String>(
+                value: 'delete',
+                child: Row(
+                  children: [
+                    const Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFD64545)),
+                    const SizedBox(width: 8),
+                    const Text('Delete', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFFD64545))),
+                  ],
+                ),
+              ),
             ],
           );
-          if (result == 'edit') onEdit();
+          if (result == 'edit') onEdit?.call();
+          if (result == 'delete') onDelete?.call();
         },
         child: SizedBox(
           width: size,

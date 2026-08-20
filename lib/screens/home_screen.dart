@@ -209,22 +209,6 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           if (app.showingSubcategoryPicker)
             Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.md,
-                AppSpacing.lg,
-                AppSpacing.sm,
-              ),
-              child: Text(
-                AppStrings.chooseSubcategoryHint(lang),
-                style: GoogleFonts.poppins(
-                  fontSize: 13,
-                  color: theme.textMain.withValues(alpha: 0.75),
-                ),
-              ),
-            ),
-          if (app.showingSubcategoryPicker)
-            Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
               child: GridView.builder(
                 key: ValueKey(
@@ -232,6 +216,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
+                padding: EdgeInsets.zero,
                 gridDelegate: AppSpacing.phraseGridDelegate(context),
                 itemCount: app.subcategoriesForSelected.length,
                 itemBuilder: (context, i) {
@@ -507,6 +492,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       final confirm = await showDialog<bool>(
                         context: context,
                         builder: (ctx) => AlertDialog(
+                          title: const Text('Are you sure?'),
                           content: Text(AppStrings.deletePhrase(lang)),
                           actions: [
                             TextButton(
@@ -520,7 +506,26 @@ class _HomeScreenState extends State<HomeScreen> {
                           ],
                         ),
                       );
-                      if (confirm == true) await app.deletePhrase(phrase);
+                      if (confirm == true) {
+                        final wasFavorite = app.isFavorite(phrase);
+                        await app.deletePhrase(phrase);
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context)
+                          ..hideCurrentSnackBar()
+                          ..showSnackBar(
+                            SnackBar(
+                              duration: const Duration(seconds: 5),
+                              content: const Text('Phrase deleted'),
+                              action: SnackBarAction(
+                                label: 'Undo',
+                                onPressed: () => app.restorePhrase(
+                                  phrase,
+                                  restoreFavorite: wasFavorite,
+                                ),
+                              ),
+                            ),
+                          );
+                      }
                     },
                   );
                 },

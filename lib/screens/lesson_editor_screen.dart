@@ -105,6 +105,7 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        title: const Text('Are you sure?'),
         content: Text(AppStrings.deletePhrase(lang)),
         actions: [
           TextButton(
@@ -122,6 +123,27 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
     setState(() => _phrases = _phrases.where((p) => p.id != phrase.id).toList());
     try {
       await context.read<AppState>().deleteLessonPhrase(phrase.id);
+      if (!mounted) return;
+      final app = context.read<AppState>();
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 5),
+            content: const Text('Phrase deleted'),
+            action: SnackBarAction(
+              label: 'Undo',
+              onPressed: () async {
+                await app.addLessonPhrase(
+                  widget.lessonId,
+                  phrase.text,
+                  imagePath: phrase.imagePath,
+                );
+                if (mounted) await _load();
+              },
+            ),
+          ),
+        );
     } catch (_) {
       if (!mounted) return;
       await _load();

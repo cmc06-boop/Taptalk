@@ -3,41 +3,49 @@
 /// Categories match folder names under [assets/images]; phrase labels match image filenames.
 abstract final class DefaultBuiltinContent {
   static const defaultCategories = <(String key, String name, String iconKey)>[
-    ('feelings', 'Feelings', 'feelings'),
-    ('needs', 'Needs', 'needs'),
+    ('emotions', 'Emotions', 'emotions'),
     ('food', 'Food', 'food'),
     ('drinks', 'Drinks', 'drinks'),
     ('school', 'School', 'school'),
-    ('responses', 'Responses', 'custom'),
+    ('questions', 'Questions', 'questions'),
     ('health_safety', 'Health & Safety', 'custom'),
     ('family', 'Family', 'custom'),
     ('activities', 'Activities', 'activities'),
-    ('hobbies', 'Hobbies', 'custom'),
     ('greetings', 'Greetings', 'greetings'),
     ('animals', 'Animals', 'animals'),
     ('colors', 'Colors', 'custom'),
     ('places', 'Places', 'places'),
     ('transportation', 'Transportation', 'custom'),
     ('technology', 'Technology', 'custom'),
+    ('alphabets', 'Alphabets', 'alphabets'),
+    ('body_parts', 'Body Parts', 'body_parts'),
+    ('dates', 'Dates', 'dates'),
+    ('home', 'Home', 'home'),
+    ('numbers', 'Numbers', 'numbers'),
+    ('phrases', 'Phrases', 'phrases'),
   ];
 
   static const categoryDisplayOrder = <String>[
-    'feelings',
-    'needs',
+    'emotions',
     'food',
     'drinks',
     'school',
-    'responses',
+    'questions',
     'health_safety',
     'family',
     'activities',
-    'hobbies',
     'greetings',
     'animals',
     'colors',
     'places',
     'transportation',
     'technology',
+    'alphabets',
+    'body_parts',
+    'dates',
+    'home',
+    'numbers',
+    'phrases',
   ];
 
   /// Subcategories for Food and Drinks (key, name, parent key, icon key).
@@ -50,6 +58,8 @@ abstract final class DefaultBuiltinContent {
     ('drinks_hot', 'Hot Drinks', 'drinks', 'drinks_hot'),
     ('drinks_cold', 'Cold Drinks', 'drinks', 'drinks_cold'),
     ('drinks_dairy', 'Milk & Yogurt', 'drinks', 'drinks_dairy'),
+    ('dates_days', 'Days', 'dates', 'dates_days'),
+    ('dates_months', 'Months', 'dates', 'dates_months'),
   ];
 
   static const subcategoryDisplayOrder = <String>[
@@ -60,9 +70,11 @@ abstract final class DefaultBuiltinContent {
     'drinks_hot',
     'drinks_cold',
     'drinks_dairy',
+    'dates_days',
+    'dates_months',
   ];
 
-  static const parentCategoriesWithSubcategories = {'food', 'drinks'};
+  static const parentCategoriesWithSubcategories = {'food', 'drinks', 'dates'};
 
   static bool hasSubcategories(String key) =>
       parentCategoriesWithSubcategories.contains(key);
@@ -78,11 +90,19 @@ abstract final class DefaultBuiltinContent {
   }
 
   /// Legacy keys dropped from defaults; removed on seed so empty duplicates disappear.
-  static const obsoleteCategoryKeys = ['foods'];
+  static const obsoleteCategoryKeys = [
+    'foods',
+    'needs',
+    'hobbies',
+    'feelings',
+    'responses',
+  ];
 
   /// When a legacy key is removed, reassign its phrases to the replacement key.
   static const obsoleteCategoryKeyMigrations = <String, String>{
     'foods': 'food',
+    'feelings': 'emotions',
+    'responses': 'questions',
   };
 
   /// (label, category key, path under assets/images/)
@@ -156,21 +176,21 @@ abstract final class DefaultBuiltinContent {
     ('Grandpa', 'family', 'Family/Grandpa.jpg'),
     ('Mother', 'family', 'Family/Mother.jpg'),
     ('Sister', 'family', 'Family/Sister.jpg'),
-    // Feelings
-    ('Angry', 'feelings', 'Feelings/Angry.png'),
-    ('I am Cold', 'feelings', 'Feelings/I am Cold.png'),
-    ('I am Confuse', 'feelings', 'Feelings/I am Confuse.png'),
-    ('I am Excited', 'feelings', 'Feelings/I am Excited.png'),
-    ('I am Happy', 'feelings', 'Feelings/I am Happy.png'),
-    ('I am Hot', 'feelings', 'Feelings/I am Hot.png'),
-    ('I am Hungry', 'feelings', 'Feelings/I am Hungry.jpg'),
-    ('I am Hurt', 'feelings', 'Feelings/I am Hurt.png'),
-    ('I am Sad', 'feelings', 'Feelings/I am Sad.png'),
-    ('I am Scared', 'feelings', 'Feelings/I am Scared.jpeg'),
-    ('I am Tired', 'feelings', 'Feelings/I am Tired.png'),
-    ('I Feel Lonely', 'feelings', 'Feelings/I Feel Lonely.png'),
-    ('I Feel Sick', 'feelings', 'Feelings/I Feel Sick.jpeg'),
-    ('Too Loud Noisy', 'feelings', 'Feelings/Too Loud Noisy.png'),
+    // Emotions
+    ('Angry', 'emotions', 'Feelings/Angry.png'),
+    ('I am Cold', 'emotions', 'Feelings/I am Cold.png'),
+    ('I am Confuse', 'emotions', 'Feelings/I am Confuse.png'),
+    ('I am Excited', 'emotions', 'Feelings/I am Excited.png'),
+    ('I am Happy', 'emotions', 'Feelings/I am Happy.png'),
+    ('I am Hot', 'emotions', 'Feelings/I am Hot.png'),
+    ('I am Hungry', 'emotions', 'Feelings/I am Hungry.jpg'),
+    ('I am Hurt', 'emotions', 'Feelings/I am Hurt.png'),
+    ('I am Sad', 'emotions', 'Feelings/I am Sad.png'),
+    ('I am Scared', 'emotions', 'Feelings/I am Scared.jpeg'),
+    ('I am Tired', 'emotions', 'Feelings/I am Tired.png'),
+    ('I Feel Lonely', 'emotions', 'Feelings/I Feel Lonely.png'),
+    ('I Feel Sick', 'emotions', 'Feelings/I Feel Sick.jpeg'),
+    ('Too Loud Noisy', 'emotions', 'Feelings/Too Loud Noisy.png'),
     // Foods
     ('Apple', 'food_fruits', 'Foods/Apple.jpg'),
     ('Banana', 'food_fruits', 'Foods/Banana.jpg'),
@@ -226,28 +246,6 @@ abstract final class DefaultBuiltinContent {
     ('My Head Hurts', 'health_safety', 'Health & Safety/My Head Hurts.jpg'),
     ('My Leg Hurts', 'health_safety', 'Health & Safety/My Leg Hurts.jpg'),
     ('My Tooth Hurts', 'health_safety', 'Health & Safety/My Tooth Hurts.jpeg'),
-    // Hobbies
-    ('I like building things', 'hobbies', 'Hobbies/I like building things.png'),
-    ('I like collecting things', 'hobbies', 'Hobbies/I like collecting things.png'),
-    ('I like gardening', 'hobbies', 'Hobbies/I like gardening.png'),
-    ('I like painting', 'hobbies', 'Hobbies/I like painting.png'),
-    ('I like playing games', 'hobbies', 'Hobbies/I like playing games.png'),
-    ('I like playing puzzles', 'hobbies', 'Hobbies/I like playing puzzles.png'),
-    ('I like playing sports', 'hobbies', 'Hobbies/I like playing sports.png'),
-    ('I like reading', 'hobbies', 'Hobbies/I like reading.png'),
-    ('I like taking pictures', 'hobbies', 'Hobbies/I like taking pictures.png'),
-    ('I like writing stories', 'hobbies', 'Hobbies/I like writing stories.png'),
-    // Needs
-    ('I am hungry', 'needs', 'Needs/I am hungry.png'),
-    ('I am thirsty', 'needs', 'Needs/I am thirsty.png'),
-    ('I need a snack', 'needs', 'Needs/I need a snack.png'),
-    ('I need assistance', 'needs', 'Needs/I need assistance.png'),
-    ('I need help', 'needs', 'Needs/I need help.png'),
-    ('I need medicine', 'needs', 'Needs/I need medicine.png'),
-    ('I need my device', 'needs', 'Needs/I need my device.png'),
-    ('I need rest', 'needs', 'Needs/I need rest.png'),
-    ('I need to go to the restroom', 'needs', 'Needs/I need to go to the restroom.png'),
-    ('I need to wash my hands', 'needs', 'Needs/I need to wash my hands.png'),
     // Places
     ('Bakery', 'places', 'Places/Bakery.jpg'),
     ('Beach', 'places', 'Places/Beach.jpg'),
@@ -263,26 +261,26 @@ abstract final class DefaultBuiltinContent {
     ('Resort', 'places', 'Places/Resort.jpg'),
     ('School', 'places', 'Places/School.jpg'),
     ('Store', 'places', 'Places/Store.jpg'),
-    // Responses
-    ('Again', 'responses', 'Responses/Again.jpg'),
-    ('Excuse Me', 'responses', 'Responses/Excuse Me.jpg'),
-    ('Go', 'responses', 'Responses/Go.jpg'),
-    ('Help', 'responses', 'Responses/Help.jpg'),
-    ('I Understand', 'responses', 'Responses/I Understand.jpg'),
-    ('Maybe', 'responses', 'Responses/Maybe.jpg'),
-    ('No', 'responses', 'Responses/No.png'),
-    ('Not Okay', 'responses', 'Responses/Not Okay.jpg'),
-    ('Okay', 'responses', 'Responses/Okay.jpg'),
-    ('Please', 'responses', 'Responses/Please.png'),
-    ('Sorry', 'responses', 'Responses/Sorry.png'),
-    ('Stop', 'responses', 'Responses/Stop.jpg'),
-    ('Thank You', 'responses', 'Responses/Thank You.jpg'),
-    ('What ', 'responses', 'Responses/What .jpg'),
-    ('Where', 'responses', 'Responses/Where.png'),
-    ('Who ', 'responses', 'Responses/Who .png'),
-    ('Why ', 'responses', 'Responses/Why .jpg'),
-    ('Yes', 'responses', 'Responses/Yes.jpg'),
-    ('You Are Welcome', 'responses', 'Responses/You Are Welcome.avif'),
+    // Questions
+    ('Again', 'questions', 'Responses/Again.jpg'),
+    ('Excuse Me', 'questions', 'Responses/Excuse Me.jpg'),
+    ('Go', 'questions', 'Responses/Go.jpg'),
+    ('Help', 'questions', 'Responses/Help.jpg'),
+    ('I Understand', 'questions', 'Responses/I Understand.jpg'),
+    ('Maybe', 'questions', 'Responses/Maybe.jpg'),
+    ('No', 'questions', 'Responses/No.png'),
+    ('Not Okay', 'questions', 'Responses/Not Okay.jpg'),
+    ('Okay', 'questions', 'Responses/Okay.jpg'),
+    ('Please', 'questions', 'Responses/Please.png'),
+    ('Sorry', 'questions', 'Responses/Sorry.png'),
+    ('Stop', 'questions', 'Responses/Stop.jpg'),
+    ('Thank You', 'questions', 'Responses/Thank You.jpg'),
+    ('What ', 'questions', 'Responses/What .jpg'),
+    ('Where', 'questions', 'Responses/Where.png'),
+    ('Who ', 'questions', 'Responses/Who .png'),
+    ('Why ', 'questions', 'Responses/Why .jpg'),
+    ('Yes', 'questions', 'Responses/Yes.jpg'),
+    ('You Are Welcome', 'questions', 'Responses/You Are Welcome.avif'),
     // School
     ('Can I have a break', 'school', 'School/Can I have a break.png'),
     ('Can you help me', 'school', 'School/Can you help me.png'),

@@ -933,8 +933,8 @@ abstract final class AppStrings {
           : 'You can change this later in Settings.';
 
   static String chooseThemeTitle(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Pumili ng Tema 🌸'
-      : 'Choose Your Theme 🌸';
+      ? 'Pumili ng Tema'
+      : 'Choose Your Theme';
 
   static String chooseThemeSub(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Pumili ng kulay na komportable para sa iyo'

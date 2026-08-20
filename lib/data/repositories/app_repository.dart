@@ -1196,6 +1196,32 @@ class AppRepository {
     );
   }
 
+  Future<void> deleteCustomCategories(int userId, Iterable<String> keys) async {
+    final normalized = keys.map(normalizeCategoryKey).where((key) => key.isNotEmpty).toSet();
+    if (normalized.isEmpty) return;
+    final db = await _dbHelper.database;
+    await db.transaction((txn) async {
+      for (final key in normalized) {
+        await txn.delete('favorites', where: 'user_id = ? AND category_key = ?', whereArgs: [userId, key]);
+        await txn.delete('phrases', where: 'user_id = ? AND category_key = ? AND is_builtin = 0', whereArgs: [userId, key]);
+        await txn.delete('categories', where: 'user_id = ? AND category_key = ?', whereArgs: [userId, key]);
+      }
+    });
+  }
+
+  Future<void> renameCategory(int userId, String key, String name) async {
+    final normalizedKey = normalizeCategoryKey(key);
+    final trimmedName = name.trim();
+    if (normalizedKey.isEmpty || trimmedName.isEmpty) return;
+    final db = await _dbHelper.database;
+    await db.update(
+      'categories',
+      {'category_name': trimmedName},
+      where: 'user_id = ? AND category_key = ?',
+      whereArgs: [userId, normalizedKey],
+    );
+  }
+
   Future<List<PhraseModel>> getPhrases(int userId) async {
     await warmPhraseImageCacheDirectory();
     final db = await _dbHelper.database;

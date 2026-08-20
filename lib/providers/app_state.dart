@@ -23,6 +23,7 @@ import '../data/models/vocabulary_growth_summary.dart';
 import '../core/constants/tts_speed_options.dart';
 import '../core/theme/theme_tokens.dart';
 import '../data/database/database_helper.dart';
+import '../data/default_builtin_content.dart';
 import '../data/models/favorite_model.dart';
 import '../data/models/history_model.dart';
 import '../data/models/enrolled_class_model.dart';
@@ -114,7 +115,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   AppLanguage _language = AppLanguage.english;
   int _languageRevision = 0;
   double _ttsSpeed = TtsSpeedOptions.defaultSpeed;
-  String _selectedCategoryKey = 'feelings';
+  String _selectedCategoryKey = 'emotions';
   String? _selectedSubcategoryKey;
   bool _drawerOpen = false;
   bool _routeChanging = false;
@@ -1286,7 +1287,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _phrases = [];
     _favorites = [];
     _history = [];
-    _selectedCategoryKey = 'feelings';
+    _selectedCategoryKey = 'emotions';
     _selectedSubcategoryKey = null;
     _profileCode = '';
     _enrolledClasses = [];
@@ -2421,6 +2422,33 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  bool isCustomCategory(CategoryModel category) =>
+      !DefaultBuiltinContent.defaultCategories.any((entry) => entry.$1 == category.key);
+
+  Future<void> deleteCustomCategories(Iterable<String> keys) async {
+    if (_user == null) return;
+    final allowed = _categories
+        .where(isCustomCategory)
+        .map((category) => category.key)
+        .toSet();
+    final deleting = keys.where(allowed.contains).toSet();
+    if (deleting.isEmpty) return;
+    await _repo.deleteCustomCategories(_user!.id, deleting);
+    await _refreshPersonalBoard();
+    notifyListeners();
+    await _pushLearnerCategoriesToCloud();
+    await _pushLearnerCustomPhrasesToCloud();
+    await _pushLearnerFavoritesToCloud();
+  }
+
+  Future<void> renameCustomCategory(CategoryModel category, String name) async {
+    if (_user == null || !isCustomCategory(category) || name.trim().isEmpty) return;
+    await _repo.renameCategory(_user!.id, category.key, name);
+    await _refreshPersonalBoard();
+    notifyListeners();
+    unawaited(_pushLearnerCategoriesToCloud());
+  }
+
   Future<String?> addPhrase(String text, {String? imagePath}) async {
     if (_user == null || text.trim().isEmpty) return null;
     if (showingSubcategoryPicker) return null;
@@ -2460,8 +2488,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
     if (!phrase.isBuiltin &&
         (_user!.isLearner || _user!.isParent || _user!.isTeacher)) {
-      unawaited(_pushLearnerCustomPhrasesToCloud());
-      unawaited(_pushLearnerFavoritesToCloud());
+      await _pushLearnerCustomPhrasesToCloud();
+      await _pushLearnerFavoritesToCloud();
     }
   }
 
@@ -4991,6 +5019,50 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
+  Future<void> restorePhrase(PhraseModel phrase, {bool restoreFavorite = false}) async {
+    if (_user == null || phrase.isBuiltin) return;
+    final restored = await _repo.addPhrase(
+      userId: _user!.id,
+      text: phrase.text,
+      categoryKey: phrase.categoryKey,
+      imagePath: phrase.imagePath,
+    );
+    if (restoreFavorite) {
+      await _repo.addFavorite(
+        userId: _user!.id,
+        phraseText: restored.text,
+        categoryKey: restored.categoryKey,
+        phraseId: restored.id,
+        imagePath: restored.imagePath,
+      );
+    }
+    await _refreshPersonalBoard();
+    notifyListeners();
+    await _pushLearnerCustomPhrasesToCloud();
+    if (restoreFavorite) await _pushLearnerFavoritesToCloud();
+  }
+
+  Future<void> _pushLearnerCategoriesToCloud() async {
+    if (!CloudScope.syncMonitoring) return;
+    if (_user == null || !_notificationSync.isCloudAvailable) return;
+    if (!_hasPersonalBoardRole()) return;
+    final uid = await _personalBoardCloudUid();
+    if (uid == null || uid.isEmpty) return;
+    final local = (await _repo.getCategories(_user!.id))
+        .map(
+          (category) => RemoteLearnerCategory(
+            key: category.key,
+            name: category.name,
+            iconKey: category.iconKey,
+          ),
+        )
+        .toList();
+    await _notificationSync.syncLearnerCategories(
+      learnerFirebaseUid: uid,
+      categories: local,
+    );
+  }
+
   Future<void> _pushLearnerCustomPhrasesToCloud() async {
     if (!CloudScope.syncMonitoring) return;
     if (_user == null || !_notificationSync.isCloudAvailable) return;
@@ -5640,8 +5712,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (_user == null) return AppStrings.notSignedIn(_language);
     final trimmed = fullName.trim();
     if (trimmed.isEmpty) return AppStrings.fillAllFields(_language);
+    final updatedFirstName = trimmed.split(RegExp(r'\s+')).first;
     await _repo.updateUserFullName(_user!.id, trimmed);
+    await _repo.updateUserSettings(
+      _user!.id,
+      firstName: updatedFirstName,
+    );
     _user = _user!.copyWith(fullName: trimmed);
+    _welcomeFirstName = updatedFirstName;
     if (CloudScope.syncMonitoring) {
       await FirebaseService.instance.initialize();
       await _notificationSync.initialize();
