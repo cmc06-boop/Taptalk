@@ -49,7 +49,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
       }
       return;
     }
-    final hasNewEntries = visible.length > _items.length ||
+    final hasNewEntries =
+        visible.length > _items.length ||
         (_items.isNotEmpty && visible.first.id != _items.first.id);
     if (hasNewEntries) {
       setState(() => _items = visible);
@@ -113,23 +114,62 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Widget _buildCard(HistoryModel item, AppLanguage lang) {
     final app = context.read<AppState>();
     final theme = app.theme;
-    final fmt = DateFormat('d MMM - h:mm a');
+    final fmt = DateFormat('h:mm a');
 
     return _HistoryCard(
       key: ValueKey('history_${item.id}_${lang.name}_${app.languageRevision}'),
       item: item,
       formattedTime: fmt.format(item.createdAt),
       theme: theme,
-      lang: lang,
       onRemove: () => _removeItem(item),
       onSpeak: () => speakWithFeedback(
-            context,
-            item.text,
-            record: false,
-            categoryKey: item.categoryKey,
-          ),
+        context,
+        item.text,
+        record: false,
+        categoryKey: item.categoryKey,
+      ),
       categoryLabelFor: _categoryLabel,
     );
+  }
+
+  List<Widget> _buildDatedHistory(AppLanguage lang, TapTalkThemeToken theme) {
+    final widgets = <Widget>[];
+    DateTime? previousDay;
+    final dateFormat = DateFormat('MMMM d, y');
+
+    for (final item in _items) {
+      final day = DateTime(
+        item.createdAt.year,
+        item.createdAt.month,
+        item.createdAt.day,
+      );
+      if (previousDay == null || day != previousDay) {
+        if (widgets.isNotEmpty) {
+          widgets.add(const SizedBox(height: AppSpacing.sm));
+        }
+        widgets.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+            child: Text(
+              dateFormat.format(day),
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: theme.textMain,
+              ),
+            ),
+          ),
+        );
+        previousDay = day;
+      }
+      widgets.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+          child: _buildCard(item, lang),
+        ),
+      );
+    }
+    return widgets;
   }
 
   @override
@@ -225,11 +265,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 ),
               ),
               const SizedBox(height: AppSpacing.xs),
-              for (final item in _items)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                  child: _buildCard(item, lang),
-                ),
+              ..._buildDatedHistory(lang, theme),
             ],
           ],
         ),
@@ -238,13 +274,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 }
 
-class _HistoryCard extends StatefulWidget {
+class _HistoryCard extends StatelessWidget {
   const _HistoryCard({
     super.key,
     required this.item,
     required this.formattedTime,
     required this.theme,
-    required this.lang,
     required this.onRemove,
     required this.onSpeak,
     required this.categoryLabelFor,
@@ -253,204 +288,150 @@ class _HistoryCard extends StatefulWidget {
   final HistoryModel item;
   final String formattedTime;
   final TapTalkThemeToken theme;
-  final AppLanguage lang;
   final VoidCallback onRemove;
   final VoidCallback onSpeak;
   final String Function(AppState app, HistoryModel item) categoryLabelFor;
 
   @override
-  State<_HistoryCard> createState() => _HistoryCardState();
-}
-
-class _HistoryCardState extends State<_HistoryCard>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _dismissController;
-  late final Animation<double> _collapse;
-  late final Animation<Offset> _slideOut;
-  late final Animation<double> _fadeOut;
-  bool _deleting = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _dismissController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 320),
-    );
-    final curve = CurvedAnimation(
-      parent: _dismissController,
-      curve: Curves.easeInCubic,
-    );
-    _slideOut = Tween<Offset>(
-      begin: Offset.zero,
-      end: const Offset(1.15, 0),
-    ).animate(curve);
-    _fadeOut = Tween<double>(begin: 1, end: 0).animate(curve);
-    _collapse = Tween<double>(begin: 1, end: 0).animate(curve);
-  }
-
-  @override
-  void dispose() {
-    _dismissController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _animateDelete() async {
-    if (_deleting) return;
-    setState(() => _deleting = true);
-    await _dismissController.forward();
-    if (mounted) widget.onRemove();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
-    final phraseText = app.localizedPhrase(
-      widget.item.text,
-      widget.item.categoryKey,
-    );
-    final categoryLabel = widget.categoryLabelFor(app, widget.item);
-    final lessonClassName = widget.item.lessonContext == null
+    final phraseText = app.localizedPhrase(item.text, item.categoryKey);
+    final categoryLabel = categoryLabelFor(app, item);
+    final lessonClassName = item.lessonContext == null
         ? null
-        : app.localizedContent(widget.item.lessonContext!.className);
-    final lessonTitle = widget.item.lessonContext == null
+        : app.localizedContent(item.lessonContext!.className);
+    final lessonTitle = item.lessonContext == null
         ? null
-        : app.localizedContent(widget.item.lessonContext!.lessonTitle);
-    final theme = widget.theme;
+        : app.localizedContent(item.lessonContext!.lessonTitle);
 
-    return ClipRect(
-      child: SizeTransition(
-        sizeFactor: _collapse,
-        alignment: Alignment.topCenter,
-        child: FadeTransition(
-          opacity: _fadeOut,
-          child: SlideTransition(
-            position: _slideOut,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.md,
-                vertical: AppSpacing.md,
-              ),
-              decoration: BoxDecoration(
-                color: theme.bgMid,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: theme.bgAccent.withValues(alpha: 0.22),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: theme.bgAccent.withValues(alpha: 0.12),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: _deleting ? null : widget.onSpeak,
-                        borderRadius: BorderRadius.circular(10),
-                        child: Padding(
-                          padding:
-                              const EdgeInsets.only(right: AppSpacing.xs),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (widget.item.isLessonEntry) ...[
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: AppSpacing.sm,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: theme.bgAccent,
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Text(
-                                    lessonClassName!,
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                                if (widget.item.text.trim() !=
-                                    widget.item.lessonContext!.lessonTitle
-                                        .trim()) ...[
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    lessonTitle!,
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      color: theme.textMain
-                                          .withValues(alpha: 0.75),
-                                    ),
-                                  ),
-                                ],
-                              ] else
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: AppSpacing.sm,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: theme.bgAccent,
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Text(
-                                    categoryLabel,
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              const SizedBox(height: AppSpacing.xs),
-                              Text(
-                                widget.formattedTime,
-                                style: GoogleFonts.poppins(
-                                  fontSize: 11,
-                                  color:
-                                      theme.textMain.withValues(alpha: 0.55),
-                                ),
+    return Dismissible(
+      key: ValueKey('dismiss_history_${item.id}'),
+      direction: DismissDirection.startToEnd,
+      onDismissed: (_) => onRemove(),
+      background: Container(
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.only(left: AppSpacing.lg),
+        decoration: BoxDecoration(
+          color: theme.accentEmphasis,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: const Icon(Icons.delete_outline_rounded, color: Colors.white),
+      ),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.md,
+        ),
+        decoration: BoxDecoration(
+          color: theme.bgMid.withValues(alpha: 0.88),
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: theme.textMain.withValues(alpha: 0.18),
+              blurRadius: 3,
+              spreadRadius: 0.15,
+              offset: Offset.zero,
+            ),
+          ],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: onSpeak,
+                  borderRadius: BorderRadius.circular(10),
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: AppSpacing.xs),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (item.isLessonEntry) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.sm,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: theme.bgAccent,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              lessonClassName!,
+                              style: GoogleFonts.poppins(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
                               ),
-                              const SizedBox(height: AppSpacing.sm),
-                              Text(
-                                phraseText,
-                                style: GoogleFonts.poppins(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                  color: theme.textMain,
-                                  height: 1.3,
-                                ),
+                            ),
+                          ),
+                          if (item.text.trim() !=
+                              item.lessonContext!.lessonTitle.trim()) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              lessonTitle!,
+                              style: GoogleFonts.poppins(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: theme.textMain.withValues(alpha: 0.75),
                               ),
-                            ],
+                            ),
+                          ],
+                        ] else
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.sm,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: theme.bgAccent,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              categoryLabel,
+                              style: GoogleFonts.poppins(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: AppSpacing.sm),
+                        Text(
+                          phraseText,
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: theme.textMain,
+                            height: 1.3,
                           ),
                         ),
-                      ),
+                        Padding(
+                          padding: const EdgeInsets.only(
+                            left: AppSpacing.sm,
+                            top: 2,
+                          ),
+                          child: Text(
+                            formattedTime,
+                            style: GoogleFonts.poppins(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: theme.textMain.withValues(alpha: 0.58),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline_rounded),
-                    color: theme.textMain.withValues(alpha: 0.45),
-                    tooltip: AppStrings.delete(widget.lang),
-                    onPressed: _deleting ? null : _animateDelete,
-                  ),
-                ],
+                ),
               ),
             ),
-          ),
+          ],
         ),
       ),
     );
   }
 }
-

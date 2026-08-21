@@ -102,10 +102,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   AppScreenBuilder? _screenBuilder;
   final TtsService tts = TtsService();
   final DeviceSmsService _deviceSms = DeviceSmsService();
-  late final NotificationSyncService _notificationSync = NotificationSyncService(
-    repository: _repo,
-    cloudBackend: FirestoreNotificationBackend(),
-  );
+  late final NotificationSyncService _notificationSync =
+      NotificationSyncService(
+        repository: _repo,
+        cloudBackend: FirestoreNotificationBackend(),
+      );
 
   bool _loading = true;
   UserModel? _user;
@@ -122,6 +123,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   DateTime? _lastSubcategoryBackAt;
   bool _isSpeaking = false;
   String _speakingText = '';
+  int? _speakingPhraseId;
   int _spokenWordStart = -1;
   int _spokenWordEnd = -1;
   Timer? _readAlongTimer;
@@ -144,6 +146,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   List<CategoryModel> _categories = [];
   List<PhraseModel> _phrases = [];
   List<FavoriteModel> _favorites = [];
+  Future<void> _favoriteCloudMutation = Future<void>.value();
+  DateTime? _lastFavoriteLocalMutationAt;
   List<HistoryModel> _history = [];
   List<LinkedChildModel> _linkedChildren = [];
   List<ParentNotification> _notifications = [];
@@ -193,6 +197,17 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _route = route;
   }
 
+  /// Replaces the in-memory stack and the real Navigator (when ready).
+  /// During cold start [_loading] is true — only the memory stack is updated
+  /// because [MaterialApp.home] will pick up [pageStack.first] once loading ends.
+  Future<void> _goToRouteReplacingStack(AppRoute route) async {
+    if (_loading) {
+      _resetNavigationStack(route);
+      return;
+    }
+    await setRoute(route, replace: true);
+  }
+
   void bindScreenBuilder(AppScreenBuilder builder) => _screenBuilder = builder;
 
   Route<void> _pageRoute(AppRoute route) {
@@ -216,7 +231,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
-    final justReturnedToSubcategories = _lastSubcategoryBackAt != null &&
+    final justReturnedToSubcategories =
+        _lastSubcategoryBackAt != null &&
         DateTime.now().difference(_lastSubcategoryBackAt!) <
             const Duration(milliseconds: 400);
     if (justReturnedToSubcategories && _route == AppRoute.home) {
@@ -299,9 +315,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
     return null;
   }
+
   bool get drawerOpen => _drawerOpen;
   bool get isSpeaking => _isSpeaking;
   String get speakingText => _speakingText;
+  int? get speakingPhraseId => _speakingPhraseId;
   int get spokenWordStart => _spokenWordStart;
   int get spokenWordEnd => _spokenWordEnd;
 
@@ -352,6 +370,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (ownerId == null) return const [];
     return _history.where((h) => h.userId == ownerId).toList();
   }
+
   List<LinkedChildModel> get linkedChildren => _linkedChildren;
   List<ParentNotification> get notifications =>
       List.unmodifiable(_notifications);
@@ -392,7 +411,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final ownerId = _personalBoardUserId;
     if (ownerId == null) return const [];
     if (showingSubcategoryPicker) return const [];
-    return _phrases
+    final list = _phrases
         .where(
           (p) =>
               p.userId == ownerId &&
@@ -400,6 +419,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
               p.isActive,
         )
         .toList();
+    // Large video categories: stable A→Z so cards load consistently.
+    if (effectivePhraseCategoryKey == 'emotions' ||
+        effectivePhraseCategoryKey == 'home') {
+      list.sort((a, b) => a.text.toLowerCase().compareTo(b.text.toLowerCase()));
+    }
+    return list;
   }
 
   CategoryModel? get selectedCategory {
@@ -508,8 +533,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         offset = _speechHighlightOffset;
       }
 
-      final remaining =
-          fullText.substring(offset.clamp(0, fullText.length)).trimLeft();
+      final remaining = fullText
+          .substring(offset.clamp(0, fullText.length))
+          .trimLeft();
       if (remaining.isEmpty) return true;
 
       final resumeAt = fullText.indexOf(remaining, offset);
@@ -603,6 +629,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _speechHighlightOffset = 0;
     _readAlongWordIndex = 0;
     _speakingText = '';
+    _speakingPhraseId = null;
     _spokenWordStart = -1;
     _spokenWordEnd = -1;
   }
@@ -686,11 +713,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _activateMonitoringSync() async {
     if (_user == null) return;
 
-    final needsFullCloud = _user!.isParent ||
-        _user!.isTeacher ||
-        _user!.isOnlineAccount;
-    final needsMonitoringSync =
-        _user!.isLearner && CloudScope.syncMonitoring;
+    final needsFullCloud =
+        _user!.isParent || _user!.isTeacher || _user!.isOnlineAccount;
+    final needsMonitoringSync = _user!.isLearner && CloudScope.syncMonitoring;
 
     if (needsFullCloud || needsMonitoringSync) {
       await _notificationSync.initialize();
@@ -752,7 +777,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _startLearnerEnrollmentSync() async {
-    if (_user == null || !_user!.isLearner || !CloudScope.syncMonitoring) return;
+    if (_user == null || !_user!.isLearner || !CloudScope.syncMonitoring)
+      return;
     final uid = await _learnerFirebaseUidForSync();
     if (uid == null || uid.isEmpty) return;
     await _notificationSync.startLearnerEnrollmentSync(
@@ -869,15 +895,37 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
             await _repo.dedupeCustomPhrases(_user!.id);
           }
           if (snapshot.favorites.isNotEmpty) {
-            await _repo.mergeRemoteLearnerFavorites(
-              learnerUserId: _user!.id,
-              favorites: snapshot.favorites,
-            );
+            // Wait for any in-flight star/unstar push, then skip applying a
+            // possibly-stale remote list during the local-toggle grace window.
+            await _favoriteCloudMutation;
+            if (_user == null) return;
+            if (!_favoriteMergeGraceActive) {
+              final uid = await _personalBoardCloudUid();
+              final favorites = (uid != null && uid.isNotEmpty)
+                  ? await _notificationSync.getLearnerFavoritesFromCloud(uid)
+                  : snapshot.favorites;
+              if (favorites.isNotEmpty) {
+                await _repo.mergeRemoteLearnerFavorites(
+                  learnerUserId: _user!.id,
+                  favorites: favorites,
+                );
+              }
+            }
           }
           if (snapshot.speakHistory.isNotEmpty) {
+            final settings = await _repo.getUserSettings(_user!.id);
+            final clearedAtMs = settings['history_cleared_at_ms'] as int?;
+            final retainedHistory = clearedAtMs == null
+                ? snapshot.speakHistory
+                : snapshot.speakHistory
+                      .where(
+                        (item) =>
+                            item.createdAt.millisecondsSinceEpoch > clearedAtMs,
+                      )
+                      .toList();
             await _repo.mergeRemoteLearnerSpeakHistory(
               learnerUserId: _user!.id,
-              history: snapshot.speakHistory,
+              history: retainedHistory,
             );
           }
           await _refreshPersonalBoard();
@@ -913,7 +961,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _startTeacherMonitoringSync() async {
-    if (_user == null || !_user!.isTeacher || !CloudScope.syncMonitoring) return;
+    if (_user == null || !_user!.isTeacher || !CloudScope.syncMonitoring)
+      return;
     final teacherFirebaseUid = await _resolveAccountFirebaseUid();
     if (teacherFirebaseUid == null) return;
     await _notificationSync.startTeacherMonitoringSync(
@@ -961,7 +1010,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _startTeacherJoinRequestSync() async {
-    if (_user == null || !_user!.isTeacher || !CloudScope.syncMonitoring) return;
+    if (_user == null || !_user!.isTeacher || !CloudScope.syncMonitoring)
+      return;
     final teacherFirebaseUid = await _resolveAccountFirebaseUid();
     if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) return;
     await _syncJoinRequestsFromCloudForTeacher();
@@ -985,7 +1035,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _startLearnerJoinRequestSync() async {
-    if (_user == null || !_user!.isLearner || !CloudScope.syncMonitoring) return;
+    if (_user == null || !_user!.isLearner || !CloudScope.syncMonitoring)
+      return;
     final uid = await _learnerFirebaseUidForSync();
     if (uid == null || uid.isEmpty) return;
     await _notificationSync.startLearnerJoinRequestSync(
@@ -1008,7 +1059,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _syncJoinRequestsFromCloudForTeacher() async {
-    if (_user == null || !_user!.isTeacher || !_notificationSync.isCloudAvailable) {
+    if (_user == null ||
+        !_user!.isTeacher ||
+        !_notificationSync.isCloudAvailable) {
       return;
     }
     final teacherFirebaseUid = await _resolveAccountFirebaseUid();
@@ -1032,8 +1085,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       _pendingJoinRequests = [];
       return;
     }
-    _pendingJoinRequests =
-        await _repo.getPendingJoinRequestsForTeacher(_user!.id);
+    _pendingJoinRequests = await _repo.getPendingJoinRequestsForTeacher(
+      _user!.id,
+    );
   }
 
   Future<void> refreshPendingJoinRequests({
@@ -1048,11 +1102,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _joinRequestsRevision++;
     notifyListeners();
     if (cloudSyncInBackground) {
-      unawaited(_syncJoinRequestsFromCloudForTeacher().then((_) async {
-        await _loadPendingJoinRequests();
-        _joinRequestsRevision++;
-        notifyListeners();
-      }));
+      unawaited(
+        _syncJoinRequestsFromCloudForTeacher().then((_) async {
+          await _loadPendingJoinRequests();
+          _joinRequestsRevision++;
+          notifyListeners();
+        }),
+      );
     } else {
       await _syncJoinRequestsFromCloudForTeacher();
       await _loadPendingJoinRequests();
@@ -1072,7 +1128,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (request.teacherUserId != _user!.id) {
       return AppStrings.somethingWentWrong(_language);
     }
-    if (!await _repo.isLearnerEnrolled(request.learnerUserId, request.classId)) {
+    if (!await _repo.isLearnerEnrolled(
+      request.learnerUserId,
+      request.classId,
+    )) {
       await _repo.enrollLearnerInClass(request.learnerUserId, request.classId);
     }
     final learnerFirebaseUid = request.learnerFirebaseUid?.trim() ?? '';
@@ -1254,7 +1313,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _routeUserAfterOnboardingChecks() async {
     if (_user == null) return;
     final settings = await _repo.getUserSettings(_user!.id);
-    final hasAccountLanguage = settings['language'] is String &&
+    final hasAccountLanguage =
+        settings['language'] is String &&
         (settings['language'] as String).trim().isNotEmpty;
 
     var languageDone = await _isLanguageOnboardingDone(_user!.id);
@@ -1263,20 +1323,20 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       languageDone = true;
     }
     if (!languageDone) {
-      _resetNavigationStack(AppRoute.chooseLanguage);
+      await _goToRouteReplacingStack(AppRoute.chooseLanguage);
       return;
     }
     if (_user!.isLearner) {
       if (_user!.needsTheme) {
-        _resetNavigationStack(AppRoute.chooseTheme);
+        await _goToRouteReplacingStack(AppRoute.chooseTheme);
         return;
       }
       await _ensureStarterData();
-      _resetNavigationStack(AppRoute.chooseCategory);
+      await _goToRouteReplacingStack(AppRoute.chooseCategory);
     } else if (_user!.isParent) {
-      _resetNavigationStack(AppRoute.myChild);
+      await _goToRouteReplacingStack(AppRoute.myChild);
     } else if (_user!.isTeacher) {
-      _resetNavigationStack(AppRoute.teacherDashboard);
+      await _goToRouteReplacingStack(AppRoute.teacherDashboard);
     }
   }
 
@@ -1322,12 +1382,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       fullName: _user!.fullName,
     );
     _ttsSpeed = TtsSpeedOptions.snap(
-      (settings['tts_speed'] as num?)?.toDouble() ?? TtsSpeedOptions.defaultSpeed,
+      (settings['tts_speed'] as num?)?.toDouble() ??
+          TtsSpeedOptions.defaultSpeed,
     );
     _applyLanguageFromSettings(settings);
     final settingsLanguage = settings['language'];
-    final hasSettingsLanguage = settingsLanguage is String &&
-        settingsLanguage.trim().isNotEmpty;
+    final hasSettingsLanguage =
+        settingsLanguage is String && settingsLanguage.trim().isNotEmpty;
     if (!hasSettingsLanguage) {
       await _restoreLanguagePref();
     } else {
@@ -1337,8 +1398,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await _syncTtsSpeedPref();
     final contacts = settings['emergency_contacts'];
     if (contacts is List) {
-      _emergencyContacts =
-          AppRepository.normalizeEmergencyContacts(contacts.whereType<String>().toList());
+      _emergencyContacts = AppRepository.normalizeEmergencyContacts(
+        contacts.whereType<String>().toList(),
+      );
     } else {
       _emergencyContacts = [];
     }
@@ -1366,18 +1428,18 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       }
     }
 
-    _categories = (await _repo.getCategories(userId))
-        .where((c) => c.userId == userId)
-        .toList();
-    _phrases = (await _repo.getPhrases(userId))
-        .where((p) => p.userId == userId)
-        .toList();
-    _favorites = (await _repo.getFavorites(userId))
-        .where((f) => f.userId == userId)
-        .toList();
-    _history = (await _repo.getHistory(userId))
-        .where((h) => h.userId == userId)
-        .toList();
+    _categories = (await _repo.getCategories(
+      userId,
+    )).where((c) => c.userId == userId).toList();
+    _phrases = (await _repo.getPhrases(
+      userId,
+    )).where((p) => p.userId == userId).toList();
+    _favorites = (await _repo.getFavorites(
+      userId,
+    )).where((f) => f.userId == userId).toList();
+    _history = (await _repo.getHistory(
+      userId,
+    )).where((h) => h.userId == userId).toList();
 
     if (_categories.isNotEmpty &&
         !_categories.any((c) => c.key == _selectedCategoryKey)) {
@@ -1441,8 +1503,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final settings = await _repo.getUserSettings(_user!.id);
     final signupFirstName = (settings['first_name'] as String?)?.trim();
     final themeKey = _user!.themeKey?.trim();
-    final resolvedThemeKey =
-        themeKey != null && themeKey.isNotEmpty ? themeKey : _theme.key;
+    final resolvedThemeKey = themeKey != null && themeKey.isNotEmpty
+        ? themeKey
+        : _theme.key;
 
     await _notificationSync.syncUserProfile(
       RemoteUserProfile(
@@ -1551,7 +1614,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (uid == null || uid.isEmpty) return;
 
     try {
-      final cloudSnapshot = await _notificationSync.getUserProfileFromCloud(uid);
+      final cloudSnapshot = await _notificationSync.getUserProfileFromCloud(
+        uid,
+      );
       var profile = cloudSnapshot;
       if (profile != null &&
           AppRepository.isGenericAccountName(profile.fullName)) {
@@ -1561,7 +1626,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         firebaseUid: uid,
         email: _user!.email.contains('@taptalk.stub')
             ? (FirebaseService.instance.auth?.currentUser?.email ??
-                _user!.email)
+                  _user!.email)
             : _user!.email,
       );
       profile = _mergeCloudAccountPreferences(
@@ -1610,13 +1675,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final uid = _user!.isLearner
         ? await _learnerFirebaseUidForSync()
         : (await _ensureCloudAuthSession()
-            ? await _resolveAccountFirebaseUid()
-            : null);
+              ? await _resolveAccountFirebaseUid()
+              : null);
     if (uid == null || uid.isEmpty) return;
 
     try {
-      final remote =
-          await _notificationSync.getLearnerCategoriesFromCloud(uid);
+      final remote = await _notificationSync.getLearnerCategoriesFromCloud(uid);
       if (remote.isNotEmpty) {
         await _repo.mergeRemoteLearnerCategories(
           learnerUserId: _user!.id,
@@ -1639,7 +1703,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final isWindows =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
     final authUid = await FirebaseService.instance.waitForAuthUid(
-      timeout: isWindows ? const Duration(seconds: 20) : const Duration(seconds: 12),
+      timeout: isWindows
+          ? const Duration(seconds: 20)
+          : const Duration(seconds: 12),
     );
     if (authUid == null || authUid.isEmpty) {
       debugPrint('Account cloud restore skipped: Firebase auth not ready');
@@ -1702,18 +1768,21 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _refreshPersonalBoard() async {
     if (_user == null) return;
     final ownerId = _user!.id;
-    _categories = (await _repo.getCategories(ownerId))
-        .where((c) => c.userId == ownerId)
-        .toList();
-    _phrases = (await _repo.getPhrases(ownerId))
-        .where((p) => p.userId == ownerId)
-        .toList();
-    _favorites = (await _repo.getFavorites(ownerId))
-        .where((f) => f.userId == ownerId)
-        .toList();
-    _history = (await _repo.getHistory(ownerId))
-        .where((h) => h.userId == ownerId)
-        .toList();
+    // Keep builtin phrase media (videos/images) in sync for every
+    // category and subcategory on each personal-board refresh.
+    await _repo.seedLearnerData(ownerId);
+    _categories = (await _repo.getCategories(
+      ownerId,
+    )).where((c) => c.userId == ownerId).toList();
+    _phrases = (await _repo.getPhrases(
+      ownerId,
+    )).where((p) => p.userId == ownerId).toList();
+    _favorites = (await _repo.getFavorites(
+      ownerId,
+    )).where((f) => f.userId == ownerId).toList();
+    _history = (await _repo.getHistory(
+      ownerId,
+    )).where((h) => h.userId == ownerId).toList();
     if (_categories.isNotEmpty &&
         !_categories.any((c) => c.key == _selectedCategoryKey)) {
       _selectedCategoryKey = _categories.first.key;
@@ -1743,9 +1812,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _scheduleRouteRefresh(AppRoute route) {
-    if (route == AppRoute.favorites && _user != null) {
-      unawaited(refreshFavoritesFromCloud());
-    } else if (_isPersonalBoardRoute(route) && _user != null) {
+    // Favorites rely on local toggleFavorite + notifyListeners; auto cloud
+    // pull on open was racing and undoing star/unstar. Manual pull-to-refresh
+    // still calls refreshFavoritesFromCloud.
+    if (_isPersonalBoardRoute(route) &&
+        route != AppRoute.favorites &&
+        _user != null) {
       unawaited(_refreshPersonalBoard());
     }
   }
@@ -1765,7 +1837,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       if (replace) {
         _resetNavigationStack(route);
         if (nav != null) {
-          await nav.pushAndRemoveUntil(_pageRoute(route), (_) => false);
+          unawaited(nav.pushAndRemoveUntil(_pageRoute(route), (_) => false));
         }
         _scheduleRouteRefresh(route);
         notifyListeners();
@@ -1786,7 +1858,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       _pageStack.add(route);
       _route = route;
       if (nav != null) {
-        await nav.push(_pageRoute(route));
+        unawaited(nav.push(_pageRoute(route)));
       }
       _scheduleRouteRefresh(route);
       notifyListeners();
@@ -1917,11 +1989,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final changed = snapped != _ttsSpeed;
     _ttsSpeed = snapped;
 
-    if (changed && _isSpeaking && !_speechPaused && _isActiveSpeakGeneration()) {
+    if (changed &&
+        _isSpeaking &&
+        !_speechPaused &&
+        _isActiveSpeakGeneration()) {
       _interruptingForSpeed = true;
-      unawaited(
-        tts.stop().whenComplete(() => _interruptingForSpeed = false),
-      );
+      unawaited(tts.stop().whenComplete(() => _interruptingForSpeed = false));
     }
 
     notifyListeners();
@@ -2019,8 +2092,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         );
       } else {
         await _notificationSync.initialize();
-        var cloudProfile =
-            await _notificationSync.getUserProfileFromCloud(uid);
+        var cloudProfile = await _notificationSync.getUserProfileFromCloud(uid);
         final cloudSnapshot = cloudProfile;
         if (cloudProfile != null &&
             AppRepository.isGenericAccountName(cloudProfile.fullName)) {
@@ -2066,7 +2138,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (_user!.isLearner || _user!.isParent || _user!.isTeacher) {
       await _routeUserAfterOnboardingChecks();
     } else {
-      _resetNavigationStack(AppRoute.login);
+      await _goToRouteReplacingStack(AppRoute.login);
       notifyListeners();
       return AppStrings.parentTeacherComingSoon(_language);
     }
@@ -2208,17 +2280,17 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       _theme = TapTalkThemes.appDefault;
       await _setLanguageOnboardingDone(_user!.id, false);
       await _setCategoryOnboardingDone(_user!.id, false);
-      _resetNavigationStack(AppRoute.chooseLanguage);
+      await _goToRouteReplacingStack(AppRoute.chooseLanguage);
     } else if (role == 'parent') {
       _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
       await _setLanguageOnboardingDone(_user!.id, false);
-      _resetNavigationStack(AppRoute.chooseLanguage);
+      await _goToRouteReplacingStack(AppRoute.chooseLanguage);
     } else if (role == 'teacher') {
       _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
       await _setLanguageOnboardingDone(_user!.id, false);
-      _resetNavigationStack(AppRoute.chooseLanguage);
+      await _goToRouteReplacingStack(AppRoute.chooseLanguage);
     } else {
-      _resetNavigationStack(AppRoute.login);
+      await _goToRouteReplacingStack(AppRoute.login);
     }
 
     notifyListeners();
@@ -2273,10 +2345,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     if (user.firebaseUid == null || user.firebaseUid!.trim().isEmpty) {
-      final uid =
-          await FirebaseService.instance.provisionAuthAccountForPasswordReset(
-        email: normalizedEmail,
-      );
+      final uid = await FirebaseService.instance
+          .provisionAuthAccountForPasswordReset(email: normalizedEmail);
       if (uid != null) {
         await _repo.linkFirebaseUid(user.id, uid);
       }
@@ -2353,7 +2423,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _resetAccountSession();
     _theme = TapTalkThemes.appDefault;
     _resetSpeechTracking();
-    _resetNavigationStack(AppRoute.welcome);
+    await _goToRouteReplacingStack(AppRoute.welcome);
     _drawerOpen = false;
     notifyListeners();
   }
@@ -2398,7 +2468,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       }
       _pageStack.add(AppRoute.home);
       _route = AppRoute.home;
-      await navigatorKey.currentState?.push(_pageRoute(AppRoute.home));
+      final nav = navigatorKey.currentState;
+      if (nav != null) {
+        unawaited(nav.push(_pageRoute(AppRoute.home)));
+      }
       _scheduleRouteRefresh(AppRoute.home);
       notifyListeners();
     } finally {
@@ -2422,8 +2495,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  bool isCustomCategory(CategoryModel category) =>
-      !DefaultBuiltinContent.defaultCategories.any((entry) => entry.$1 == category.key);
+  bool isCustomCategory(CategoryModel category) => !DefaultBuiltinContent
+      .defaultCategories
+      .any((entry) => entry.$1 == category.key);
 
   Future<void> deleteCustomCategories(Iterable<String> keys) async {
     if (_user == null) return;
@@ -2442,7 +2516,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> renameCustomCategory(CategoryModel category, String name) async {
-    if (_user == null || !isCustomCategory(category) || name.trim().isEmpty) return;
+    if (_user == null || !isCustomCategory(category) || name.trim().isEmpty)
+      return;
     await _repo.renameCategory(_user!.id, category.key, name);
     await _refreshPersonalBoard();
     notifyListeners();
@@ -2475,9 +2550,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         '${phrase.text.trim().toLowerCase()}__${phrase.categoryKey}';
     _phrases = _phrases.where((p) => p.id != phrase.id).toList();
     _favorites = _favorites
-        .where(
-          (f) => f.phraseId != phrase.id && f.dedupeKey != removedKey,
-        )
+        .where((f) => f.phraseId != phrase.id && f.dedupeKey != removedKey)
         .toList();
     notifyListeners();
 
@@ -2521,43 +2594,77 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   bool isFavorite(PhraseModel phrase) {
-    final key = '${phrase.text.trim().toLowerCase()}__${phrase.categoryKey}';
-    return _favorites.any((f) => f.dedupeKey == key);
+    final key = _favoriteDedupeKey(phrase.text, phrase.categoryKey);
+    return _favorites.any(
+      (f) => _favoriteDedupeKey(f.phraseText, f.categoryKey) == key,
+    );
   }
 
   int? favoriteIdFor(PhraseModel phrase) {
-    final key = '${phrase.text.trim().toLowerCase()}__${phrase.categoryKey}';
+    final key = _favoriteDedupeKey(phrase.text, phrase.categoryKey);
     for (final f in _favorites) {
-      if (f.dedupeKey == key) return f.id;
+      if (_favoriteDedupeKey(f.phraseText, f.categoryKey) == key) return f.id;
     }
     return null;
+  }
+
+  String _favoriteDedupeKey(String text, String categoryKey) {
+    return '${AppRepository.storedUserText(text).toLowerCase()}__'
+        '${AppRepository.normalizeCategoryKey(categoryKey)}';
   }
 
   Future<void> toggleFavorite(PhraseModel phrase) async {
     if (_user == null || phrase.userId != _user!.id) return;
     final favId = favoriteIdFor(phrase);
     if (favId != null) {
+      // Update every listener immediately (Home star and Favorites filters),
+      // then reconcile with the persisted list below.
+      _favorites = _favorites.where((f) => f.id != favId).toList();
+      notifyListeners();
       await _repo.removeFavorite(favId);
     } else {
-      await _repo.addFavorite(
+      final added = await _repo.addFavorite(
         userId: _user!.id,
         phraseText: phrase.text,
         categoryKey: phrase.categoryKey,
         phraseId: phrase.isBuiltin ? null : phrase.id,
         imagePath: phrase.imagePath,
       );
+      _favorites = [
+        ..._favorites.where(
+          (f) =>
+              _favoriteDedupeKey(f.phraseText, f.categoryKey) !=
+              _favoriteDedupeKey(added.phraseText, added.categoryKey),
+        ),
+        added,
+      ];
+      notifyListeners();
     }
+    _lastFavoriteLocalMutationAt = DateTime.now();
     _favorites = await _repo.getFavorites(_user!.id);
     notifyListeners();
-    unawaited(_pushLearnerFavoritesToCloud());
+    final cloudMutation = _pushLearnerFavoritesToCloud();
+    _favoriteCloudMutation = cloudMutation;
+    await cloudMutation;
+  }
+
+  bool get _favoriteMergeGraceActive {
+    final at = _lastFavoriteLocalMutationAt;
+    if (at == null) return false;
+    return DateTime.now().difference(at) < const Duration(seconds: 8);
   }
 
   Future<void> refreshFavoritesFromCloud() async {
     if (_user == null || !_hasPersonalBoardRole()) return;
-    await _pullLearnerFavoritesFromCloud(_user!.id);
-    _favorites = (await _repo.getFavorites(_user!.id))
-        .where((f) => f.userId == _user!.id)
-        .toList();
+    await _favoriteCloudMutation;
+    // Right after a local star/unstar, keep the local list so a stale cloud
+    // read cannot undo the toggle the user just made.
+    if (!_favoriteMergeGraceActive) {
+      await _pullLearnerFavoritesFromCloud(_user!.id);
+    }
+    _favorites = (await _repo.getFavorites(
+      _user!.id,
+    )).where((f) => f.userId == _user!.id).toList();
     notifyListeners();
   }
 
@@ -2575,7 +2682,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       className: className,
       lessonTitle: lessonTitle,
     );
-    final cloudCategoryKey = AppRepository.isLessonCategoryKey(storedCategoryKey)
+    final cloudCategoryKey =
+        AppRepository.isLessonCategoryKey(storedCategoryKey)
         ? storedCategoryKey
         : AppRepository.normalizeCategoryKey(baseCategoryKey);
     final now = DateTime.now();
@@ -2645,10 +2753,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (!_notificationSync.isCloudAvailable) return;
     final uid = await _learnerFirebaseUidForSync();
     if (uid == null || uid.isEmpty) return;
-    final effectiveCategoryKey =
-        AppRepository.isLessonCategoryKey(categoryKey)
-            ? categoryKey
-            : AppRepository.normalizeCategoryKey(categoryKey);
+    final effectiveCategoryKey = AppRepository.isLessonCategoryKey(categoryKey)
+        ? categoryKey
+        : AppRepository.normalizeCategoryKey(categoryKey);
     final syncKey = AppRepository.remoteActivitySyncKey(
       createdAt: createdAt,
       phraseText: phraseText,
@@ -2724,8 +2831,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   void _startMonitoringConnectivitySync() {
     _connectivitySubscription?.cancel();
-    _connectivitySubscription =
-        Connectivity().onConnectivityChanged.listen((results) {
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((
+      results,
+    ) {
       if (results.isEmpty ||
           results.every((r) => r == ConnectivityResult.none)) {
         return;
@@ -2828,8 +2936,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       return false;
     }
     final localEditAt = _classLocalEditAt[classId];
-    if (localEditAt != null &&
-        !remoteUpdatedAt.isAfter(localEditAt)) {
+    if (localEditAt != null && !remoteUpdatedAt.isAfter(localEditAt)) {
       return false;
     }
     final lastPush = _lastOwnClassPushUpdatedAt[classId];
@@ -2975,7 +3082,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   void _startPendingActivitySyncTimer() {
     _pendingActivitySyncTimer?.cancel();
-    if (_user == null || !_user!.isLearner || !CloudScope.syncMonitoring) return;
+    if (_user == null || !_user!.isLearner || !CloudScope.syncMonitoring)
+      return;
     _pendingActivitySyncTimer = Timer.periodic(
       MonitoringConstants.pendingActivitySyncInterval,
       (_) => unawaited(_syncPendingLearnerActivityToCloud()),
@@ -3016,7 +3124,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       );
     }
 
-    if (!_notificationSync.isMonitoredLearnerActivitySyncActive(learnerUserId)) {
+    if (!_notificationSync.isMonitoredLearnerActivitySyncActive(
+      learnerUserId,
+    )) {
       await _notificationSync.startMonitoredLearnerActivitySync(
         learnerUserId: learnerUserId,
         learnerFirebaseUid: uid,
@@ -3113,7 +3223,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       return const [];
     }
     try {
-      final activityRangeStart = rangeStart ??
+      final activityRangeStart =
+          rangeStart ??
           (full
               ? MonitoringConstants.cloudActivityPullRangeStart()
               : DateTime.now().subtract(
@@ -3209,7 +3320,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     int learnerUserId, {
     bool full = true,
   }) async {
-    final prior = _monitoringHistoryPullChain[learnerUserId] ?? Future<void>.value();
+    final prior =
+        _monitoringHistoryPullChain[learnerUserId] ?? Future<void>.value();
     final task = prior.then((_) async {
       final changed = await _pullLearnerMonitoringBoardFromCloud(
         learnerUserId,
@@ -3247,7 +3359,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _prefetchMonitoredLearnerCaches() async {
     if (_user == null) return;
-    if (await NetworkStatus.isOffline() || !_notificationSync.isCloudAvailable) {
+    if (await NetworkStatus.isOffline() ||
+        !_notificationSync.isCloudAvailable) {
       return;
     }
     if (_user!.isParent || _user!.isTeacher) {
@@ -3298,9 +3411,19 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> clearAllHistory() async {
     if (_user == null) return;
-    await _repo.clearHistory(_user!.id);
+    final userId = _user!.id;
+    final clearedAtMs = DateTime.now().millisecondsSinceEpoch;
+    await _repo.clearHistory(userId);
+    await _repo.updateUserSettings(userId, historyClearedAtMs: clearedAtMs);
     _history = [];
     notifyListeners();
+
+    final uid = await _personalBoardCloudUid();
+    if (uid == null || uid.isEmpty) return;
+    await _notificationSync.syncLearnerSpeakHistory(
+      learnerFirebaseUid: uid,
+      history: const [],
+    );
   }
 
   Future<void> _loadLinkedChildren({bool syncCloudInBackground = false}) async {
@@ -3354,9 +3477,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (authUid == null || authUid.isEmpty) return null;
 
     final storedUid = _user!.firebaseUid?.trim();
-    if (storedUid != null &&
-        storedUid.isNotEmpty &&
-        storedUid != authUid) {
+    if (storedUid != null && storedUid.isNotEmpty && storedUid != authUid) {
       debugPrint(
         'Firebase UID mismatch (db=$storedUid, auth=$authUid); cloud sync skipped.',
       );
@@ -3378,8 +3499,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
     final isWindows =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
-    final effectiveTimeout =
-        isWindows ? timeout + const Duration(seconds: 8) : timeout;
+    final effectiveTimeout = isWindows
+        ? timeout + const Duration(seconds: 8)
+        : timeout;
     final deadline = DateTime.now().add(effectiveTimeout);
     while (true) {
       final uid = await _resolveAccountFirebaseUid();
@@ -3491,9 +3613,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _syncFirebaseSessionAfterRestore() async {
     if (_user == null || !FirebaseService.instance.isAvailable) return;
-    final needsCloud = _user!.isTeacher ||
-        _user!.isParent ||
-        _user!.isOnlineAccount;
+    final needsCloud =
+        _user!.isTeacher || _user!.isParent || _user!.isOnlineAccount;
     if (!needsCloud) return;
 
     final restoredUid = await FirebaseService.instance.waitForAuthUid();
@@ -3524,16 +3645,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (firebaseAuth == null || firebaseAuth.currentUser != null) return;
 
     _firebaseAuthRestoreSubscription?.cancel();
-    _firebaseAuthRestoreSubscription =
-        firebaseAuth.authStateChanges().listen((user) async {
+    _firebaseAuthRestoreSubscription = firebaseAuth.authStateChanges().listen((
+      user,
+    ) async {
       if (user == null || _user == null) return;
       await _firebaseAuthRestoreSubscription?.cancel();
       _firebaseAuthRestoreSubscription = null;
 
       final storedUid = _user!.firebaseUid?.trim();
-      if (storedUid != null &&
-          storedUid.isNotEmpty &&
-          user.uid != storedUid) {
+      if (storedUid != null && storedUid.isNotEmpty && user.uid != storedUid) {
         debugPrint('Late Firebase auth UID mismatch; cloud sync skipped.');
         return;
       }
@@ -3571,23 +3691,19 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
     final index = _notifications.indexWhere((n) => n.id == notificationId);
     if (index >= 0) {
-      _notifications[index] =
-          _notifications[index].copyWith(isRead: true);
+      _notifications[index] = _notifications[index].copyWith(isRead: true);
       notifyListeners();
     }
   }
 
   Future<void> markAllNotificationsRead() async {
     if (_user == null || !_user!.isParent) return;
-    final remoteIds =
-        await _repo.unreadNotificationRemoteIds(_user!.id);
+    final remoteIds = await _repo.unreadNotificationRemoteIds(_user!.id);
     await _repo.markAllNotificationsRead(_user!.id);
     if (remoteIds.isNotEmpty) {
       unawaited(_notificationSync.markAllRemoteNotificationsRead(remoteIds));
     }
-    _notifications = [
-      for (final n in _notifications) n.copyWith(isRead: true),
-    ];
+    _notifications = [for (final n in _notifications) n.copyWith(isRead: true)];
     notifyListeners();
   }
 
@@ -3604,7 +3720,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
-  Future<void> refreshLinkedChildren({bool cloudSyncInBackground = true}) async {
+  Future<void> refreshLinkedChildren({
+    bool cloudSyncInBackground = true,
+  }) async {
     await _loadLinkedChildren(syncCloudInBackground: cloudSyncInBackground);
     if (!cloudSyncInBackground) {
       await Future.wait(
@@ -3614,7 +3732,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
-  Future<void> refreshTeacherClasses({bool cloudSyncInBackground = true}) async {
+  Future<void> refreshTeacherClasses({
+    bool cloudSyncInBackground = true,
+  }) async {
     if (_user == null || !_user!.isTeacher) {
       _teacherClasses = [];
       _teacherStudentCount = 0;
@@ -3651,8 +3771,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           }),
         ),
       );
-    _teacherStudentCount =
-        await _repo.countEnrolledStudentsForTeacher(_user!.id);
+    _teacherStudentCount = await _repo.countEnrolledStudentsForTeacher(
+      _user!.id,
+    );
   }
 
   Future<void> _syncTeacherClassesFromCloudAndReload() async {
@@ -3773,10 +3894,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     RemoteTeacherClass? remoteClass,
     String? enrollmentTeacherName,
   }) async {
-    for (final candidate in [
-      remoteClass?.teacherName,
-      enrollmentTeacherName,
-    ]) {
+    for (final candidate in [remoteClass?.teacherName, enrollmentTeacherName]) {
       final trimmed = candidate?.trim() ?? '';
       if (trimmed.isNotEmpty && !AppRepository.isGenericAccountName(trimmed)) {
         return trimmed;
@@ -3795,7 +3913,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         profile: profile,
         existingName: null,
       );
-      if (resolved.isNotEmpty && !AppRepository.isGenericAccountName(resolved)) {
+      if (resolved.isNotEmpty &&
+          !AppRepository.isGenericAccountName(resolved)) {
         return resolved;
       }
     } catch (e, st) {
@@ -3820,7 +3939,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
-  Future<List<TeacherRecentAlert>> getTeacherRecentAlerts({int limit = 4}) async {
+  Future<List<TeacherRecentAlert>> getTeacherRecentAlerts({
+    int limit = 4,
+  }) async {
     if (_user == null || !_user!.isTeacher) return [];
     await _syncTeacherAlertsFromCloud();
     return _repo.getRecentAlertsForTeacher(
@@ -3829,7 +3950,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
-  Future<List<TeacherRecentAlert>> getTeacherAlertHistory({int limit = 100}) async {
+  Future<List<TeacherRecentAlert>> getTeacherAlertHistory({
+    int limit = 100,
+  }) async {
     if (_user == null || !_user!.isTeacher) return [];
     await _syncTeacherAlertsFromCloud();
     return _repo.getRecentAlertsForTeacher(
@@ -3838,7 +3961,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
-  Future<List<TeacherRecentLesson>> getTeacherRecentLessons({int limit = 8}) async {
+  Future<List<TeacherRecentLesson>> getTeacherRecentLessons({
+    int limit = 8,
+  }) async {
     if (_user == null || !_user!.isTeacher) return [];
     return _repo.getRecentLessonsForTeacher(
       teacherUserId: _user!.id,
@@ -3846,7 +3971,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
-  Future<List<TeacherRecentLesson>> getTeacherLessonHistory({int limit = 100}) async {
+  Future<List<TeacherRecentLesson>> getTeacherLessonHistory({
+    int limit = 100,
+  }) async {
     if (_user == null || !_user!.isTeacher) return [];
     return _repo.getRecentLessonsForTeacher(
       teacherUserId: _user!.id,
@@ -4040,8 +4167,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       classId: classId,
     );
     for (final student in students) {
-      final learnerFirebaseUid =
-          await _repo.getFirebaseUidForUser(student.learnerId);
+      final learnerFirebaseUid = await _repo.getFirebaseUidForUser(
+        student.learnerId,
+      );
       if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) continue;
       await _notificationSync.syncClassEnrollment(
         classId: classId,
@@ -4093,13 +4221,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     );
     if (classCode.isEmpty) return lessons;
     if (cloudSyncInBackground) {
-      unawaited(_syncEnrolledClassLessonsFromCloudAndReload(classId, classCode));
+      unawaited(
+        _syncEnrolledClassLessonsFromCloudAndReload(classId, classCode),
+      );
       return lessons;
     }
-    await _syncClassLessonsFromCloud(
-      classId: classId,
-      classCode: classCode,
-    );
+    await _syncClassLessonsFromCloud(classId: classId, classCode: classCode);
     return _repo.getEnrolledClassLessons(
       learnerUserId: _user!.id,
       classId: classId,
@@ -4111,10 +4238,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     String classCode,
   ) async {
     try {
-      await _syncClassLessonsFromCloud(
-        classId: classId,
-        classCode: classCode,
-      );
+      await _syncClassLessonsFromCloud(classId: classId, classCode: classCode);
       notifyListeners();
     } catch (e, st) {
       debugPrint('Background lesson sync failed: $e\n$st');
@@ -4139,10 +4263,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       return lessons;
     }
     await _pushClassContentToCloud(classId);
-    return _repo.getClassLessons(
-      teacherUserId: _user!.id,
-      classId: classId,
-    );
+    return _repo.getClassLessons(teacherUserId: _user!.id, classId: classId);
   }
 
   Future<void> _syncTeacherClassLessonsFromCloudAndReload(
@@ -4157,10 +4278,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         notifyListeners();
         return;
       }
-      await _syncClassLessonsFromCloud(
-        classId: classId,
-        classCode: classCode,
-      );
+      await _syncClassLessonsFromCloud(classId: classId, classCode: classCode);
       notifyListeners();
     } catch (e, st) {
       debugPrint('Background teacher lesson sync failed: $e\n$st');
@@ -4178,10 +4296,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       final classCode = (classRow?['class_code'] as String?) ?? '';
       if (classCode.isNotEmpty && cloudSyncInBackground) {
         if (!_liveClassContentIds.contains(classId)) {
-          unawaited(_syncClassLessonsFromCloud(
-            classId: classId,
-            classCode: classCode,
-          ));
+          unawaited(
+            _syncClassLessonsFromCloud(classId: classId, classCode: classCode),
+          );
         }
       } else if (classCode.isNotEmpty) {
         await _syncClassLessonsFromCloud(
@@ -4241,10 +4358,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<List<LessonPhrase>> getLessonPhrases(int lessonId) async {
     if (_user == null || !_user!.isTeacher) return [];
-    return _repo.getLessonPhrases(
-      teacherUserId: _user!.id,
-      lessonId: lessonId,
-    );
+    return _repo.getLessonPhrases(teacherUserId: _user!.id, lessonId: lessonId);
   }
 
   Future<String?> addLessonPhrase(
@@ -4294,8 +4408,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (_user == null || !_user!.isTeacher) return false;
     final classId = await _repo.classIdForLessonPhrase(phraseId);
     if (classId != null) _markClassLocallyEdited(classId);
-    final savedImage =
-        clearImage ? null : await persistPhraseImageIfNeeded(imagePath);
+    final savedImage = clearImage
+        ? null
+        : await persistPhraseImageIfNeeded(imagePath);
     final updated = await _repo.updateLessonPhrase(
       teacherUserId: _user!.id,
       phraseId: phraseId,
@@ -4463,8 +4578,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (!_notificationSync.isCloudAvailable) return;
     try {
       for (final student in students) {
-        final learnerFirebaseUid =
-            await _repo.getFirebaseUidForUser(student.learnerId);
+        final learnerFirebaseUid = await _repo.getFirebaseUidForUser(
+          student.learnerId,
+        );
         if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) continue;
         await _notificationSync.syncClassEnrollment(
           classId: student.classId,
@@ -4498,8 +4614,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     final trimmedCustom = customMessage?.trim();
-    final isCustom =
-        trimmedCustom != null && trimmedCustom.isNotEmpty;
+    final isCustom = trimmedCustom != null && trimmedCustom.isNotEmpty;
     final teacherName = _user!.fullName;
 
     final title = isCustom
@@ -4544,10 +4659,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
     final inAppError = switch (result.status) {
       TeacherAlertStatus.sent => null,
-      TeacherAlertStatus.noLinkedParents =>
-        AppStrings.alertNoLinkedParents(_language, learnerName),
-      TeacherAlertStatus.notAuthorized =>
-        AppStrings.alertNotAuthorized(_language),
+      TeacherAlertStatus.noLinkedParents => AppStrings.alertNoLinkedParents(
+        _language,
+        learnerName,
+      ),
+      TeacherAlertStatus.notAuthorized => AppStrings.alertNotAuthorized(
+        _language,
+      ),
     };
 
     if (result.notificationIds.isNotEmpty) {
@@ -4555,10 +4673,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
     }
 
-    final learnerFirebaseUid =
-        await _resolveLearnerFirebaseUid(learnerUserId);
-    final localContacts =
-        await _repo.getEmergencyContactsForLearner(learnerUserId);
+    final learnerFirebaseUid = await _resolveLearnerFirebaseUid(learnerUserId);
+    final localContacts = await _repo.getEmergencyContactsForLearner(
+      learnerUserId,
+    );
     var contacts = CloudScope.syncMonitoring
         ? await _notificationSync.resolveEmergencyContacts(
             learnerUserId: learnerUserId,
@@ -4604,7 +4722,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     );
 
     return TeacherAlertDeliveryResult(
-      inAppError: inAppError ??
+      inAppError:
+          inAppError ??
           (offline ? AppStrings.inAppNeedsInternet(_language) : null),
       sms: SmsAlertResult(
         attempted: sms.attempted,
@@ -4634,7 +4753,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _refreshEnrolledClassTeacherNamesFromCloud() async {
     if (_user == null || !_user!.isLearner) return;
-    if (!CloudScope.syncMonitoring || !_notificationSync.isCloudAvailable) return;
+    if (!CloudScope.syncMonitoring || !_notificationSync.isCloudAvailable)
+      return;
     if (await NetworkStatus.isOffline()) return;
 
     final classes = await _repo.getEnrolledClasses(_user!.id);
@@ -4659,7 +4779,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   /// teacher-class records into local SQLite so the learner sees them.
   Future<void> _syncEnrolledClassesFromCloud() async {
     if (!CloudScope.syncMonitoring) return;
-    if (_user == null || !_user!.isLearner || !_notificationSync.isCloudAvailable) {
+    if (_user == null ||
+        !_user!.isLearner ||
+        !_notificationSync.isCloudAvailable) {
       return;
     }
     final uid = await _learnerFirebaseUidForSync();
@@ -4694,8 +4816,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
             .getTeacherClassByCodeFromCloud(code)
             .timeout(const Duration(seconds: 8));
         if (remoteClass != null) {
-          classRow =
-              await _repo.importRemoteTeacherClassForEnrollment(remoteClass);
+          classRow = await _repo.importRemoteTeacherClassForEnrollment(
+            remoteClass,
+          );
         }
       }
       if (classRow == null) continue;
@@ -4752,8 +4875,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Drops local enrollments when the teacher removed the class from cloud.
-  Future<void> _pruneEnrollmentsForDeletedCloudClasses(int learnerUserId) async {
-    if (!CloudScope.syncMonitoring || !_notificationSync.isCloudAvailable) return;
+  Future<void> _pruneEnrollmentsForDeletedCloudClasses(
+    int learnerUserId,
+  ) async {
+    if (!CloudScope.syncMonitoring || !_notificationSync.isCloudAvailable)
+      return;
     final local = await _repo.getEnrolledClasses(learnerUserId);
     for (final enrolled in local) {
       final code = AppRepository.normalizeClassCode(enrolled.classCode);
@@ -4773,7 +4899,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _resyncLearnerEnrollmentsToCloud() async {
     if (!CloudScope.syncMonitoring) return;
-    if (_user == null || !_user!.isLearner || !_notificationSync.isCloudAvailable) {
+    if (_user == null ||
+        !_user!.isLearner ||
+        !_notificationSync.isCloudAvailable) {
       return;
     }
     final learnerFirebaseUid = await _learnerFirebaseUidForSync();
@@ -4793,12 +4921,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       // Teacher deleted this class — do not re-create the cloud enrollment.
       if (remoteClass == null) continue;
 
-      final teacherFirebaseUid = remoteClass.teacherFirebaseUid.trim().isNotEmpty
+      final teacherFirebaseUid =
+          remoteClass.teacherFirebaseUid.trim().isNotEmpty
           ? remoteClass.teacherFirebaseUid.trim()
           : await _repo.getFirebaseUidForUser(enrolled.teacherId);
       if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) continue;
-      final teacherName =
-          await _repo.teacherDisplayNameForUserId(enrolled.teacherId);
+      final teacherName = await _repo.teacherDisplayNameForUserId(
+        enrolled.teacherId,
+      );
       await _notificationSync.syncClassEnrollment(
         classId: enrolled.classId,
         classCode: code,
@@ -4835,7 +4965,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
             .timeout(const Duration(seconds: 12));
         if (remoteClass != null) {
           teacherFirebaseUidFromRemote = remoteClass.teacherFirebaseUid;
-          classRow = await _repo.importRemoteTeacherClassForEnrollment(remoteClass);
+          classRow = await _repo.importRemoteTeacherClassForEnrollment(
+            remoteClass,
+          );
         }
       } catch (e, st) {
         debugPrint('Cloud class code lookup failed: $e\n$st');
@@ -4877,7 +5009,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final learnerFirebaseUid =
         _user!.firebaseUid ?? FirebaseService.instance.currentUid;
     final teacherUserId = classRow['teacher_user_id'] as int?;
-    final teacherFirebaseUid = teacherFirebaseUidFromRemote ??
+    final teacherFirebaseUid =
+        teacherFirebaseUidFromRemote ??
         (teacherUserId == null
             ? null
             : await _repo.getFirebaseUidForUser(teacherUserId));
@@ -4916,9 +5049,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         learnerUserId: _user!.id,
         learnerName: _user!.fullName,
         learnerFirebaseUid: learnerFirebaseUid,
-        status: ClassJoinRequest.statusToString(
-          ClassJoinRequestStatus.pending,
-        ),
+        status: ClassJoinRequest.statusToString(ClassJoinRequestStatus.pending),
         requestedAt: now,
       ),
     );
@@ -4991,8 +5122,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (!_hasPersonalBoardRole()) return;
     final uid = await _personalBoardCloudUid();
     if (uid == null || uid.isEmpty) return;
-    final remote =
-        await _notificationSync.getLearnerCategoriesFromCloud(uid);
+    final remote = await _notificationSync.getLearnerCategoriesFromCloud(uid);
     if (remote.isNotEmpty) {
       await _repo.mergeRemoteLearnerCategories(
         learnerUserId: _user!.id,
@@ -5019,7 +5149,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
-  Future<void> restorePhrase(PhraseModel phrase, {bool restoreFavorite = false}) async {
+  Future<void> restorePhrase(
+    PhraseModel phrase, {
+    bool restoreFavorite = false,
+  }) async {
     if (_user == null || phrase.isBuiltin) return;
     final restored = await _repo.addPhrase(
       userId: _user!.id,
@@ -5100,8 +5233,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (!_hasPersonalBoardRole()) return;
     final uid = await _personalBoardCloudUid();
     if (uid == null || uid.isEmpty) return;
-    final remote =
-        await _notificationSync.getLearnerCustomPhrasesFromCloud(uid);
+    final remote = await _notificationSync.getLearnerCustomPhrasesFromCloud(
+      uid,
+    );
     if (remote.isNotEmpty) {
       await _repo.mergeRemoteLearnerCustomPhrases(
         learnerUserId: _user!.id,
@@ -5122,23 +5256,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _syncLearnerFavoritesToCloud() async {
     if (!CloudScope.syncMonitoring) return;
     if (_user == null || !_hasPersonalBoardRole()) return;
-    final uid = await _personalBoardCloudUid();
-    if (uid == null || uid.isEmpty) return;
-    final remote = await _notificationSync.getLearnerFavoritesFromCloud(uid);
-    if (remote.isNotEmpty) {
-      await _repo.mergeRemoteLearnerFavorites(
-        learnerUserId: _user!.id,
-        favorites: remote,
-      );
-    }
-    final local = await _repo.getFavoritesForCloudSync(
-      _user!.id,
-      firebaseUid: uid,
-    );
-    await _notificationSync.syncLearnerFavorites(
-      learnerFirebaseUid: uid,
-      favorites: local,
-    );
+    // Push local favorites as source of truth. Pull-before-push was wiping
+    // stars/unstars that had not reached the cloud yet.
+    await _favoriteCloudMutation;
+    await _pushLearnerFavoritesToCloud();
   }
 
   Future<void> _syncLearnerSpeakHistoryToCloud() async {
@@ -5147,20 +5268,27 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (!_hasPersonalBoardRole()) return;
     final uid = await _personalBoardCloudUid();
     if (uid == null || uid.isEmpty) return;
-    final remote =
-        await _notificationSync.getLearnerSpeakHistoryFromCloud(uid);
-    if (remote.isNotEmpty) {
+    final settings = await _repo.getUserSettings(_user!.id);
+    final clearedAtMs = settings['history_cleared_at_ms'] as int?;
+    final remote = await _notificationSync.getLearnerSpeakHistoryFromCloud(uid);
+    final retainedRemote = clearedAtMs == null
+        ? remote
+        : remote
+              .where(
+                (item) => item.createdAt.millisecondsSinceEpoch > clearedAtMs,
+              )
+              .toList();
+    if (retainedRemote.isNotEmpty) {
       await _repo.mergeRemoteLearnerSpeakHistory(
         learnerUserId: _user!.id,
-        history: remote,
+        history: retainedRemote,
       );
     }
     final local = await _repo.getHistoryForCloudSync(_user!.id);
     final merged = AppRepository.mergeSpeakHistoryForCloudExport(
       local: local,
-      remote: remote,
+      remote: retainedRemote,
     );
-    if (merged.isEmpty) return;
     await _notificationSync.syncLearnerSpeakHistory(
       learnerFirebaseUid: uid,
       history: merged,
@@ -5178,7 +5306,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
     final learnerFirebaseUid = learnerUserId == _user?.id
         ? (await _resolveAccountFirebaseUid() ??
-            await _resolveLearnerFirebaseUid(learnerUserId))
+              await _resolveLearnerFirebaseUid(learnerUserId))
         : await _resolveLearnerFirebaseUid(learnerUserId);
     if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) return;
     try {
@@ -5197,6 +5325,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _pullLearnerFavoritesFromCloud(int learnerUserId) async {
     if (!CloudScope.syncMonitoring) return;
     if (await NetworkStatus.isOffline()) return;
+    // Don't let a stale cloud list undo a star/unstar the user just made.
+    if (learnerUserId == _user?.id && _favoriteMergeGraceActive) return;
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
     if (!_notificationSync.isCloudAvailable) return;
@@ -5205,7 +5335,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
     final learnerFirebaseUid = learnerUserId == _user?.id
         ? (await _resolveAccountFirebaseUid() ??
-            await _resolveLearnerFirebaseUid(learnerUserId))
+              await _resolveLearnerFirebaseUid(learnerUserId))
         : await _resolveLearnerFirebaseUid(learnerUserId);
     if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) return;
     try {
@@ -5232,22 +5362,34 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
     final learnerFirebaseUid = learnerUserId == _user?.id
         ? (await _resolveAccountFirebaseUid() ??
-            await _resolveLearnerFirebaseUid(learnerUserId))
+              await _resolveLearnerFirebaseUid(learnerUserId))
         : await _resolveLearnerFirebaseUid(learnerUserId);
     if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) return;
     try {
       final history = await _notificationSync
           .getLearnerSpeakHistoryFromCloud(learnerFirebaseUid)
           .timeout(const Duration(seconds: 15));
+      var retainedHistory = history;
+      if (learnerUserId == _user?.id) {
+        final settings = await _repo.getUserSettings(learnerUserId);
+        final clearedAtMs = settings['history_cleared_at_ms'] as int?;
+        if (clearedAtMs != null) {
+          retainedHistory = history
+              .where(
+                (item) => item.createdAt.millisecondsSinceEpoch > clearedAtMs,
+              )
+              .toList();
+        }
+      }
       final inserted = await _repo.mergeRemoteLearnerSpeakHistory(
         learnerUserId: learnerUserId,
-        history: history,
+        history: retainedHistory,
       );
       if (inserted > 0) {
         _bumpChildMonitoringRevision(learnerUserId);
       }
       debugPrint(
-        'Pulled ${history.length} speak history entries for user $learnerUserId'
+        'Pulled ${retainedHistory.length} speak history entries for user $learnerUserId'
         ' ($inserted new)',
       );
     } catch (e, st) {
@@ -5302,7 +5444,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (forMonitoring &&
         _user != null &&
         (_user!.isParent || _user!.isTeacher)) {
-      final fromCloud = await _resolveLearnerFirebaseUidFromCloud(learnerUserId);
+      final fromCloud = await _resolveLearnerFirebaseUidFromCloud(
+        learnerUserId,
+      );
       if (fromCloud != null && fromCloud.isNotEmpty) return fromCloud;
       return null;
     }
@@ -5425,7 +5569,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (_user!.isParent || _user!.isTeacher) {
       cloudReady = await _ensureCloudAuthSession();
     }
-    final online = cloudReady &&
+    final online =
+        cloudReady &&
         !await NetworkStatus.isOffline() &&
         !NetworkStatus.isCloudBlocked &&
         _notificationSync.isCloudAvailable;
@@ -5436,16 +5581,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         await _loadLinkedChildren(syncCloudInBackground: false);
       }
     }
-    final learnerUid =
-        await _resolveLearnerFirebaseUid(learnerUserId, forMonitoring: true);
+    final learnerUid = await _resolveLearnerFirebaseUid(
+      learnerUserId,
+      forMonitoring: true,
+    );
     if (online && learnerUid != null && learnerUid.isNotEmpty) {
       if (full) {
         await _syncLearnerEnrollmentsFromCloudForUser(learnerUserId);
       }
-      await _syncLearnerMonitoringBoardFromCloud(
-        learnerUserId,
-        full: full,
-      );
+      await _syncLearnerMonitoringBoardFromCloud(learnerUserId, full: full);
       if (_liveMonitoredLearnerIds.contains(learnerUserId)) {
         await startLiveChildMonitoringSync(learnerUserId);
       }
@@ -5508,8 +5652,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }) async {
     final linked = linkedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
     final range = _dateRangeForPeriod(period, month: month);
-    final locale =
-        _language == AppLanguage.filipino ? 'fil_PH' : 'en_US';
+    final locale = _language == AppLanguage.filipino ? 'fil_PH' : 'en_US';
     final earliest = linked.isAfter(range.$1) ? linked : range.$1;
 
     List<RemoteLearnerActivity> cloudActivities = const [];
@@ -5539,11 +5682,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
             rangeStart: range.$1,
             rangeEnd: range.$2,
           );
-    final usageStats =
-        AppRepository.mergePhraseUsageStats(localStats, cloudStats);
+    final usageStats = AppRepository.mergePhraseUsageStats(
+      localStats,
+      cloudStats,
+    );
     final phrasesUsed = usageStats.length;
-    final phraseTaps =
-        usageStats.fold<int>(0, (sum, stat) => sum + stat.count);
+    final phraseTaps = usageStats.fold<int>(0, (sum, stat) => sum + stat.count);
 
     final firstUsesFromCustom = await _repo.getCustomPhraseAdditions(
       learnerUserId: learnerUserId,
@@ -5597,7 +5741,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _syncLearnerEnrollmentsFromCloudForUser(int learnerUserId) async {
+  Future<void> _syncLearnerEnrollmentsFromCloudForUser(
+    int learnerUserId,
+  ) async {
     if (!CloudScope.syncMonitoring) return;
     if (!_notificationSync.isCloudAvailable) return;
     final uid = await _resolveLearnerFirebaseUid(learnerUserId);
@@ -5631,10 +5777,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     bool syncCloud = false,
   }) async {
     if (syncCloud) {
-      await _syncClassLessonsFromCloud(
-        classId: classId,
-        classCode: classCode,
-      );
+      await _syncClassLessonsFromCloud(classId: classId, classCode: classCode);
     }
     return _repo.getClassLessonsByClassId(classId);
   }
@@ -5671,8 +5814,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       rangeEnd: range.$2,
       personalOnly: true,
     );
-    final locale =
-        _language == AppLanguage.filipino ? 'fil_PH' : 'en_US';
+    final locale = _language == AppLanguage.filipino ? 'fil_PH' : 'en_US';
     return SessionUsageCalculator.summarize(
       events: allEvents,
       period: period,
@@ -5694,8 +5836,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         return (start, start.add(const Duration(days: 1)));
       case ChildUsagePeriod.thisWeek:
         final weekday = now.weekday;
-        final start = DateTime(now.year, now.month, now.day)
-            .subtract(Duration(days: weekday - 1));
+        final start = DateTime(
+          now.year,
+          now.month,
+          now.day,
+        ).subtract(Duration(days: weekday - 1));
         return (start, start.add(const Duration(days: 7)));
       case ChildUsagePeriod.month:
         final m = month ?? DateTime(now.year, now.month);
@@ -5705,8 +5850,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  String get profileCode =>
-      (_user?.isLearner ?? false) ? _profileCode : '';
+  String get profileCode => (_user?.isLearner ?? false) ? _profileCode : '';
 
   Future<String?> updateProfileName(String fullName) async {
     if (_user == null) return AppStrings.notSignedIn(_language);
@@ -5714,10 +5858,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (trimmed.isEmpty) return AppStrings.fillAllFields(_language);
     final updatedFirstName = trimmed.split(RegExp(r'\s+')).first;
     await _repo.updateUserFullName(_user!.id, trimmed);
-    await _repo.updateUserSettings(
-      _user!.id,
-      firstName: updatedFirstName,
-    );
+    await _repo.updateUserSettings(_user!.id, firstName: updatedFirstName);
     _user = _user!.copyWith(fullName: trimmed);
     _welcomeFirstName = updatedFirstName;
     if (CloudScope.syncMonitoring) {
@@ -5790,7 +5931,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     return null;
   }
 
-  Future<String?> changePassword(String currentPassword, String newPassword) async {
+  Future<String?> changePassword(
+    String currentPassword,
+    String newPassword,
+  ) async {
     if (_user == null) return AppStrings.notSignedIn(_language);
     if (currentPassword.isEmpty || newPassword.isEmpty) {
       return AppStrings.fillAllFields(_language);
@@ -5798,9 +5942,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (!AuthValidation.isStrongPassword(newPassword)) {
       return AppStrings.passwordTooShort(_language);
     }
-    final ok = await _repo.updateUserPassword(_user!.id, currentPassword, newPassword);
+    final ok = await _repo.updateUserPassword(
+      _user!.id,
+      currentPassword,
+      newPassword,
+    );
     if (!ok) return AppStrings.wrongCurrentPassword(_language);
-    _user = _user!.copyWith(passwordHash: AppRepository.hashPassword(newPassword));
+    _user = _user!.copyWith(
+      passwordHash: AppRepository.hashPassword(newPassword),
+    );
     notifyListeners();
     return null;
   }
@@ -5811,6 +5961,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     String? categoryKey,
     String? className,
     String? lessonTitle,
+    int? phraseId,
   }) async {
     final catKey = categoryKey ?? _selectedCategoryKey;
     final spoken = text.trim();
@@ -5846,6 +5997,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _currentSpeakGeneration = gen;
 
     _speakingText = spoken;
+    _speakingPhraseId = phraseId;
     _isSpeaking = true;
     _spokenWordStart = -1;
     _spokenWordEnd = -1;
@@ -5984,4 +6136,3 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 }
-

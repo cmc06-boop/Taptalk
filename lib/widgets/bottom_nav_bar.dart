@@ -50,8 +50,8 @@ class TapTalkBottomNav extends StatelessWidget {
             child: _NavItem(
               icon: Icons.home_rounded,
               label: AppStrings.home(lang),
-              active: current == AppRoute.home,
-              onTap: () => app.setRoute(AppRoute.home),
+              active: current == AppRoute.chooseCategory,
+              onTap: () => app.setRoute(AppRoute.chooseCategory),
               color: theme,
             ),
           ),

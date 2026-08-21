@@ -12,6 +12,7 @@ Future<void> speakWithFeedback(
   String? categoryKey,
   String? className,
   String? lessonTitle,
+  int? phraseId,
 }) async {
   final app = context.read<AppState>();
   if (text.trim().isEmpty) {
@@ -28,6 +29,7 @@ Future<void> speakWithFeedback(
     categoryKey: categoryKey,
     className: className,
     lessonTitle: lessonTitle,
+    phraseId: phraseId,
   );
   if (!ok && context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(

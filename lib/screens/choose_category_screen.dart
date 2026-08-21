@@ -21,8 +21,34 @@ class ChooseCategoryScreen extends StatefulWidget {
 
 class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
   bool _selecting = false;
+  bool _showFloatingSelect = false;
+  final ScrollController _scrollController = ScrollController();
   final Set<String> _selectedKeys = {};
   final Set<String> _pendingDeletedKeys = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(() {
+      final show = _scrollController.offset > 118;
+      if (show != _showFloatingSelect && mounted) {
+        setState(() => _showFloatingSelect = show);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _toggleSelectionMode() {
+    setState(() {
+      _selecting = !_selecting;
+      _selectedKeys.clear();
+    });
+  }
 
   Future<void> _showAddCategoryDialog(BuildContext context) async {
     await AddCategoryDialog.show(context);
@@ -135,6 +161,7 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
             onRefresh: () => app.refreshLearnerCollections(),
             color: theme.bgAccent,
             child: ListView(
+              controller: _scrollController,
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.only(bottom: 96),
               children: [
@@ -191,18 +218,22 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
                               ),
                             ),
                           ),
-                          if (_selecting && _selectedKeys.isNotEmpty)
-                            IconButton(
-                              tooltip: AppStrings.delete(lang),
-                              onPressed: () => _deleteCategories(app, _selectedKeys),
-                              icon: const Icon(Icons.delete_outline_rounded),
-                            ),
                           TextButton(
-                            onPressed: () => setState(() {
-                              _selecting = !_selecting;
-                              _selectedKeys.clear();
-                            }),
-                            child: Text(_selecting ? AppStrings.cancel(lang) : 'Select'),
+                            onPressed: _toggleSelectionMode,
+                            style: TextButton.styleFrom(
+                              backgroundColor: _selecting
+                                  ? Colors.transparent
+                                  : theme.bgAccent.withValues(alpha: 0.10),
+                              minimumSize: Size.zero,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            child: Text(
+                              _selecting ? AppStrings.cancel(lang) : 'Select',
+                            ),
                           ),
                         ],
                       ),
@@ -256,13 +287,53 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
             right: AppSpacing.lg,
             bottom: AppSpacing.md,
             child: FloatingActionButton(
-              onPressed: () => _showAddCategoryDialog(context),
-              backgroundColor: theme.bgAccent,
-              foregroundColor: Colors.white,
-              tooltip: AppStrings.addCategoryShort(lang),
-              child: const Icon(Icons.add_rounded),
-            ),
+                  onPressed: _selecting
+                      ? () {
+                          if (_selectedKeys.isNotEmpty) {
+                            _deleteCategories(app, _selectedKeys);
+                          }
+                        }
+                      : () => _showAddCategoryDialog(context),
+                  backgroundColor: theme.bgAccent,
+                  foregroundColor: Colors.white,
+                  tooltip: _selecting
+                      ? AppStrings.delete(lang)
+                      : AppStrings.addCategoryShort(lang),
+                  child: Icon(
+                    _selecting
+                        ? Icons.delete_outline_rounded
+                        : Icons.add_rounded,
+                  ),
+                ),
           ),
+          if (_selecting && _showFloatingSelect)
+            Positioned(
+              right: AppSpacing.lg,
+              top: AppSpacing.sm,
+              child: Material(
+                color: Colors.white,
+                elevation: 4,
+                borderRadius: BorderRadius.circular(20),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: _toggleSelectionMode,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 13,
+                      vertical: 7,
+                    ),
+                    child: Text(
+                      AppStrings.cancel(lang),
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: theme.textMain,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );

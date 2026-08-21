@@ -9,7 +9,7 @@ import '../providers/app_state.dart';
 import 'highlighting_text_controller.dart';
 import 'phrase_image.dart';
 
-class PhraseCard extends StatelessWidget {
+class PhraseCard extends StatefulWidget {
   const PhraseCard({
     super.key,
     required this.phrase,
@@ -40,22 +40,47 @@ class PhraseCard extends StatelessWidget {
   final bool dense;
 
   @override
+  State<PhraseCard> createState() => _PhraseCardState();
+}
+
+class _PhraseCardState extends State<PhraseCard>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive {
+    // Home has ~58 videos — keeping every card alive starves decoders online.
+    // Retention is handled by the video view after a successful load.
+    if (widget.phrase.categoryKey == 'home') return false;
+    return isPhraseVideoPath(widget.phrase.imagePath);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final theme = app.theme;
-    final lang = app.language;
+    super.build(context);
+    final phrase = widget.phrase;
+    final displayText = widget.displayText;
+    final onTap = widget.onTap;
+    final onSpeak = widget.onSpeak;
+    final onDelete = widget.onDelete;
+    final onFavorite = widget.onFavorite;
+    final onEdit = widget.onEdit;
+    final isFavorite = widget.isFavorite;
+    final showFavorite = widget.showFavorite;
+    final showDelete = widget.showDelete;
+    final showEdit = widget.showEdit;
+    final dense = widget.dense;
+
+    final theme = context.select((AppState app) => app.theme);
+    final lang = context.select((AppState app) => app.language);
+    final String phraseText = displayText ??
+        context.select((AppState app) => app.localizedPhraseText(phrase));
     final cardRadius = dense ? AppSpacing.radiusMd : AppSpacing.radiusLg;
     final edgePad = dense ? AppSpacing.xs : AppSpacing.sm;
     final actionHeight = dense ? 28.0 : 32.0;
     final actionIcon = dense ? 14.0 : 15.0;
     final labelSize = dense ? 9.0 : 10.0;
     final titleSize = dense ? 9.5 : 11.0;
-    final phraseText = displayText ??
-        app.localizedPhraseText(phrase);
     final canEdit = showEdit && !phrase.isBuiltin && onEdit != null;
     final canDelete = showDelete && !phrase.isBuiltin;
-    final isSpeakingThisPhrase = app.isSpeaking &&
-        app.speakingText.trim() == phraseText.trim();
     final phraseStyle = GoogleFonts.poppins(
       fontSize: titleSize,
       fontWeight: FontWeight.w800,
@@ -98,10 +123,25 @@ class PhraseCard extends StatelessWidget {
                           borderRadius: BorderRadius.circular(
                             dense ? AppSpacing.radiusSm : AppSpacing.radiusMd,
                           ),
-                          child: PhraseImage(
-                            imagePath: phrase.imagePath,
-                            theme: theme,
-                            fill: true,
+                          child: Selector<AppState, bool>(
+                            selector: (_, app) {
+                              if (!app.isSpeaking) return false;
+                              if (app.speakingPhraseId != null &&
+                                  app.speakingPhraseId == phrase.id) {
+                                return true;
+                              }
+                              final text = displayText ??
+                                  app.localizedPhraseText(phrase);
+                              return app.speakingText.trim() == text.trim();
+                            },
+                            builder: (_, playing, _) {
+                              return PhraseImage(
+                                imagePath: phrase.imagePath,
+                                theme: theme,
+                                fill: true,
+                                playing: playing,
+                              );
+                            },
                           ),
                         ),
                       ),
@@ -134,26 +174,45 @@ class PhraseCard extends StatelessWidget {
                 SizedBox(
                   height: dense ? 28 : 32,
                   child: Center(
-                    child: isSpeakingThisPhrase
-                        ? RichText(
-                            textAlign: TextAlign.center,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            text: buildHighlightedTextSpan(
-                              text: phraseText,
-                              start: app.spokenWordStart,
-                              end: app.spokenWordEnd,
-                              accent: theme.bgAccent,
-                              style: phraseStyle,
-                            ),
-                          )
-                        : Text(
-                            phraseText,
+                    child: Selector<AppState, (bool, int, int)>(
+                      selector: (_, app) {
+                        final text =
+                            displayText ?? app.localizedPhraseText(phrase);
+                        final active = app.isSpeaking &&
+                            app.speakingText.trim() == text.trim();
+                        if (!active) return const (false, 0, 0);
+                        return (
+                          true,
+                          app.spokenWordStart,
+                          app.spokenWordEnd,
+                        );
+                      },
+                      builder: (context, highlight, child) {
+                        final (active, start, end) = highlight;
+                        final text = phraseText;
+                        if (!active) {
+                          return Text(
+                            text,
                             textAlign: TextAlign.center,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: phraseStyle,
+                          );
+                        }
+                        return RichText(
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          text: buildHighlightedTextSpan(
+                            text: text,
+                            start: start,
+                            end: end,
+                            accent: theme.bgAccent,
+                            style: phraseStyle,
                           ),
+                        );
+                      },
+                    ),
                   ),
                 ),
                 SizedBox(height: dense ? 3 : AppSpacing.xs),

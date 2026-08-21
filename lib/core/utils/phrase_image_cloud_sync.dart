@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
+import 'phrase_image_storage.dart';
+
 /// Uploads local phrase images to Firebase Storage for cross-device sync.
 Future<String?> resolveImagePathForCloudSync(
   String? imagePath,
@@ -28,14 +30,25 @@ Future<String?> resolveImagePathForCloudSync(
 
   try {
     final ext = p.extension(trimmed);
-    final safeExt = ext.isEmpty || ext.length > 8 ? '.jpg' : ext;
+    final safeExt = ext.isEmpty || ext.length > 8
+        ? (isPhraseVideoPath(trimmed) ? '.mp4' : '.jpg')
+        : ext;
     final objectName = '${const Uuid().v4()}$safeExt';
     final ref = FirebaseStorage.instance
         .ref()
         .child('phrase_images')
         .child(uid)
         .child(objectName);
-    await ref.putFile(file);
+    final isVideo =
+        isPhraseVideoPath(trimmed) || safeExt.toLowerCase() == '.mp4';
+    if (isVideo) {
+      await ref.putFile(
+        file,
+        SettableMetadata(contentType: 'video/mp4'),
+      );
+    } else {
+      await ref.putFile(file);
+    }
     return await ref.getDownloadURL();
   } catch (e, st) {
     debugPrint('Phrase image cloud upload failed: $e\n$st');

@@ -200,6 +200,7 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
                       categoryKey: phrase.categoryKey,
                       className: widget.className,
                       lessonTitle: widget.lessonTitle,
+                      phraseId: phrase.id,
                     ),
                     onSpeak: () => speakWithFeedback(
                       context,
@@ -208,6 +209,7 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
                       categoryKey: phrase.categoryKey,
                       className: widget.className,
                       lessonTitle: widget.lessonTitle,
+                      phraseId: phrase.id,
                     ),
                     onFavorite: () => app.toggleFavorite(phrase),
                     onDelete: () {},

@@ -36,7 +36,8 @@ dependencies:
   mobile_scanner: ^7.4.0
   qr_flutter: ^4.1.0
   share_plus: ^13.3.0
-
+  video_player: ^2.10.0
+  video_player_win: ^3.2.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -72,6 +73,17 @@ flutter:
     - assets/images/Transportation/
     - "assets/images/Category Cards/"
     - "assets/images/Logo/"
+    - assets/videos/Activities/
+    - assets/videos/Alphabet/
+    - "assets/videos/Body Parts/"
+    - "assets/videos/Days & Months/"
+    - assets/videos/Emotions/
+    - assets/videos/Family/
+    - assets/videos/Greetings/
+    - assets/videos/Home/
+    - assets/videos/Numbers/
+    - assets/videos/Phrases/
+    - assets/videos/Questions/
   fonts:
     - family: Poppins
       fonts:

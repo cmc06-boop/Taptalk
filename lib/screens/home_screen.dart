@@ -132,13 +132,18 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _appendPhrase(String text, {bool speak = false}) {
+  void _appendPhrase(String text, {bool speak = false, int? phraseId}) {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
     final current = _textController.text.trim();
     _textController.text = current.isEmpty ? trimmed : '$current $trimmed';
     if (speak) {
-      speakWithFeedback(context, trimmed, record: true);
+      speakWithFeedback(
+        context,
+        trimmed,
+        record: true,
+        phraseId: phraseId,
+      );
     }
   }
 
@@ -204,35 +209,36 @@ class _HomeScreenState extends State<HomeScreen> {
       body: RefreshIndicator(
         onRefresh: _refresh,
         color: theme.bgAccent,
-        child: ListView(
-        key: ValueKey('home_${lang.name}_${app.languageRevision}'),
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
-        children: [
-          if (app.showingSubcategoryPicker)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: GridView.builder(
-                key: ValueKey(
-                  'subcats_${lang.name}_${app.languageRevision}_${app.selectedCategoryKey}',
+        child: CustomScrollView(
+          key: ValueKey('home_${lang.name}_${app.languageRevision}'),
+          physics: const AlwaysScrollableScrollPhysics(),
+          cacheExtent: 1200,
+          slivers: [
+            if (app.showingSubcategoryPicker)
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg)
+                    .copyWith(bottom: AppSpacing.xxl),
+                sliver: SliverGrid(
+                  key: ValueKey(
+                    'subcats_${lang.name}_${app.languageRevision}_${app.selectedCategoryKey}',
+                  ),
+                  gridDelegate: AppSpacing.phraseGridDelegate(context),
+                  delegate: SliverChildBuilderDelegate(
+                    (context, i) {
+                      final sub = app.subcategoriesForSelected[i];
+                      return CategoryGridCard(
+                        category: sub,
+                        label: app.localizedCategoryName(sub),
+                        onTap: () => app.selectSubcategory(sub.key),
+                      );
+                    },
+                    childCount: app.subcategoriesForSelected.length,
+                  ),
                 ),
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                padding: EdgeInsets.zero,
-                gridDelegate: AppSpacing.phraseGridDelegate(context),
-                itemCount: app.subcategoriesForSelected.length,
-                itemBuilder: (context, i) {
-                  final sub = app.subcategoriesForSelected[i];
-                  return CategoryGridCard(
-                    category: sub,
-                    label: app.localizedCategoryName(sub),
-                    onTap: () => app.selectSubcategory(sub.key),
-                  );
-                },
-              ),
-            )
-          else ...[
-          PanelCard(
+              )
+            else ...[
+              SliverToBoxAdapter(
+                child: PanelCard(
             margin: const EdgeInsets.fromLTRB(
               AppSpacing.lg,
               0,
@@ -449,98 +455,107 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: GridView.builder(
-                key: ValueKey(
-                  'phrases_${lang.name}_${app.languageRevision}_${app.effectivePhraseCategoryKey}',
-                ),
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: AppSpacing.phraseGridDelegate(context),
-                itemCount: app.phrasesForCategory.length,
-                itemBuilder: (context, i) {
-                  final phrase = app.phrasesForCategory[i];
-                  return PhraseCard(
-                    key: ValueKey(
-                      'phrase_${phrase.id}_${lang.name}_${app.languageRevision}',
-                    ),
-                    phrase: phrase,
-                    dense: denseGrid,
-                    isFavorite: app.isFavorite(phrase),
-                    onTap: () => _appendPhrase(app.localizedPhraseText(phrase)),
-                    onSpeak: () => _appendPhrase(
-                      app.localizedPhraseText(phrase),
-                      speak: true,
-                    ),
-                    onFavorite: () => app.toggleFavorite(phrase),
-                    onEdit: () async {
-                      if (phrase.isBuiltin) return;
-                      final result = await EditPhraseDialog.show(
-                        context,
-                        initialText: app.localizedPhraseText(phrase),
-                        initialImagePath: phrase.imagePath,
-                        title: AppStrings.editPhrase(lang),
-                      );
-                      if (result == null || !mounted) return;
-                      await app.updatePhrase(
-                        phrase,
-                        text: result.text,
-                        imagePath: result.imagePath,
-                        clearImage: result.clearImage,
-                      );
-                    },
-                    onDelete: () async {
-                      final confirm = await showDialog<bool>(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text('Are you sure?'),
-                          content: Text(AppStrings.deletePhrase(lang)),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(ctx, false),
-                              child: Text(AppStrings.cancel(lang)),
-                            ),
-                            FilledButton(
-                              onPressed: () => Navigator.pop(ctx, true),
-                              child: Text(AppStrings.delete(lang)),
-                            ),
-                          ],
+              ),
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg)
+                    .copyWith(bottom: AppSpacing.xxl),
+                sliver: SliverGrid(
+                  key: ValueKey(
+                    'phrases_${lang.name}_${app.languageRevision}_${app.effectivePhraseCategoryKey}',
+                  ),
+                  gridDelegate: AppSpacing.phraseGridDelegate(context),
+                  delegate: SliverChildBuilderDelegate(
+                    (context, i) {
+                      final phrase = app.phrasesForCategory[i];
+                      return PhraseCard(
+                        key: ValueKey('phrase_${phrase.id}'),
+                        phrase: phrase,
+                        dense: denseGrid,
+                        isFavorite: app.isFavorite(phrase),
+                        onTap: () =>
+                            _appendPhrase(app.localizedPhraseText(phrase)),
+                        onSpeak: () => _appendPhrase(
+                          app.localizedPhraseText(phrase),
+                          speak: true,
+                          phraseId: phrase.id,
                         ),
-                      );
-                      if (confirm == true) {
-                        final wasFavorite = app.isFavorite(phrase);
-                        await app.deletePhrase(phrase);
-                        if (!context.mounted) return;
-                        final messenger = ScaffoldMessenger.of(context);
-                        messenger.hideCurrentSnackBar();
-                        final snackBar = messenger.showSnackBar(
-                            SnackBar(
-                              duration: const Duration(seconds: 5),
-                              content: const Text('Deleting phrase in 5 seconds'),
-                              action: SnackBarAction(
-                                label: 'Undo',
-                                onPressed: () {
-                                  unawaited(
-                                    app.restorePhrase(
-                                      phrase,
-                                      restoreFavorite: wasFavorite,
-                                    ),
-                                  );
-                                },
-                              ),
+                        onFavorite: () => app.toggleFavorite(phrase),
+                        onEdit: () async {
+                          if (phrase.isBuiltin) return;
+                          final result = await EditPhraseDialog.show(
+                            context,
+                            initialText: app.localizedPhraseText(phrase),
+                            initialImagePath: phrase.imagePath,
+                            title: AppStrings.editPhrase(lang),
+                          );
+                          if (result == null || !mounted) return;
+                          await app.updatePhrase(
+                            phrase,
+                            text: result.text,
+                            imagePath: result.imagePath,
+                            clearImage: result.clearImage,
+                          );
+                        },
+                        onDelete: () async {
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('Are you sure?'),
+                              content: Text(AppStrings.deletePhrase(lang)),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx, false),
+                                  child: Text(AppStrings.cancel(lang)),
+                                ),
+                                FilledButton(
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  child: Text(AppStrings.delete(lang)),
+                                ),
+                              ],
                             ),
                           );
-                        await Future<void>.delayed(const Duration(seconds: 5));
-                        snackBar.close();
-                      }
+                          if (confirm == true) {
+                            final wasFavorite = app.isFavorite(phrase);
+                            await app.deletePhrase(phrase);
+                            if (!context.mounted) return;
+                            final messenger = ScaffoldMessenger.of(context);
+                            messenger.hideCurrentSnackBar();
+                            final snackBar = messenger.showSnackBar(
+                              SnackBar(
+                                duration: const Duration(seconds: 5),
+                                content: const Text(
+                                  'Deleting phrase in 5 seconds',
+                                ),
+                                action: SnackBarAction(
+                                  label: 'Undo',
+                                  onPressed: () {
+                                    unawaited(
+                                      app.restorePhrase(
+                                        phrase,
+                                        restoreFavorite: wasFavorite,
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            );
+                            await Future<void>.delayed(
+                              const Duration(seconds: 5),
+                            );
+                            snackBar.close();
+                          }
+                        },
+                      );
                     },
-                  );
-                },
+                    childCount: app.phrasesForCategory.length,
+                    // Keep built non-Home video cards alive while scrolling.
+                    // Home cards keep-alive only after their video loads.
+                    addAutomaticKeepAlives: true,
+                  ),
+                ),
               ),
-            ),
+            ],
           ],
-        ],
         ),
       ),
       ),

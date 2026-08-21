@@ -23,7 +23,8 @@ class FavoritesScreen extends StatefulWidget {
 }
 
 class _FavoritesScreenState extends State<FavoritesScreen> {
-  String? _filterCategoryKey;
+  static const _allCategoriesKey = '__all__';
+  String _filterCategoryKey = _allCategoriesKey;
   final Set<String> _removedFavoriteKeys = {};
 
   Future<void> _refresh() async {
@@ -36,13 +37,33 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
         if (phrase.id == favorite.phraseId) return phrase;
       }
     }
-    final favoriteKey = favorite.dedupeKey;
+    final favoriteKey =
+        '${favorite.phraseText.trim().toLowerCase()}__${favorite.categoryKey}';
     for (final phrase in app.phrases) {
       final phraseKey =
           '${phrase.text.trim().toLowerCase()}__${phrase.categoryKey}';
       if (phraseKey == favoriteKey) return phrase;
     }
     return null;
+  }
+
+  bool _matchesCategoryFilter(
+    AppState app,
+    FavoriteModel favorite,
+    String filterKey,
+  ) {
+    if (filterKey == _allCategoriesKey || favorite.categoryKey == filterKey) {
+      return true;
+    }
+
+    // A phrase stored under a subcategory also belongs to its top-level
+    // category (for example, Breakfast appears under Food and under ALL).
+    for (final category in app.categories) {
+      if (category.key == favorite.categoryKey) {
+        return category.parentKey == filterKey;
+      }
+    }
+    return false;
   }
 
   PhraseModel _displayPhrase(AppState app, FavoriteModel favorite) {
@@ -89,20 +110,20 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentSnackBar();
     final snackBar = messenger.showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 5),
-          content: const Text('Deleting phrase in 5 seconds'),
-          action: SnackBarAction(
-            label: 'Undo',
-            onPressed: () {
-              unawaited(app.restorePhrase(phrase, restoreFavorite: true));
-              if (mounted) {
-                setState(() => _removedFavoriteKeys.remove(favorite.dedupeKey));
-              }
-            },
-          ),
+      SnackBar(
+        duration: const Duration(seconds: 5),
+        content: const Text('Deleting phrase in 5 seconds'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            unawaited(app.restorePhrase(phrase, restoreFavorite: true));
+            if (mounted) {
+              setState(() => _removedFavoriteKeys.remove(favorite.dedupeKey));
+            }
+          },
         ),
-      );
+      ),
+    );
     await Future<void>.delayed(const Duration(seconds: 5));
     snackBar.close();
     if (mounted) {
@@ -111,26 +132,19 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
   }
 
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      unawaited(context.read<AppState>().refreshFavoritesFromCloud());
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final lang = app.language;
     final theme = app.theme;
     final denseGrid = AppSpacing.phraseGridIsDense(context);
-    final filterKey = _filterCategoryKey ?? app.selectedCategoryKey;
+    final filterKey = _filterCategoryKey;
+    final topLevelCategories =
+        app.categories.where((c) => c.isTopLevel).toList();
 
     final favoriteItems = app.favorites
         .where(
           (f) =>
-              f.categoryKey == filterKey &&
+              _matchesCategoryFilter(app, f, filterKey) &&
               !_removedFavoriteKeys.contains(f.dedupeKey),
         )
         .toList();
@@ -146,146 +160,177 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
         onRefresh: _refresh,
         color: theme.bgAccent,
         child: SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.only(bottom: AppSpacing.lg),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(AppSpacing.md),
-                decoration: BoxDecoration(
-                  color: theme.bgMid.withValues(alpha: 0.55),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      AppStrings.favorites(lang),
-                      style: GoogleFonts.poppins(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        color: theme.textMain,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(
-                      AppStrings.favoritesHint(lang),
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w400,
-                        color: theme.textMain.withValues(alpha: 0.78),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: Text(
-                AppStrings.categories(lang),
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  color: theme.textMain,
-                ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            SizedBox(
-              height: 48,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-                itemCount: app.categories.length,
-                separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
-                itemBuilder: (context, i) {
-                  final cat = app.categories[i];
-                  final active = cat.key == filterKey;
-                  return FilterChip(
-                    selected: active,
-                    showCheckmark: false,
-                    avatar: CategoryIcon(
-                      category: cat,
-                      size: 16,
-                      color: active ? Colors.white : cat.accentColor,
-                    ),
-                    label: Text(app.localizedCategoryName(cat)),
-                    labelStyle: GoogleFonts.poppins(
-                      fontSize: 12,
-                      fontWeight: active ? FontWeight.w700 : FontWeight.w600,
-                      color: active ? Colors.white : theme.textMain,
-                    ),
-                    selectedColor: theme.bgAccent,
-                    backgroundColor: Colors.white.withValues(alpha: 0.65),
-                    side: BorderSide(color: theme.bgMid, width: 1.5),
-                    onSelected: (_) => setState(() => _filterCategoryKey = cat.key),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: Text(
-                AppStrings.favoritePhrases(lang),
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  color: theme.textMain,
-                ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            if (favoriteItems.isEmpty)
-              SizedBox(
-                width: double.infinity,
-                height: MediaQuery.sizeOf(context).height * 0.38,
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        const Icon(
-                          Icons.star_rounded,
-                          size: 72,
-                          color: Color(0xFFFFC107),
-                        ),
-                        const SizedBox(height: AppSpacing.lg),
-                        Text(
-                          AppStrings.emptyFavoritesDesign(lang),
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.poppins(
-                            fontSize: 14,
-                            color: theme.bgAccent.withValues(alpha: 0.85),
-                            height: 1.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              )
-            else
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-                child: GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: AppSpacing.phraseGridDelegate(context),
-                  itemCount: favoriteItems.length,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: theme.bgMid.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        AppStrings.favorites(lang),
+                        style: GoogleFonts.poppins(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: theme.textMain,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.xs),
+                      Text(
+                        AppStrings.favoritesHint(lang),
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w400,
+                          color: theme.textMain.withValues(alpha: 0.78),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                child: Text(
+                  AppStrings.categories(lang),
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: theme.textMain,
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              SizedBox(
+                height: 48,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.lg,
+                  ),
+                  itemCount: topLevelCategories.length + 1,
+                  separatorBuilder: (_, _) =>
+                      const SizedBox(width: AppSpacing.sm),
                   itemBuilder: (context, i) {
-                    final favorite = favoriteItems[i];
-                    final phrase = _displayPhrase(app, favorite);
-                    return PhraseCard(
+                    if (i == 0) {
+                      final active = filterKey == _allCategoriesKey;
+                      return FilterChip(
+                        selected: active,
+                        showCheckmark: false,
+                        label: Text(AppStrings.all(lang)),
+                        labelStyle: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: active
+                              ? FontWeight.w700
+                              : FontWeight.w600,
+                          color: active ? Colors.white : theme.textMain,
+                        ),
+                        selectedColor: theme.bgAccent,
+                        backgroundColor: Colors.white.withValues(alpha: 0.88),
+                        elevation: active ? 0 : 2,
+                        shadowColor: theme.textMain.withValues(alpha: 0.16),
+                        side: active
+                            ? BorderSide(color: theme.bgMid, width: 1.5)
+                            : BorderSide.none,
+                        onSelected: (_) => setState(
+                          () => _filterCategoryKey = _allCategoriesKey,
+                        ),
+                      );
+                    }
+                    final cat = topLevelCategories[i - 1];
+                    final active = cat.key == filterKey;
+                    return FilterChip(
+                      selected: active,
+                      showCheckmark: false,
+                      avatar: CategoryIcon(
+                        category: cat,
+                        size: 16,
+                        color: active ? Colors.white : cat.accentColor,
+                      ),
+                      label: Text(app.localizedCategoryName(cat)),
+                      labelStyle: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: active ? FontWeight.w700 : FontWeight.w600,
+                        color: active ? Colors.white : theme.textMain,
+                      ),
+                      selectedColor: theme.bgAccent,
+                      backgroundColor: Colors.white.withValues(alpha: 0.88),
+                      elevation: active ? 0 : 2,
+                      shadowColor: theme.textMain.withValues(alpha: 0.16),
+                      side: active
+                          ? BorderSide(color: theme.bgMid, width: 1.5)
+                          : BorderSide.none,
+                      onSelected: (_) =>
+                          setState(() => _filterCategoryKey = cat.key),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                child: Text(
+                  AppStrings.favoritePhrases(lang),
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: theme.textMain,
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              if (favoriteItems.isEmpty)
+                SizedBox(
+                  width: double.infinity,
+                  height: MediaQuery.sizeOf(context).height * 0.38,
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.xl,
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Text(
+                            AppStrings.emptyFavoritesDesign(lang),
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.poppins(
+                              fontSize: 14,
+                              color: theme.bgAccent.withValues(alpha: 0.85),
+                              height: 1.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.lg,
+                  ),
+                  child: GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate: AppSpacing.phraseGridDelegate(context),
+                    itemCount: favoriteItems.length,
+                    itemBuilder: (context, i) {
+                      final favorite = favoriteItems[i];
+                      final phrase = _displayPhrase(app, favorite);
+                      return PhraseCard(
                         key: ValueKey(
                           'fav_${favorite.id}_${favorite.dedupeKey}_${lang.name}_${app.languageRevision}',
                         ),
@@ -293,25 +338,27 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                         dense: denseGrid,
                         isFavorite: true,
                         onTap: () => speakWithFeedback(
-                              context,
-                              app.localizedPhraseText(phrase),
-                              record: true,
-                            ),
+                          context,
+                          app.localizedPhraseText(phrase),
+                          record: true,
+                          phraseId: phrase.id,
+                        ),
                         onSpeak: () => speakWithFeedback(
-                              context,
-                              app.localizedPhraseText(phrase),
-                              record: true,
-                            ),
+                          context,
+                          app.localizedPhraseText(phrase),
+                          record: true,
+                          phraseId: phrase.id,
+                        ),
                         onFavorite: () => app.toggleFavorite(phrase),
                         onDelete: phrase.isBuiltin
                             ? () {}
                             : () => _confirmDeletePhrase(phrase, favorite),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
-              ),
-          ],
-        ),
+            ],
+          ),
         ),
       ),
     );

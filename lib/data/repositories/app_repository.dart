@@ -159,7 +159,12 @@ class AppRepository {
 
   Future<UserModel?> findUserById(int id) async {
     final db = await _dbHelper.database;
-    final rows = await db.query('users', where: 'id = ?', whereArgs: [id], limit: 1);
+    final rows = await db.query(
+      'users',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
     if (rows.isEmpty) return null;
     return UserModel.fromMap(rows.first);
   }
@@ -314,7 +319,8 @@ class AppRepository {
         where: 'id = ?',
         whereArgs: [userByEmail.id],
       );
-      if (profile.profileCode != null && profile.profileCode!.trim().isNotEmpty) {
+      if (profile.profileCode != null &&
+          profile.profileCode!.trim().isNotEmpty) {
         await updateUserSettings(
           userByEmail.id,
           profileCode: normalizeProfileCode(profile.profileCode!),
@@ -444,10 +450,7 @@ class AppRepository {
       return updated ?? byUid;
     }
 
-    final fullName = resolveLoginFullName(
-      profile: profile,
-      existingName: null,
-    );
+    final fullName = resolveLoginFullName(profile: profile, existingName: null);
     final db = await _dbHelper.database;
     final settings = <String, dynamic>{
       'language': 'English',
@@ -489,8 +492,8 @@ class AppRepository {
     if (!isValidClassCodeFormat(code)) return null;
 
     final cloudTeacherName = remote.teacherName?.trim() ?? '';
-    final stubName = cloudTeacherName.isNotEmpty &&
-            !isGenericAccountName(cloudTeacherName)
+    final stubName =
+        cloudTeacherName.isNotEmpty && !isGenericAccountName(cloudTeacherName)
         ? cloudTeacherName
         : 'Teacher';
 
@@ -523,8 +526,9 @@ class AppRepository {
     final db = await _dbHelper.database;
     await db.insert('teacher_classes', {
       'teacher_user_id': teacherId,
-      'class_name':
-          remote.className.trim().isEmpty ? 'Class' : remote.className.trim(),
+      'class_name': remote.className.trim().isEmpty
+          ? 'Class'
+          : remote.className.trim(),
       'class_code': code,
       'created_at': remote.createdAt.millisecondsSinceEpoch,
     });
@@ -553,8 +557,9 @@ class AppRepository {
     final id = await ensureUserStubFromFirebase(
       firebaseUid: remote.learnerFirebaseUid,
       role: 'learner',
-      displayName:
-          remote.learnerName.trim().isEmpty ? 'Learner' : remote.learnerName,
+      displayName: remote.learnerName.trim().isEmpty
+          ? 'Learner'
+          : remote.learnerName,
       profileCode: remote.profileCode,
     );
     return (await findUserById(id))!;
@@ -731,7 +736,12 @@ class AppRepository {
 
   Future<void> updateUserTheme(int userId, String themeKey) async {
     final db = await _dbHelper.database;
-    await db.update('users', {'theme': themeKey}, where: 'id = ?', whereArgs: [userId]);
+    await db.update(
+      'users',
+      {'theme': themeKey},
+      where: 'id = ?',
+      whereArgs: [userId],
+    );
   }
 
   Future<void> updateUserFullName(int userId, String fullName) async {
@@ -783,12 +793,7 @@ class AppRepository {
     }
     if (updates.isNotEmpty) {
       final db = await _dbHelper.database;
-      await db.update(
-        'users',
-        updates,
-        where: 'id = ?',
-        whereArgs: [userId],
-      );
+      await db.update('users', updates, where: 'id = ?', whereArgs: [userId]);
     }
     if (profile.profileCode != null && profile.profileCode!.trim().isNotEmpty) {
       await updateUserSettings(
@@ -834,7 +839,11 @@ class AppRepository {
     return true;
   }
 
-  Future<bool> updateUserPassword(int userId, String currentPassword, String newPassword) async {
+  Future<bool> updateUserPassword(
+    int userId,
+    String currentPassword,
+    String newPassword,
+  ) async {
     final user = await findUserById(userId);
     if (user == null || user.passwordHash != hashPassword(currentPassword)) {
       return false;
@@ -871,14 +880,22 @@ class AppRepository {
     int? age,
     bool clearAge = false,
     String? gradeLevel,
+    int? historyClearedAtMs,
   }) async {
     final db = await _dbHelper.database;
     final user = await findUserById(userId);
     if (user == null) return;
-    final rows = await db.query('users', where: 'id = ?', whereArgs: [userId], limit: 1);
+    final rows = await db.query(
+      'users',
+      where: 'id = ?',
+      whereArgs: [userId],
+      limit: 1,
+    );
     Map<String, dynamic> settings = {};
     if (rows.isNotEmpty && rows.first['settings_json'] != null) {
-      settings = jsonDecode(rows.first['settings_json'] as String) as Map<String, dynamic>;
+      settings =
+          jsonDecode(rows.first['settings_json'] as String)
+              as Map<String, dynamic>;
     }
     if (language != null) settings['language'] = language;
     if (ttsSpeed != null) settings['tts_speed'] = ttsSpeed;
@@ -891,6 +908,9 @@ class AppRepository {
       settings['age'] = age;
     }
     if (gradeLevel != null) settings['grade_level'] = gradeLevel.trim();
+    if (historyClearedAtMs != null) {
+      settings['history_cleared_at_ms'] = historyClearedAtMs;
+    }
     await db.update(
       'users',
       {'settings_json': jsonEncode(settings)},
@@ -899,13 +919,23 @@ class AppRepository {
     );
   }
 
-  Future<void> updateEmergencyContacts(int userId, List<String> contacts) async {
+  Future<void> updateEmergencyContacts(
+    int userId,
+    List<String> contacts,
+  ) async {
     final db = await _dbHelper.database;
-    final rows = await db.query('users', where: 'id = ?', whereArgs: [userId], limit: 1);
+    final rows = await db.query(
+      'users',
+      where: 'id = ?',
+      whereArgs: [userId],
+      limit: 1,
+    );
     if (rows.isEmpty) return;
     Map<String, dynamic> settings = {};
     if (rows.first['settings_json'] != null) {
-      settings = jsonDecode(rows.first['settings_json'] as String) as Map<String, dynamic>;
+      settings =
+          jsonDecode(rows.first['settings_json'] as String)
+              as Map<String, dynamic>;
     }
     final cleaned = normalizeEmergencyContacts(contacts);
     settings['emergency_contacts'] = cleaned;
@@ -919,14 +949,17 @@ class AppRepository {
 
   Future<Map<String, dynamic>> getUserSettings(int userId) async {
     final db = await _dbHelper.database;
-    final rows = await db.query('users', where: 'id = ?', whereArgs: [userId], limit: 1);
+    final rows = await db.query(
+      'users',
+      where: 'id = ?',
+      whereArgs: [userId],
+      limit: 1,
+    );
     if (rows.isEmpty || rows.first['settings_json'] == null) {
-      return {
-        'language': 'English',
-        'tts_speed': TtsSpeedOptions.defaultSpeed,
-      };
+      return {'language': 'English', 'tts_speed': TtsSpeedOptions.defaultSpeed};
     }
-    return jsonDecode(rows.first['settings_json'] as String) as Map<String, dynamic>;
+    return jsonDecode(rows.first['settings_json'] as String)
+        as Map<String, dynamic>;
   }
 
   Future<List<String>> getEmergencyContactsForLearner(int learnerUserId) async {
@@ -935,9 +968,7 @@ class AppRepository {
     final settings = await getUserSettings(learnerUserId);
     final contacts = settings['emergency_contacts'];
     if (contacts is! List) return const [];
-    return normalizeEmergencyContacts(
-      contacts.whereType<String>().toList(),
-    );
+    return normalizeEmergencyContacts(contacts.whereType<String>().toList());
   }
 
   Future<bool> hasStarterPersonalData(int userId) async {
@@ -996,6 +1027,9 @@ class AppRepository {
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
     }
 
+    // Upsert only — never delete/recreate video builtins on refresh.
+    // Online personal-board sync was wiping these rows (new ids) which made
+    // home videos remount/disappear even though offline keep-alive was fine.
     for (final entry in DefaultBuiltinContent.defaultPhrases) {
       final text = entry.$1;
       final cat = entry.$2;
@@ -1009,27 +1043,66 @@ class AppRepository {
         limit: 1,
       );
       if (existing.isEmpty) {
-        await db.insert(
-          'phrases',
-          {
-            'user_id': userId,
-            'phrase_text': text,
-            'category_key': cat,
-            'image_path': img,
-            'is_builtin': 1,
-            'is_active': 1,
-          },
-        );
+        await db.insert('phrases', {
+          'user_id': userId,
+          'phrase_text': text,
+          'category_key': cat,
+          'image_path': img,
+          'is_builtin': 1,
+          'is_active': 1,
+        });
         continue;
       }
       if (img != null && existing.first['image_path'] != img) {
         await db.update(
           'phrases',
-          {'image_path': img},
+          {'image_path': img, 'is_active': 1},
           where: 'id = ?',
           whereArgs: [existing.first['id']],
         );
       }
+    }
+
+    await dedupeBuiltinPhrases(userId);
+    await deactivateCustomPhrasesMatchingBuiltins(userId);
+  }
+
+  /// Hides custom phrases that clone a builtin (same text + category).
+  Future<void> deactivateCustomPhrasesMatchingBuiltins(int userId) async {
+    final db = await _dbHelper.database;
+    final builtins = await db.query(
+      'phrases',
+      columns: ['phrase_text', 'category_key'],
+      where: 'user_id = ? AND is_builtin = 1 AND is_active = 1',
+      whereArgs: [userId],
+    );
+    final builtinKeys = <String>{
+      for (final row in builtins)
+        customPhraseDedupeKey(
+          row['phrase_text'] as String,
+          row['category_key'] as String,
+        ),
+    };
+    if (builtinKeys.isEmpty) return;
+
+    final customs = await db.query(
+      'phrases',
+      columns: ['id', 'phrase_text', 'category_key'],
+      where: 'user_id = ? AND is_builtin = 0 AND is_active = 1',
+      whereArgs: [userId],
+    );
+    for (final row in customs) {
+      final key = customPhraseDedupeKey(
+        row['phrase_text'] as String,
+        row['category_key'] as String,
+      );
+      if (!builtinKeys.contains(key)) continue;
+      await db.update(
+        'phrases',
+        {'is_active': 0},
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
     }
   }
 
@@ -1038,7 +1111,8 @@ class AppRepository {
     for (final key in DefaultBuiltinContent.obsoleteCategoryKeys) {
       final normalized = normalizeCategoryKey(key);
       if (normalized.isEmpty) continue;
-      final replacement = DefaultBuiltinContent.obsoleteCategoryKeyMigrations[key] ??
+      final replacement =
+          DefaultBuiltinContent.obsoleteCategoryKeyMigrations[key] ??
           DefaultBuiltinContent.obsoleteCategoryKeyMigrations[normalized];
       if (replacement != null && replacement.trim().isNotEmpty) {
         await db.update(
@@ -1094,14 +1168,15 @@ class AppRepository {
       if (a.isTopLevel && !b.isTopLevel) return -1;
       if (!a.isTopLevel && b.isTopLevel) return 1;
       if (!a.isTopLevel && !b.isTopLevel) {
-        final parentCompare =
-            (a.parentKey ?? '').compareTo(b.parentKey ?? '');
+        final parentCompare = (a.parentKey ?? '').compareTo(b.parentKey ?? '');
         if (parentCompare != 0) return parentCompare;
-        return DefaultBuiltinContent.subcategoryOrderIndex(a.key)
-            .compareTo(DefaultBuiltinContent.subcategoryOrderIndex(b.key));
+        return DefaultBuiltinContent.subcategoryOrderIndex(
+          a.key,
+        ).compareTo(DefaultBuiltinContent.subcategoryOrderIndex(b.key));
       }
-      final order = DefaultBuiltinContent.categoryOrderIndex(a.key)
-          .compareTo(DefaultBuiltinContent.categoryOrderIndex(b.key));
+      final order = DefaultBuiltinContent.categoryOrderIndex(
+        a.key,
+      ).compareTo(DefaultBuiltinContent.categoryOrderIndex(b.key));
       if (order != 0) return order;
       return a.id.compareTo(b.id);
     });
@@ -1127,8 +1202,7 @@ class AppRepository {
       await db.insert('categories', {
         'user_id': learnerUserId,
         'category_key': key,
-        'category_name':
-            remote.name.trim().isEmpty ? key : remote.name.trim(),
+        'category_name': remote.name.trim().isEmpty ? key : remote.name.trim(),
         'icon_key': remote.iconKey.trim().isEmpty ? 'custom' : remote.iconKey,
       });
     }
@@ -1188,23 +1262,33 @@ class AppRepository {
       'category_name': name.trim(),
       'icon_key': 'custom',
     });
-    return CategoryModel(
-      id: id,
-      userId: userId,
-      key: key,
-      name: name.trim(),
-    );
+    return CategoryModel(id: id, userId: userId, key: key, name: name.trim());
   }
 
   Future<void> deleteCustomCategories(int userId, Iterable<String> keys) async {
-    final normalized = keys.map(normalizeCategoryKey).where((key) => key.isNotEmpty).toSet();
+    final normalized = keys
+        .map(normalizeCategoryKey)
+        .where((key) => key.isNotEmpty)
+        .toSet();
     if (normalized.isEmpty) return;
     final db = await _dbHelper.database;
     await db.transaction((txn) async {
       for (final key in normalized) {
-        await txn.delete('favorites', where: 'user_id = ? AND category_key = ?', whereArgs: [userId, key]);
-        await txn.delete('phrases', where: 'user_id = ? AND category_key = ? AND is_builtin = 0', whereArgs: [userId, key]);
-        await txn.delete('categories', where: 'user_id = ? AND category_key = ?', whereArgs: [userId, key]);
+        await txn.delete(
+          'favorites',
+          where: 'user_id = ? AND category_key = ?',
+          whereArgs: [userId, key],
+        );
+        await txn.delete(
+          'phrases',
+          where: 'user_id = ? AND category_key = ? AND is_builtin = 0',
+          whereArgs: [userId, key],
+        );
+        await txn.delete(
+          'categories',
+          where: 'user_id = ? AND category_key = ?',
+          whereArgs: [userId, key],
+        );
       }
     });
   }
@@ -1240,12 +1324,20 @@ class AppRepository {
     final db = await _dbHelper.database;
     for (final phrase in phrases) {
       if (phrase.isBuiltin || phrase.imagePath == null) continue;
-      if (!isRemotePhraseImagePath(phrase.imagePath)) continue;
+      final raw = phrase.imagePath!.trim();
+      if (raw.isEmpty) continue;
 
-      final local = await cachePhraseImageLocally(phrase.imagePath);
+      // Persist remote media (and asset videos) into app documents for offline use.
+      if (!isRemotePhraseImagePath(raw) &&
+          !(raw.toLowerCase().startsWith('assets/') && isPhraseVideoPath(raw))) {
+        continue;
+      }
+
+      final local = await ensureLocalPhraseMediaPath(raw);
       if (local == null ||
-          local == phrase.imagePath ||
-          isRemotePhraseImagePath(local)) {
+          local == raw ||
+          isRemotePhraseImagePath(local) ||
+          local.toLowerCase().startsWith('assets/')) {
         continue;
       }
 
@@ -1293,7 +1385,8 @@ class AppRepository {
     final rows = await db.query(
       'phrases',
       columns: ['phrase_text', 'category_key', 'created_at'],
-      where: 'user_id = ? AND is_builtin = 0 AND is_active = 1 AND created_at IS NOT NULL',
+      where:
+          'user_id = ? AND is_builtin = 0 AND is_active = 1 AND created_at IS NOT NULL',
       whereArgs: [learnerUserId],
       orderBy: 'created_at ASC',
     );
@@ -1321,7 +1414,7 @@ class AppRepository {
 
   /// Tap/usage counts for learner-added phrases only (vocabulary growth panel).
   Future<({List<PhraseUsageStat> stats, int phrasesUsed, int phraseTaps})>
-      getCustomPhraseUsageStats({
+  getCustomPhraseUsageStats({
     required int learnerUserId,
     required DateTime rangeStart,
     required DateTime rangeEnd,
@@ -1331,11 +1424,7 @@ class AppRepository {
       learnerUserId: learnerUserId,
     );
     if (customPhrases.isEmpty) {
-      return (
-        stats: const <PhraseUsageStat>[],
-        phrasesUsed: 0,
-        phraseTaps: 0,
-      );
+      return (stats: const <PhraseUsageStat>[], phrasesUsed: 0, phraseTaps: 0);
     }
 
     final customKeys = <String>{
@@ -1345,7 +1434,8 @@ class AppRepository {
     };
 
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT phrase_text, category_key, class_name, lesson_title,
              COUNT(*) AS usage_count
       FROM history
@@ -1353,11 +1443,13 @@ class AppRepository {
         AND created_at >= ?
         AND created_at < ?
       GROUP BY phrase_text, category_key, class_name, lesson_title
-    ''', [
-      learnerUserId,
-      rangeStart.millisecondsSinceEpoch,
-      rangeEnd.millisecondsSinceEpoch,
-    ]);
+    ''',
+      [
+        learnerUserId,
+        rangeStart.millisecondsSinceEpoch,
+        rangeEnd.millisecondsSinceEpoch,
+      ],
+    );
 
     final merged = <String, PhraseUsageStat>{};
     for (final row in rows) {
@@ -1399,11 +1491,7 @@ class AppRepository {
         return a.text.compareTo(b.text);
       });
     final phraseTaps = stats.fold<int>(0, (sum, stat) => sum + stat.count);
-    return (
-      stats: stats,
-      phrasesUsed: stats.length,
-      phraseTaps: phraseTaps,
-    );
+    return (stats: stats, phrasesUsed: stats.length, phraseTaps: phraseTaps);
   }
 
   Future<List<RemoteLearnerCustomPhrase>> getCustomPhrasesForCloudSync(
@@ -1538,6 +1626,26 @@ class AppRepository {
       final text = remote.phraseText;
       final categoryKey = remote.categoryKey;
       final createdAtMs = remote.createdAt.millisecondsSinceEpoch;
+      final lowerText = text.toLowerCase();
+
+      // Do not create a custom clone of a builtin phrase (causes doubles online).
+      final builtinMatch = await db.query(
+        'phrases',
+        columns: ['id', 'phrase_text'],
+        where:
+            'user_id = ? AND is_builtin = 1 AND is_active = 1 AND category_key = ?',
+        whereArgs: [learnerUserId, categoryKey],
+      );
+      var matchesBuiltin = false;
+      for (final row in builtinMatch) {
+        if (storedUserText(row['phrase_text'] as String).toLowerCase() ==
+            lowerText) {
+          matchesBuiltin = true;
+          break;
+        }
+      }
+      if (matchesBuiltin) continue;
+
       final existingRows = await db.query(
         'phrases',
         where:
@@ -1545,7 +1653,6 @@ class AppRepository {
         whereArgs: [learnerUserId, categoryKey],
       );
       Map<String, Object?>? matched;
-      final lowerText = text.toLowerCase();
       for (final row in existingRows) {
         if (storedUserText(row['phrase_text'] as String).toLowerCase() ==
             lowerText) {
@@ -1559,7 +1666,9 @@ class AppRepository {
         if (currentCreated == null || createdAtMs < currentCreated) {
           updates['created_at'] = createdAtMs;
         }
-        final remoteImage = await resolveStoredPhraseImagePath(remote.imagePath);
+        final remoteImage = await resolveStoredPhraseImagePath(
+          remote.imagePath,
+        );
         if (remoteImage != null && remoteImage.isNotEmpty) {
           updates['image_path'] = remoteImage;
         }
@@ -1574,21 +1683,18 @@ class AppRepository {
         continue;
       }
       final remoteImage = await resolveStoredPhraseImagePath(remote.imagePath);
-      await db.insert(
-        'phrases',
-        {
-          'user_id': learnerUserId,
-          'phrase_text': text,
-          'category_key': categoryKey,
-          'image_path': remoteImage,
-          'is_builtin': 0,
-          'is_active': 1,
-          'created_at': createdAtMs,
-        },
-        conflictAlgorithm: ConflictAlgorithm.ignore,
-      );
+      await db.insert('phrases', {
+        'user_id': learnerUserId,
+        'phrase_text': text,
+        'category_key': categoryKey,
+        'image_path': remoteImage,
+        'is_builtin': 0,
+        'is_active': 1,
+        'created_at': createdAtMs,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
     }
     await dedupeCustomPhrases(learnerUserId);
+    await deactivateCustomPhrasesMatchingBuiltins(learnerUserId);
   }
 
   static List<RemoteLearnerCustomPhrase> mergeCustomPhrasesForCloudExport({
@@ -1748,7 +1854,10 @@ class AppRepository {
       final text = storedUserText(favorite.phraseText);
       final categoryKey = normalizeCategoryKey(favorite.categoryKey);
       if (text.isEmpty || categoryKey.isEmpty) continue;
-      final sourceImage = await _favoriteSourceImagePath(learnerUserId, favorite);
+      final sourceImage = await _favoriteSourceImagePath(
+        learnerUserId,
+        favorite,
+      );
       final cloudImage = await resolveFavoriteImageForCloudExport(
         sourceImage,
         firebaseUid,
@@ -1810,7 +1919,11 @@ class AppRepository {
     final remoteKeys = deduped.keys.toSet();
     final localFavorites = await getFavorites(learnerUserId);
     for (final local in localFavorites) {
-      if (!remoteKeys.contains(local.dedupeKey)) {
+      // Match remote keys (normalized) — raw dedupeKey can false-delete locals.
+      final localKey =
+          '${storedUserText(local.phraseText).toLowerCase()}__'
+          '${normalizeCategoryKey(local.categoryKey)}';
+      if (!remoteKeys.contains(localKey)) {
         await removeFavorite(local.id);
       }
     }
@@ -1962,7 +2075,8 @@ class AppRepository {
       if (text.isEmpty) continue;
       final trimmedClass = remote.className?.trim();
       final trimmedLesson = remote.lessonTitle?.trim();
-      final hasLessonContext = trimmedClass != null &&
+      final hasLessonContext =
+          trimmedClass != null &&
           trimmedClass.isNotEmpty &&
           trimmedLesson != null &&
           trimmedLesson.isNotEmpty;
@@ -1991,12 +2105,7 @@ class AppRepository {
         'history',
         where:
             'user_id = ? AND phrase_text = ? AND category_key = ? AND created_at = ?',
-        whereArgs: [
-          learnerUserId,
-          text,
-          effectiveCategoryKey,
-          createdAtMs,
-        ],
+        whereArgs: [learnerUserId, text, effectiveCategoryKey, createdAtMs],
         limit: 1,
       );
       if (existing.isNotEmpty) {
@@ -2057,11 +2166,7 @@ class AppRepository {
         row['class_name'] = trimmedClass;
         row['lesson_title'] = trimmedLesson;
       }
-      batch.insert(
-        'history',
-        row,
-        conflictAlgorithm: ConflictAlgorithm.ignore,
-      );
+      batch.insert('history', row, conflictAlgorithm: ConflictAlgorithm.ignore);
       pending++;
       inserted++;
       if (pending >= 200) {
@@ -2115,10 +2220,7 @@ class AppRepository {
     final db = await _dbHelper.database;
     final updated = await db.update(
       'phrases',
-      {
-        'phrase_text': trimmed,
-        'image_path': imagePath,
-      },
+      {'phrase_text': trimmed, 'image_path': imagePath},
       where: 'id = ? AND user_id = ? AND is_builtin = 0',
       whereArgs: [phraseId, userId],
     );
@@ -2127,10 +2229,7 @@ class AppRepository {
     // Keep favorites (if any) consistent for this phrase.
     await db.update(
       'favorites',
-      {
-        'phrase_text': trimmed,
-        'image_path': imagePath,
-      },
+      {'phrase_text': trimmed, 'image_path': imagePath},
       where: 'user_id = ? AND phrase_id = ?',
       whereArgs: [userId, phraseId],
     );
@@ -2148,13 +2247,18 @@ class AppRepository {
     );
     final favorites = rows.map(FavoriteModel.fromMap).toList();
     for (final favorite in favorites) {
-      if (favorite.imagePath == null || !isRemotePhraseImagePath(favorite.imagePath)) {
+      if (favorite.imagePath == null) continue;
+      final raw = favorite.imagePath!.trim();
+      if (raw.isEmpty) continue;
+      if (!isRemotePhraseImagePath(raw) &&
+          !(raw.toLowerCase().startsWith('assets/') && isPhraseVideoPath(raw))) {
         continue;
       }
-      final local = await cachePhraseImageLocally(favorite.imagePath);
+      final local = await ensureLocalPhraseMediaPath(raw);
       if (local == null ||
-          local == favorite.imagePath ||
-          isRemotePhraseImagePath(local)) {
+          local == raw ||
+          isRemotePhraseImagePath(local) ||
+          local.toLowerCase().startsWith('assets/')) {
         continue;
       }
       await db.update(
@@ -2167,7 +2271,11 @@ class AppRepository {
     return favorites;
   }
 
-  Future<FavoriteModel?> findFavorite(int userId, String text, String categoryKey) async {
+  Future<FavoriteModel?> findFavorite(
+    int userId,
+    String text,
+    String categoryKey,
+  ) async {
     final db = await _dbHelper.database;
     final rows = await db.query(
       'favorites',
@@ -2214,9 +2322,8 @@ class AppRepository {
   static String _historyDedupeKey({
     required String phraseText,
     required String categoryKey,
-    required int createdAtMs,
   }) {
-    return '${storedUserText(phraseText).toLowerCase()}|$categoryKey|$createdAtMs';
+    return '${storedUserText(phraseText).toLowerCase()}|$categoryKey';
   }
 
   Future<List<HistoryModel>> getHistory(int userId) async {
@@ -2227,7 +2334,7 @@ class AppRepository {
       whereArgs: [userId],
       orderBy: 'created_at DESC',
     );
-    final seen = <String>{};
+    final latestByPhrase = <String, int>{};
     final deduped = <HistoryModel>[];
     for (final row in rows) {
       final item = HistoryModel.fromMap(row);
@@ -2240,11 +2347,18 @@ class AppRepository {
       final key = _historyDedupeKey(
         phraseText: item.text,
         categoryKey: item.categoryKey,
-        createdAtMs: item.createdAt.millisecondsSinceEpoch,
       );
-      if (seen.add(key)) {
-        deduped.add(item);
+      final createdAtMs = item.createdAt.millisecondsSinceEpoch;
+      final latestAtMs = latestByPhrase[key];
+      if (latestAtMs != null &&
+          latestAtMs - createdAtMs <=
+              MonitoringConstants
+                  .monitoringHistoryDedupeWindow
+                  .inMilliseconds) {
+        continue;
       }
+      latestByPhrase[key] = createdAtMs;
+      deduped.add(item);
     }
     return deduped;
   }
@@ -2280,7 +2394,8 @@ class AppRepository {
     final db = await _dbHelper.database;
     final trimmedClass = className?.trim();
     final trimmedLesson = lessonTitle?.trim();
-    final hasLessonContext = trimmedClass != null &&
+    final hasLessonContext =
+        trimmedClass != null &&
         trimmedClass.isNotEmpty &&
         trimmedLesson != null &&
         trimmedLesson.isNotEmpty;
@@ -2289,11 +2404,33 @@ class AppRepository {
       className: className,
       lessonTitle: lessonTitle,
     );
+    final createdAtMs = (createdAt ?? DateTime.now()).millisecondsSinceEpoch;
+    final recentRows = await db.query(
+      'history',
+      columns: ['phrase_text'],
+      where: 'user_id = ? AND category_key = ? AND created_at BETWEEN ? AND ?',
+      whereArgs: [
+        userId,
+        effectiveCategoryKey,
+        createdAtMs -
+            MonitoringConstants.monitoringHistoryDedupeWindow.inMilliseconds,
+        createdAtMs +
+            MonitoringConstants.monitoringHistoryDedupeWindow.inMilliseconds,
+      ],
+    );
+    final normalizedText = storedUserText(text).toLowerCase();
+    if (recentRows.any(
+      (row) =>
+          storedUserText(row['phrase_text'] as String).toLowerCase() ==
+          normalizedText,
+    )) {
+      return null;
+    }
     final row = <String, Object?>{
       'user_id': userId,
       'phrase_text': text.trim(),
       'category_key': effectiveCategoryKey,
-      'created_at': (createdAt ?? DateTime.now()).millisecondsSinceEpoch,
+      'created_at': createdAtMs,
     };
     if (hasLessonContext) {
       row['class_name'] = trimmedClass;
@@ -2379,7 +2516,8 @@ class AppRepository {
 
   /// Removes duplicate monitoring rows caused by overlapping cloud sync sources.
   Future<void> dedupeMonitoringHistory(int learnerUserId) async {
-    final windowMs = MonitoringConstants.monitoringHistoryDedupeWindow.inMilliseconds;
+    final windowMs =
+        MonitoringConstants.monitoringHistoryDedupeWindow.inMilliseconds;
     final db = await _dbHelper.database;
     final rows = await db.query(
       'history',
@@ -2399,7 +2537,9 @@ class AppRepository {
               other['id'] != id &&
               (other['remote_sync_key'] as String?)?.trim() == syncKey.trim(),
         );
-        if (duplicateSync.any((other) => keepIds.contains(other['id'] as int))) {
+        if (duplicateSync.any(
+          (other) => keepIds.contains(other['id'] as int),
+        )) {
           deleteIds.add(id);
           continue;
         }
@@ -2464,7 +2604,8 @@ class AppRepository {
       }
       final trimmedClass = activity.className?.trim();
       final trimmedLesson = activity.lessonTitle?.trim();
-      final hasLessonContext = trimmedClass != null &&
+      final hasLessonContext =
+          trimmedClass != null &&
           trimmedClass.isNotEmpty &&
           trimmedLesson != null &&
           trimmedLesson.isNotEmpty;
@@ -2493,12 +2634,7 @@ class AppRepository {
         'history',
         where:
             'user_id = ? AND phrase_text = ? AND category_key = ? AND created_at = ?',
-        whereArgs: [
-          learnerUserId,
-          text,
-          effectiveCategoryKey,
-          createdAtMs,
-        ],
+        whereArgs: [learnerUserId, text, effectiveCategoryKey, createdAtMs],
         limit: 1,
       );
       if (existing.isNotEmpty) {
@@ -2559,11 +2695,7 @@ class AppRepository {
         row['class_name'] = trimmedClass;
         row['lesson_title'] = trimmedLesson;
       }
-      batch.insert(
-        'history',
-        row,
-        conflictAlgorithm: ConflictAlgorithm.ignore,
-      );
+      batch.insert('history', row, conflictAlgorithm: ConflictAlgorithm.ignore);
       pending++;
       inserted++;
       if (pending >= 200) {
@@ -2612,10 +2744,7 @@ class AppRepository {
     final normalized = normalizeProfileCode(code);
     if (!isValidProfileCodeFormat(normalized)) return null;
     final db = await _dbHelper.database;
-    final rows = await db.query(
-      'users',
-      where: "role = 'learner'",
-    );
+    final rows = await db.query('users', where: "role = 'learner'");
     for (final row in rows) {
       final learnerId = row['id'] as int;
       final legacy = profileCodeFor(learnerId);
@@ -2625,7 +2754,8 @@ class AppRepository {
 
       final settingsRaw = row['settings_json'];
       if (settingsRaw == null) continue;
-      final settings = jsonDecode(settingsRaw as String) as Map<String, dynamic>;
+      final settings =
+          jsonDecode(settingsRaw as String) as Map<String, dynamic>;
       final stored = settings['profile_code'] as String?;
       if (stored != null &&
           stored.trim().isNotEmpty &&
@@ -2638,13 +2768,16 @@ class AppRepository {
 
   Future<List<LinkedChildModel>> getLinkedChildren(int parentUserId) async {
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT pc.learner_user_id, pc.linked_at, u.full_name, u.settings_json
       FROM parent_children pc
       INNER JOIN users u ON u.id = pc.learner_user_id
       WHERE pc.parent_user_id = ?
       ORDER BY pc.linked_at ASC
-    ''', [parentUserId]);
+    ''',
+      [parentUserId],
+    );
     return rows.map((row) {
       Map<String, dynamic> settings = {};
       final settingsRaw = row['settings_json'];
@@ -2673,15 +2806,11 @@ class AppRepository {
 
   Future<void> linkParentToChild(int parentUserId, int learnerUserId) async {
     final db = await _dbHelper.database;
-    await db.insert(
-      'parent_children',
-      {
-        'parent_user_id': parentUserId,
-        'learner_user_id': learnerUserId,
-        'linked_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.ignore,
-    );
+    await db.insert('parent_children', {
+      'parent_user_id': parentUserId,
+      'learner_user_id': learnerUserId,
+      'linked_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 
   Future<void> unlinkParentChild(int parentUserId, int learnerUserId) async {
@@ -2701,18 +2830,21 @@ class AppRepository {
   }) async {
     await dedupeMonitoringHistory(learnerUserId);
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT created_at, category_key, class_name, lesson_title
       FROM history
       WHERE user_id = ?
         AND created_at >= ?
         AND created_at < ?
       ORDER BY created_at ASC
-    ''', [
-      learnerUserId,
-      rangeStart.millisecondsSinceEpoch,
-      rangeEnd.millisecondsSinceEpoch,
-    ]);
+    ''',
+      [
+        learnerUserId,
+        rangeStart.millisecondsSinceEpoch,
+        rangeEnd.millisecondsSinceEpoch,
+      ],
+    );
     final events = <DateTime>[];
     for (final row in rows) {
       if (personalOnly) {
@@ -2723,9 +2855,7 @@ class AppRepository {
         );
         if (!isPersonalCategoryKey(categoryKey)) continue;
       }
-      events.add(
-        DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int),
-      );
+      events.add(DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int));
     }
     return events;
   }
@@ -2734,13 +2864,16 @@ class AppRepository {
     required int learnerUserId,
   }) async {
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT phrase_text, category_key, class_name, lesson_title,
              MIN(created_at) AS first_used_at
       FROM history
       WHERE user_id = ?
       GROUP BY phrase_text, category_key, class_name, lesson_title
-    ''', [learnerUserId]);
+    ''',
+      [learnerUserId],
+    );
 
     final merged = <String, PhraseFirstUse>{};
     for (final row in rows) {
@@ -2782,7 +2915,8 @@ class AppRepository {
   }) async {
     await dedupeMonitoringHistory(learnerUserId);
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT phrase_text, category_key, class_name, lesson_title,
              COUNT(*) AS usage_count
       FROM history
@@ -2791,11 +2925,13 @@ class AppRepository {
         AND created_at < ?
       GROUP BY phrase_text, category_key, class_name, lesson_title
       ORDER BY usage_count DESC, phrase_text ASC
-    ''', [
-      learnerUserId,
-      rangeStart.millisecondsSinceEpoch,
-      rangeEnd.millisecondsSinceEpoch,
-    ]);
+    ''',
+      [
+        learnerUserId,
+        rangeStart.millisecondsSinceEpoch,
+        rangeEnd.millisecondsSinceEpoch,
+      ],
+    );
     final merged = <String, PhraseUsageStat>{};
     for (final row in rows) {
       final stored = storedUserText(row['phrase_text'] as String);
@@ -2828,12 +2964,11 @@ class AppRepository {
         );
       }
     }
-    return merged.values.toList()
-      ..sort((a, b) {
-        final byCount = b.count.compareTo(a.count);
-        if (byCount != 0) return byCount;
-        return a.text.compareTo(b.text);
-      });
+    return merged.values.toList()..sort((a, b) {
+      final byCount = b.count.compareTo(a.count);
+      if (byCount != 0) return byCount;
+      return a.text.compareTo(b.text);
+    });
   }
 
   /// Counts phrase usage directly from cloud learner_activity rows (monitoring).
@@ -2860,7 +2995,8 @@ class AppRepository {
 
       final trimmedClass = activity.className?.trim();
       final trimmedLesson = activity.lessonTitle?.trim();
-      final hasLessonContext = trimmedClass != null &&
+      final hasLessonContext =
+          trimmedClass != null &&
           trimmedClass.isNotEmpty &&
           trimmedLesson != null &&
           trimmedLesson.isNotEmpty;
@@ -2890,12 +3026,11 @@ class AppRepository {
       }
     }
 
-    return merged.values.toList()
-      ..sort((a, b) {
-        final byCount = b.count.compareTo(a.count);
-        if (byCount != 0) return byCount;
-        return a.text.compareTo(b.text);
-      });
+    return merged.values.toList()..sort((a, b) {
+      final byCount = b.count.compareTo(a.count);
+      if (byCount != 0) return byCount;
+      return a.text.compareTo(b.text);
+    });
   }
 
   /// Merges local history stats with cloud activity stats for monitoring totals.
@@ -2919,12 +3054,11 @@ class AppRepository {
         merged[key] = stat;
       }
     }
-    return merged.values.toList()
-      ..sort((a, b) {
-        final byCount = b.count.compareTo(a.count);
-        if (byCount != 0) return byCount;
-        return a.text.compareTo(b.text);
-      });
+    return merged.values.toList()..sort((a, b) {
+      final byCount = b.count.compareTo(a.count);
+      if (byCount != 0) return byCount;
+      return a.text.compareTo(b.text);
+    });
   }
 
   Future<List<ChildLessonProgressEntry>> getChildLessonProgress({
@@ -3048,14 +3182,17 @@ class AppRepository {
     required String lessonTitle,
   }) async {
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT
         (SELECT COUNT(*) FROM lesson_phrases lp WHERE lp.lesson_id = cl.id) AS phrase_count
       FROM class_lessons cl
       INNER JOIN teacher_classes tc ON tc.id = cl.class_id
       WHERE tc.class_name = ? AND cl.title = ?
       LIMIT 1
-    ''', [className, lessonTitle]);
+    ''',
+      [className, lessonTitle],
+    );
     if (rows.isEmpty) return null;
     return rows.first['phrase_count'] as int?;
   }
@@ -3138,7 +3275,8 @@ class AppRepository {
     return out;
   }
 
-  Future<({String? error, int id, String code, String name})> createTeacherClass({
+  Future<({String? error, int id, String code, String name})>
+  createTeacherClass({
     required int teacherUserId,
     required String className,
   }) async {
@@ -3184,11 +3322,7 @@ class AppRepository {
       where: 'class_id = ?',
       whereArgs: [classId],
     );
-    await db.delete(
-      'teacher_classes',
-      where: 'id = ?',
-      whereArgs: [classId],
-    );
+    await db.delete('teacher_classes', where: 'id = ?', whereArgs: [classId]);
     return true;
   }
 
@@ -3213,21 +3347,21 @@ class AppRepository {
     required Set<String> remoteClassCodes,
   }) async {
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT ce.class_id, tc.class_code
       FROM class_enrollments ce
       INNER JOIN teacher_classes tc ON tc.id = ce.class_id
       WHERE ce.learner_user_id = ?
-    ''', [learnerUserId]);
+    ''',
+      [learnerUserId],
+    );
 
     for (final row in rows) {
       final code = normalizeClassCode((row['class_code'] as String?) ?? '');
       if (!isValidClassCodeFormat(code)) continue;
       if (!remoteClassCodes.contains(code)) {
-        await unenrollLearnerFromClass(
-          learnerUserId,
-          row['class_id'] as int,
-        );
+        await unenrollLearnerFromClass(learnerUserId, row['class_id'] as int);
       }
     }
   }
@@ -3263,26 +3397,26 @@ class AppRepository {
     if (classIds.isEmpty) return 0;
     final db = await _dbHelper.database;
     final placeholders = List.filled(classIds.length, '?').join(', ');
-    final result = await db.rawQuery(
-      '''
+    final result = await db.rawQuery('''
       SELECT COUNT(DISTINCT learner_user_id) AS c
       FROM class_enrollments
       WHERE class_id IN ($placeholders)
-      ''',
-      classIds,
-    );
+      ''', classIds);
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
   /// Distinct enrolled learners across all of a teacher's existing classes.
   Future<int> countEnrolledStudentsForTeacher(int teacherUserId) async {
     final db = await _dbHelper.database;
-    final result = await db.rawQuery('''
+    final result = await db.rawQuery(
+      '''
       SELECT COUNT(DISTINCT ce.learner_user_id) AS c
       FROM class_enrollments ce
       INNER JOIN teacher_classes tc ON tc.id = ce.class_id
       WHERE tc.teacher_user_id = ?
-    ''', [teacherUserId]);
+    ''',
+      [teacherUserId],
+    );
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
@@ -3342,15 +3476,11 @@ class AppRepository {
 
   Future<void> enrollLearnerInClass(int learnerUserId, int classId) async {
     final db = await _dbHelper.database;
-    await db.insert(
-      'class_enrollments',
-      {
-        'learner_user_id': learnerUserId,
-        'class_id': classId,
-        'enrolled_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.ignore,
-    );
+    await db.insert('class_enrollments', {
+      'learner_user_id': learnerUserId,
+      'class_id': classId,
+      'enrolled_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 
   /// Matches a locally enrolled learner when cloud enrollment carries a Firebase UID.
@@ -3361,14 +3491,17 @@ class AppRepository {
     final normalized = fullName.trim().toLowerCase();
     if (normalized.isEmpty) return null;
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT u.id
       FROM class_enrollments ce
       INNER JOIN users u ON u.id = ce.learner_user_id
       WHERE ce.class_id = ?
         AND LOWER(TRIM(u.full_name)) = ?
       LIMIT 1
-    ''', [classId, normalized]);
+    ''',
+      [classId, normalized],
+    );
     if (rows.isEmpty) return null;
     return findUserById(rows.first['id'] as int);
   }
@@ -3502,9 +3635,10 @@ class AppRepository {
     final rows = await db.query(
       'class_join_requests',
       where: 'teacher_user_id = ? AND status = ?',
-      whereArgs: [teacherUserId, ClassJoinRequest.statusToString(
-        ClassJoinRequestStatus.pending,
-      )],
+      whereArgs: [
+        teacherUserId,
+        ClassJoinRequest.statusToString(ClassJoinRequestStatus.pending),
+      ],
       orderBy: 'requested_at DESC',
     );
     return rows.map(_joinRequestFromRow).toList();
@@ -3571,9 +3705,10 @@ class AppRepository {
         remoteId: remoteId,
       );
 
-      if (remote.status == ClassJoinRequest.statusToString(
-            ClassJoinRequestStatus.accepted,
-          ) &&
+      if (remote.status ==
+              ClassJoinRequest.statusToString(
+                ClassJoinRequestStatus.accepted,
+              ) &&
           !await isLearnerEnrolled(learner.id, classId)) {
         await enrollLearnerInClass(learner.id, classId);
       }
@@ -3594,8 +3729,8 @@ class AppRepository {
       final teacherUserId = classRow['teacher_user_id'] as int? ?? 0;
       if (teacherUserId <= 0) continue;
 
-      final remoteId = remote.remoteId ??
-          '${code}_${remote.learnerFirebaseUid.trim()}';
+      final remoteId =
+          remote.remoteId ?? '${code}_${remote.learnerFirebaseUid.trim()}';
       await upsertJoinRequest(
         learnerUserId: learnerUserId,
         classId: classId,
@@ -3611,9 +3746,10 @@ class AppRepository {
         remoteId: remoteId,
       );
 
-      if (remote.status == ClassJoinRequest.statusToString(
-            ClassJoinRequestStatus.accepted,
-          ) &&
+      if (remote.status ==
+              ClassJoinRequest.statusToString(
+                ClassJoinRequestStatus.accepted,
+              ) &&
           !await isLearnerEnrolled(learnerUserId, classId)) {
         await enrollLearnerInClass(learnerUserId, classId);
       }
@@ -3624,7 +3760,8 @@ class AppRepository {
     int teacherUserId,
   ) async {
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT
         u.id AS learner_id,
         u.full_name,
@@ -3637,7 +3774,9 @@ class AppRepository {
       INNER JOIN users u ON u.id = ce.learner_user_id
       WHERE tc.teacher_user_id = ?
       ORDER BY tc.class_name ASC, u.full_name ASC
-    ''', [teacherUserId]);
+    ''',
+      [teacherUserId],
+    );
     return rows
         .map(
           (row) => TeacherClassStudent(
@@ -3659,7 +3798,8 @@ class AppRepository {
     required int classId,
   }) async {
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT
         u.id AS learner_id,
         u.full_name,
@@ -3672,7 +3812,9 @@ class AppRepository {
       INNER JOIN users u ON u.id = ce.learner_user_id
       WHERE tc.teacher_user_id = ? AND tc.id = ?
       ORDER BY u.full_name ASC
-    ''', [teacherUserId, classId]);
+    ''',
+      [teacherUserId, classId],
+    );
     return rows
         .map(
           (row) => TeacherClassStudent(
@@ -3750,7 +3892,9 @@ class AppRepository {
       if (existing == null) {
         await db.insert('teacher_classes', {
           'teacher_user_id': teacherUserId,
-          'class_name': remote.className.trim().isEmpty ? 'Class' : remote.className.trim(),
+          'class_name': remote.className.trim().isEmpty
+              ? 'Class'
+              : remote.className.trim(),
           'class_code': code,
           'created_at': remote.createdAt.millisecondsSinceEpoch,
         });
@@ -3840,7 +3984,8 @@ class AppRepository {
     required Set<String> remoteEnrollmentKeys,
   }) async {
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT
         ce.learner_user_id,
         ce.class_id,
@@ -3850,7 +3995,9 @@ class AppRepository {
       INNER JOIN teacher_classes tc ON tc.id = ce.class_id
       INNER JOIN users u ON u.id = ce.learner_user_id
       WHERE tc.teacher_user_id = ?
-    ''', [teacherUserId]);
+    ''',
+      [teacherUserId],
+    );
 
     for (final row in rows) {
       final firebaseUid = (row['firebase_uid'] as String?)?.trim() ?? '';
@@ -3867,15 +4014,21 @@ class AppRepository {
     }
   }
 
-  Future<bool> _isLearnerEnrolledInLesson(int learnerUserId, int lessonId) async {
+  Future<bool> _isLearnerEnrolledInLesson(
+    int learnerUserId,
+    int lessonId,
+  ) async {
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT ce.id
       FROM class_enrollments ce
       INNER JOIN class_lessons cl ON cl.class_id = ce.class_id
       WHERE ce.learner_user_id = ? AND cl.id = ?
       LIMIT 1
-    ''', [learnerUserId, lessonId]);
+    ''',
+      [learnerUserId, lessonId],
+    );
     return rows.isNotEmpty;
   }
 
@@ -3885,7 +4038,8 @@ class AppRepository {
   }) async {
     if (!await isLearnerEnrolled(learnerUserId, classId)) return [];
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT
         cl.id,
         cl.class_id,
@@ -3895,7 +4049,9 @@ class AppRepository {
       FROM class_lessons cl
       WHERE cl.class_id = ?
       ORDER BY cl.sort_order ASC, cl.created_at DESC
-    ''', [classId]);
+    ''',
+      [classId],
+    );
     return rows
         .map(
           (row) => ClassLesson(
@@ -3913,7 +4069,8 @@ class AppRepository {
 
   Future<List<ClassLesson>> getClassLessonsByClassId(int classId) async {
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT
         cl.id,
         cl.class_id,
@@ -3923,7 +4080,9 @@ class AppRepository {
       FROM class_lessons cl
       WHERE cl.class_id = ?
       ORDER BY cl.sort_order ASC, cl.created_at DESC
-    ''', [classId]);
+    ''',
+      [classId],
+    );
     return rows
         .map(
           (row) => ClassLesson(
@@ -3960,8 +4119,9 @@ class AppRepository {
       orderBy: 'created_at DESC',
     );
 
-    final lessonPhraseKeys =
-        lessonId != null ? await _lessonPhraseTextKeysForId(lessonId) : null;
+    final lessonPhraseKeys = lessonId != null
+        ? await _lessonPhraseTextKeysForId(lessonId)
+        : null;
     final practiced = <String>{};
     var totalInteractions = 0;
     DateTime? lastAccessed;
@@ -4069,7 +4229,8 @@ class AppRepository {
 
   Future<List<EnrolledClassModel>> getEnrolledClasses(int learnerUserId) async {
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT
         tc.id AS class_id,
         tc.class_name,
@@ -4082,7 +4243,9 @@ class AppRepository {
       INNER JOIN users u ON u.id = tc.teacher_user_id
       WHERE ce.learner_user_id = ?
       ORDER BY ce.enrolled_at ASC
-    ''', [learnerUserId]);
+    ''',
+      [learnerUserId],
+    );
     final results = <EnrolledClassModel>[];
     for (final row in rows) {
       final teacherId = row['teacher_id'] as int;
@@ -4107,7 +4270,9 @@ class AppRepository {
     final user = await findUserById(teacherUserId);
     if (user == null) return 'Teacher';
     final full = user.fullName.trim();
-    if (full.isNotEmpty && !isGenericAccountName(full) && !looksLikeEmail(full)) {
+    if (full.isNotEmpty &&
+        !isGenericAccountName(full) &&
+        !looksLikeEmail(full)) {
       return full;
     }
     final settings = await getUserSettings(teacherUserId);
@@ -4121,7 +4286,9 @@ class AppRepository {
     return fromSignup.isNotEmpty ? fromSignup : full;
   }
 
-  Future<List<ParentNotification>> getParentNotifications(int parentUserId) async {
+  Future<List<ParentNotification>> getParentNotifications(
+    int parentUserId,
+  ) async {
     await dedupeParentNotifications(parentUserId);
     final db = await _dbHelper.database;
     final rows = await db.query(
@@ -4139,7 +4306,8 @@ class AppRepository {
   }) async {
     await dedupeTeacherAlerts(teacherUserId);
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT
         MIN(pn.id) AS id,
         COALESCE(pn.class_id, MAX(tc.id), 0) AS class_id,
@@ -4171,7 +4339,9 @@ class AppRepository {
         COALESCE(pn.teacher_user_id, tc.teacher_user_id)
       ORDER BY pn.created_at DESC
       LIMIT ?
-    ''', [teacherUserId, teacherUserId, limit]);
+    ''',
+      [teacherUserId, teacherUserId, limit],
+    );
     return rows
         .map(
           (row) => TeacherRecentAlert(
@@ -4195,7 +4365,8 @@ class AppRepository {
     int limit = 8,
   }) async {
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT
         cl.id,
         cl.class_id,
@@ -4208,7 +4379,9 @@ class AppRepository {
       WHERE tc.teacher_user_id = ?
       ORDER BY cl.created_at DESC
       LIMIT ?
-    ''', [teacherUserId, limit]);
+    ''',
+      [teacherUserId, limit],
+    );
     return rows
         .map(
           (row) => TeacherRecentLesson(
@@ -4242,7 +4415,8 @@ class AppRepository {
     required int classId,
   }) async {
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT ce.id
       FROM class_enrollments ce
       INNER JOIN teacher_classes tc ON tc.id = ce.class_id
@@ -4250,7 +4424,9 @@ class AppRepository {
         AND ce.class_id = ?
         AND tc.teacher_user_id = ?
       LIMIT 1
-    ''', [learnerUserId, classId, teacherUserId]);
+    ''',
+      [learnerUserId, classId, teacherUserId],
+    );
     return rows.isNotEmpty;
   }
 
@@ -4379,11 +4555,7 @@ class AppRepository {
       }
     }
     for (final id in deleteIds) {
-      await db.delete(
-        'parent_notifications',
-        where: 'id = ?',
-        whereArgs: [id],
-      );
+      await db.delete('parent_notifications', where: 'id = ?', whereArgs: [id]);
     }
   }
 
@@ -4423,12 +4595,7 @@ class AppRepository {
         'parent_notifications',
         where:
             'parent_user_id = ? AND alert_type = ? AND title = ? AND body = ? AND (remote_id IS NULL OR remote_id = \'\')',
-        whereArgs: [
-          parentUserId,
-          item.alertType,
-          item.title,
-          item.body,
-        ],
+        whereArgs: [parentUserId, item.alertType, item.title, item.body],
         orderBy: 'created_at DESC',
         limit: 1,
       );
@@ -4660,11 +4827,7 @@ class AppRepository {
       }
     }
     for (final id in deleteIds) {
-      await db.delete(
-        'parent_notifications',
-        where: 'id = ?',
-        whereArgs: [id],
-      );
+      await db.delete('parent_notifications', where: 'id = ?', whereArgs: [id]);
     }
   }
 
@@ -4738,9 +4901,8 @@ class AppRepository {
     }
   }
 
-  List<(ParentAlertType, String, String, Duration, bool)> _englishNotificationSamples(
-    String child,
-  ) {
+  List<(ParentAlertType, String, String, Duration, bool)>
+  _englishNotificationSamples(String child) {
     return [
       (
         ParentAlertType.teacherAlert,
@@ -4813,13 +4975,16 @@ class AppRepository {
 
   Future<int?> classIdForLessonPhrase(int phraseId) async {
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT cl.class_id
       FROM lesson_phrases lp
       INNER JOIN class_lessons cl ON cl.id = lp.lesson_id
       WHERE lp.id = ?
       LIMIT 1
-    ''', [phraseId]);
+    ''',
+      [phraseId],
+    );
     if (rows.isEmpty) return null;
     return rows.first['class_id'] as int?;
   }
@@ -4839,13 +5004,16 @@ class AppRepository {
 
   Future<bool> _teacherOwnsLesson(int teacherUserId, int lessonId) async {
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT cl.id
       FROM class_lessons cl
       INNER JOIN teacher_classes tc ON tc.id = cl.class_id
       WHERE cl.id = ? AND tc.teacher_user_id = ?
       LIMIT 1
-    ''', [lessonId, teacherUserId]);
+    ''',
+      [lessonId, teacherUserId],
+    );
     return rows.isNotEmpty;
   }
 
@@ -4855,7 +5023,8 @@ class AppRepository {
   }) async {
     if (!await _teacherOwnsClass(teacherUserId, classId)) return [];
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT
         cl.id,
         cl.class_id,
@@ -4865,7 +5034,9 @@ class AppRepository {
       FROM class_lessons cl
       WHERE cl.class_id = ?
       ORDER BY cl.sort_order ASC, cl.created_at DESC
-    ''', [classId]);
+    ''',
+      [classId],
+    );
     return rows
         .map(
           (row) => ClassLesson(
@@ -4893,10 +5064,7 @@ class AppRepository {
     return null;
   }
 
-  static String? mergedPhraseImagePath({
-    String? existing,
-    String? remote,
-  }) {
+  static String? mergedPhraseImagePath({String? existing, String? remote}) {
     final remoteTrimmed = remote?.trim();
     if (remoteTrimmed == null || remoteTrimmed.isEmpty) return null;
 
@@ -5028,8 +5196,9 @@ class AppRepository {
         limit: 1,
       );
       if (classRows.isNotEmpty) {
-        final existingName =
-            storedUserText(classRows.first['class_name'] as String);
+        final existingName = storedUserText(
+          classRows.first['class_name'] as String,
+        );
         if (existingName != remoteClassName) {
           await updateClassDisplayName(
             classId: classId,
@@ -5098,8 +5267,9 @@ class AppRepository {
         }
       } else {
         lessonId = existingLessonRows.first['id'] as int;
-        final existingTitle =
-            storedUserText(existingLessonRows.first['title'] as String);
+        final existingTitle = storedUserText(
+          existingLessonRows.first['title'] as String,
+        );
         final existingSort =
             existingLessonRows.first['sort_order'] as int? ?? 0;
         final remoteTitle = storedUserText(remoteLesson.title);
@@ -5107,10 +5277,7 @@ class AppRepository {
             existingSort != remoteLesson.sortOrder) {
           await db.update(
             'class_lessons',
-            {
-              'title': remoteTitle,
-              'sort_order': remoteLesson.sortOrder,
-            },
+            {'title': remoteTitle, 'sort_order': remoteLesson.sortOrder},
             where: 'id = ?',
             whereArgs: [lessonId],
           );
@@ -5126,10 +5293,7 @@ class AppRepository {
         if (stored.isEmpty) continue;
         final textKey = lessonPhraseTextKey(stored);
         remotePhraseTextKeys.add(textKey);
-        dedupedRemotePhrases.putIfAbsent(
-          textKey,
-          () => remotePhrase,
-        );
+        dedupedRemotePhrases.putIfAbsent(textKey, () => remotePhrase);
       }
       for (final remotePhrase in dedupedRemotePhrases.values) {
         final phraseKey = remotePhrase.phraseKey.trim();
@@ -5144,8 +5308,9 @@ class AppRepository {
           whereArgs: [lessonId, phraseKey],
           limit: 1,
         );
-        Map<String, Object?>? matchedRow =
-            existingPhraseRows.isNotEmpty ? existingPhraseRows.first : null;
+        Map<String, Object?>? matchedRow = existingPhraseRows.isNotEmpty
+            ? existingPhraseRows.first
+            : null;
         if (matchedRow == null) {
           final lessonPhraseRows = await db.query(
             'lesson_phrases',
@@ -5154,7 +5319,8 @@ class AppRepository {
           );
           final storedKey = lessonPhraseTextKey(stored);
           for (final row in lessonPhraseRows) {
-            if (lessonPhraseTextKey(row['phrase_text'] as String) == storedKey) {
+            if (lessonPhraseTextKey(row['phrase_text'] as String) ==
+                storedKey) {
               matchedRow = row;
               break;
             }
@@ -5162,12 +5328,14 @@ class AppRepository {
         }
         final storedImage = mergedPhraseImagePath(
           existing: matchedRow?['image_path'] as String?,
-          remote: imagePathForCloudSync(remotePhrase.imagePath) ??
+          remote:
+              imagePathForCloudSync(remotePhrase.imagePath) ??
               remotePhrase.imagePath,
         );
         if (matchedRow != null) {
-          final existingText =
-              storedUserText(matchedRow['phrase_text'] as String);
+          final existingText = storedUserText(
+            matchedRow['phrase_text'] as String,
+          );
           final existingSort = matchedRow['sort_order'] as int? ?? 0;
           final existingImage = matchedRow['image_path'] as String?;
           if (existingText == stored &&
@@ -5213,7 +5381,8 @@ class AppRepository {
       for (final row in localPhrases) {
         final key = (row['cloud_phrase_key'] as String?)?.trim() ?? '';
         final textKey = lessonPhraseTextKey(row['phrase_text'] as String);
-        final stillRemote = (key.isNotEmpty && remotePhraseKeys.contains(key)) ||
+        final stillRemote =
+            (key.isNotEmpty && remotePhraseKeys.contains(key)) ||
             remotePhraseTextKeys.contains(textKey);
         if (stillRemote) continue;
         if (key.isNotEmpty && blockedPhraseKeys.contains(key)) continue;
@@ -5310,11 +5479,7 @@ class AppRepository {
       where: 'lesson_id = ?',
       whereArgs: [lessonId],
     );
-    await db.delete(
-      'class_lessons',
-      where: 'id = ?',
-      whereArgs: [lessonId],
-    );
+    await db.delete('class_lessons', where: 'id = ?', whereArgs: [lessonId]);
     return true;
   }
 
@@ -5430,14 +5595,17 @@ class AppRepository {
     required int phraseId,
   }) async {
     final db = await _dbHelper.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT lp.id
       FROM lesson_phrases lp
       INNER JOIN class_lessons cl ON cl.id = lp.lesson_id
       INNER JOIN teacher_classes tc ON tc.id = cl.class_id
       WHERE lp.id = ? AND tc.teacher_user_id = ?
       LIMIT 1
-    ''', [phraseId, teacherUserId]);
+    ''',
+      [phraseId, teacherUserId],
+    );
     if (rows.isEmpty) return false;
     await db.delete('lesson_phrases', where: 'id = ?', whereArgs: [phraseId]);
     return true;
@@ -5454,31 +5622,30 @@ class AppRepository {
     final db = await _dbHelper.database;
 
     // Verify ownership (phrase belongs to a lesson in teacher's class).
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT lp.id
       FROM lesson_phrases lp
       INNER JOIN class_lessons cl ON cl.id = lp.lesson_id
       INNER JOIN teacher_classes tc ON tc.id = cl.class_id
       WHERE lp.id = ? AND tc.teacher_user_id = ?
       LIMIT 1
-    ''', [phraseId, teacherUserId]);
+    ''',
+      [phraseId, teacherUserId],
+    );
     if (rows.isEmpty) return false;
 
     final updated = await db.update(
       'lesson_phrases',
-      {
-        'phrase_text': trimmed,
-        'image_path': imagePath,
-      },
+      {'phrase_text': trimmed, 'image_path': imagePath},
       where: 'id = ?',
       whereArgs: [phraseId],
     );
     return updated > 0;
   }
 
-  List<(ParentAlertType, String, String, Duration, bool)> _filipinoNotificationSamples(
-    String child,
-  ) {
+  List<(ParentAlertType, String, String, Duration, bool)>
+  _filipinoNotificationSamples(String child) {
     return [
       (
         ParentAlertType.teacherAlert,
@@ -5527,10 +5694,7 @@ class AppRepository {
 }
 
 class _LessonProgressAgg {
-  _LessonProgressAgg({
-    required this.className,
-    required this.lessonTitle,
-  });
+  _LessonProgressAgg({required this.className, required this.lessonTitle});
 
   final String className;
   final String lessonTitle;

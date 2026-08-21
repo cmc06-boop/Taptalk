@@ -7,14 +7,6 @@ import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../providers/app_state.dart';
 
-bool _isForMeRoute(AppRoute route, {bool includeCategories = false}) {
-  return route == AppRoute.home ||
-      route == AppRoute.favorites ||
-      route == AppRoute.history ||
-      route == AppRoute.settings ||
-      (includeCategories && route == AppRoute.chooseCategory);
-}
-
 Widget _settingsDrawerItem({
   required TapTalkThemeToken theme,
   required AppLanguage lang,
@@ -112,12 +104,9 @@ class SourceDrawer extends StatelessWidget {
                           if (app.user?.isParent ?? false) ...[
                             _DrawerItem(
                               theme: theme,
-                              icon: Icons.person_outline,
-                              label: AppStrings.forMe(lang),
-                              active: _isForMeRoute(
-                                app.route,
-                                includeCategories: true,
-                              ),
+                              icon: Icons.grid_view_rounded,
+                              label: AppStrings.chooseCategoryTitle(lang),
+                              active: app.route == AppRoute.chooseCategory,
                               onTap: () =>
                                   app.setRoute(AppRoute.chooseCategory),
                             ),
@@ -150,13 +139,6 @@ class SourceDrawer extends StatelessWidget {
                             ),
                             _DrawerItem(
                               theme: theme,
-                              icon: Icons.person_outline,
-                              label: AppStrings.forMe(lang),
-                              active: _isForMeRoute(app.route),
-                              onTap: () => app.setRoute(AppRoute.home),
-                            ),
-                            _DrawerItem(
-                              theme: theme,
                               icon: Icons.school_outlined,
                               label: AppStrings.classes(lang),
                               active: app.route == AppRoute.classes,
@@ -178,12 +160,9 @@ class SourceDrawer extends StatelessWidget {
                             ),
                             _DrawerItem(
                               theme: theme,
-                              icon: Icons.person_outline,
-                              label: AppStrings.forMe(lang),
-                              active: _isForMeRoute(
-                                app.route,
-                                includeCategories: true,
-                              ),
+                              icon: Icons.grid_view_rounded,
+                              label: AppStrings.chooseCategoryTitle(lang),
+                              active: app.route == AppRoute.chooseCategory,
                               onTap: () =>
                                   app.setRoute(AppRoute.chooseCategory),
                             ),
