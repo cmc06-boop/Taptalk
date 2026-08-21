@@ -49,6 +49,7 @@ import '../services/firestore_notification_backend.dart';
 import '../services/notification_sync_service.dart';
 import '../services/device_sms_service.dart';
 import '../services/network_status.dart';
+import '../services/stt_service.dart';
 import '../services/tts_service.dart';
 
 enum AppRoute {
@@ -5991,6 +5992,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
       return false;
     }
+
+    await SttService.releaseForTts();
 
     if (_speechPaused && spoken == _pausedSpeechText.trim()) {
       return _resumePausedSpeech(

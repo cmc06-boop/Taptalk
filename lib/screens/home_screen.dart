@@ -33,7 +33,9 @@ class _HomeScreenState extends State<HomeScreen> {
   final _undoStack = <String>[];
   final SttService _stt = SttService();
   bool _listening = false;
+  int _micRequestId = 0;
   String _micSessionPrefix = '';
+  String _micSessionWords = '';
   String? _attachedImagePath;
 
   @override
@@ -65,24 +67,26 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _toggleMic() async {
     final app = context.read<AppState>();
     if (_listening || _stt.isListening) {
+      _micRequestId++;
       await _stt.stop();
       _syncMicListening();
       return;
     }
+    final requestId = ++_micRequestId;
 
     final ready = await _stt.initialize(
       onStatus: (_) => _syncMicListening(),
       onError: (error) {
+        debugPrint('Home STT error: ${error.errorMsg}');
         _syncMicListening();
         if (!mounted) return;
-        if (error.permanent) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(AppStrings.speechNotAvailable(app.language))),
-          );
-        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppStrings.speechNotAvailable(app.language))),
+        );
       },
     );
 
+    if (requestId != _micRequestId) return;
     if (!ready) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -95,22 +99,42 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_micSessionPrefix.isNotEmpty && !_micSessionPrefix.endsWith(' ')) {
       _micSessionPrefix = '$_micSessionPrefix ';
     }
+    _micSessionWords = '';
 
     setState(() => _listening = true);
 
     final locale = await _stt.resolveLocale(app.language);
+    if (!mounted || requestId != _micRequestId) return;
     final started = await _stt.startListening(
       localeId: locale,
-      onResult: (words, isFinal) {
-        if (words.trim().isEmpty) return;
-        if (!mounted) return;
+      onResult: (words, _) {
+        if (requestId != _micRequestId || !mounted) return;
+        final nextWords = words.trim();
+        if (nextWords.isEmpty) return;
+        // Never let a shorter, unrelated hypothesis wipe words already shown.
+        if (_micSessionWords.isNotEmpty &&
+            nextWords.length < _micSessionWords.length &&
+            !_micSessionWords.toLowerCase().startsWith(nextWords.toLowerCase())) {
+          return;
+        }
+        _micSessionWords = nextWords;
+        final composed = '$_micSessionPrefix$_micSessionWords';
+        if (_textController.text == composed) return;
         setState(() {
-          _textController.text = '$_micSessionPrefix${words.trim()}';
+          _textController.value = TextEditingValue(
+            text: composed,
+            selection: TextSelection.collapsed(offset: composed.length),
+          );
         });
       },
     );
+    if (requestId != _micRequestId) {
+      await _stt.stop();
+      return;
+    }
     _syncMicListening();
     if (!started && mounted) {
+      setState(() => _listening = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(AppStrings.speechNotAvailable(app.language))),
       );
