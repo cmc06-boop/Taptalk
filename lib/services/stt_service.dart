@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:speech_to_text/speech_recognition_error.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
@@ -13,19 +15,22 @@ typedef SttStatusHandler = void Function(String status);
 
 /// Speech recognition for the For Me composer.
 ///
-/// Keeps one user session alive across Android's short listen windows and
-/// appends each spoken burst so the composer stays in sync with speech.
+/// On Android this uses the Google speech API (same family as Google TTS):
+/// live words, Filipino + English together, no in-app model packs.
 class SttService {
   SttService() {
     _active = this;
   }
 
   static SttService? _active;
+  static const _native = MethodChannel('com.taptalk/speech');
   final stt.SpeechToText _speech = stt.SpeechToText();
+  bool _useNative = false;
 
   bool _ready = false;
   bool _sessionActive = false;
   bool _engineStarting = false;
+  bool _capturing = false;
   int _sessionId = 0;
   int _restartCount = 0;
 
@@ -43,16 +48,18 @@ class SttService {
   Timer? _restartTimer;
   DateTime? _ignoreEngineEventsUntil;
 
-  static const Duration _silencePause = Duration(seconds: 7);
-  static const Duration _restartDelay = Duration(milliseconds: 500);
+  static const Duration _silencePause = Duration(seconds: 5);
+  static const Duration _restartDelay = Duration(milliseconds: 400);
   static const int _maxNetworkRetries = 6;
   static const double _speechRmsThreshold = 2;
 
   bool get isListening => _sessionActive;
+  bool get isCapturing => _capturing;
   bool get isReady => _ready;
 
-  /// Drops the mic so Android TTS can use the speaker. SpeechRecognizer
-  /// keeps audio focus after listen and silently blocks phrase playback.
+  Future<bool> hasPack(String? locale) async => true;
+
+  /// Drops the mic so Android TTS can use the speaker.
   static Future<void> releaseForTts() async {
     final service = _active;
     if (service == null || !service._ready) return;
@@ -77,50 +84,51 @@ class SttService {
 
     if (_ready) return true;
 
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        _native.setMethodCallHandler(_onNativeCall);
+        _useNative = true;
+        _ready = true;
+        debugPrint('STT using Google bilingual speech API');
+        return true;
+      } catch (e) {
+        debugPrint('STT native init failed: $e');
+      }
+    }
+
     _ready = await _speech.initialize(
       debugLogging: true,
       options: [
         stt.SpeechToText.androidNoBluetooth,
-        stt.SpeechToText.androidIntentLookup,
       ],
       onStatus: _handleStatus,
       onError: _handleError,
     );
-    debugPrint('STT initialize ready=$_ready');
+    debugPrint('STT initialize ready=$_ready native=$_useNative');
     return _ready;
   }
 
   Future<String?> resolveLocale(AppLanguage lang) async {
+    if (_useNative) {
+      debugPrint('STT Google API languages=fil-PH + en-US');
+      return 'fil-PH';
+    }
+
     final locales = await _speech.locales();
     debugPrint(
       'STT locales (${locales.length}) appLang=$lang: '
       '${locales.map((l) => l.localeId).join(', ')}',
     );
-
-    // Only use locales the device actually reports. Forcing fil_PH/tl_PH on
-    // this phone returns error_language_not_supported and kills recognition.
     final preferred = lang == AppLanguage.filipino
-        ? ['fil_PH', 'tl_PH', 'fil', 'tl', 'en_PH', 'en_US', 'en_SG', 'en_GB', 'en']
-        : ['en_PH', 'en_US', 'en_SG', 'en_GB', 'en', 'fil_PH', 'tl_PH', 'fil', 'tl'];
-
+        ? ['fil_PH', 'tl_PH', 'fil', 'tl', 'en_PH', 'en_US']
+        : ['en_US', 'en_PH', 'en_GB', 'en'];
     for (final want in preferred) {
-      for (final available in locales) {
-        if (_localeMatches(available.localeId, want)) {
-          debugPrint('STT using locale ${available.localeId}');
-          return available.localeId;
-        }
-      }
+      final match = locales.where(
+        (l) => l.localeId.toLowerCase().replaceAll('-', '_') ==
+            want.toLowerCase().replaceAll('-', '_'),
+      );
+      if (match.isNotEmpty) return match.first.localeId;
     }
-
-    for (final available in locales) {
-      final id = available.localeId.toLowerCase();
-      if (id.startsWith('en')) {
-        debugPrint('STT using locale ${available.localeId}');
-        return available.localeId;
-      }
-    }
-
-    debugPrint('STT using device default locale');
     return null;
   }
 
@@ -146,12 +154,11 @@ class SttService {
     _lastEmitted = '';
     _heardSpeech = false;
     _restartCount = 0;
+    _capturing = false;
     _sessionActive = true;
     final sessionId = ++_sessionId;
 
     debugPrint('STT session $sessionId start locale=$localeId');
-    _notifyStatus(stt.SpeechToText.listeningStatus);
-    _scheduleSilenceStop();
     await _listenNow(sessionId);
     return _sessionActive && sessionId == _sessionId;
   }
@@ -159,11 +166,14 @@ class SttService {
   Future<void> stop() async {
     final wasActive = _sessionActive;
     _sessionActive = false;
+    _capturing = false;
     if (wasActive) _sessionId++;
     _clearTimers();
     _engineStarting = false;
     try {
-      if (_speech.isListening) {
+      if (_useNative) {
+        await _native.invokeMethod('stop');
+      } else if (_speech.isListening) {
         await _speech.stop();
       }
     } catch (e) {
@@ -177,11 +187,16 @@ class SttService {
 
   Future<void> cancel() async {
     _sessionActive = false;
+    _capturing = false;
     _sessionId++;
     _clearTimers();
     _engineStarting = false;
     try {
-      await _speech.cancel();
+      if (_useNative) {
+        await _native.invokeMethod('cancel');
+      } else {
+        await _speech.cancel();
+      }
     } catch (e) {
       debugPrint('STT cancel error: $e');
     }
@@ -193,30 +208,35 @@ class SttService {
     _engineStarting = true;
 
     try {
-      if (_speech.isListening) {
-        try {
-          await _speech.stop();
-        } catch (_) {}
-        await Future<void>.delayed(const Duration(milliseconds: 120));
-      }
-      if (!_sessionActive || sessionId != _sessionId) return;
+      if (_useNative) {
+        debugPrint('STT native listen() locale=$_localeId');
+        await _native.invokeMethod('start', {'locale': _localeId});
+      } else {
+        if (_speech.isListening) {
+          try {
+            await _speech.stop();
+          } catch (_) {}
+          await Future<void>.delayed(const Duration(milliseconds: 120));
+        }
+        if (!_sessionActive || sessionId != _sessionId) return;
 
-      _ignoreEngineEventsUntil =
-          DateTime.now().add(const Duration(milliseconds: 450));
-      debugPrint('STT listen() locale=$_localeId');
-      await _speech.listen(
-        onResult: _handleSpeechResult,
-        onSoundLevelChange: _handleSoundLevel,
-        listenOptions: stt.SpeechListenOptions(
-          localeId: _localeId,
-          onDevice: false,
-          listenMode: stt.ListenMode.dictation,
-          partialResults: true,
-          cancelOnError: false,
-          pauseFor: const Duration(seconds: 8),
-          listenFor: const Duration(minutes: 2),
-        ),
-      );
+        _ignoreEngineEventsUntil =
+            DateTime.now().add(const Duration(milliseconds: 450));
+        debugPrint('STT listen() locale=$_localeId');
+        await _speech.listen(
+          onResult: _handleSpeechResult,
+          onSoundLevelChange: _handleSoundLevel,
+          listenOptions: stt.SpeechListenOptions(
+            localeId: _localeId,
+            onDevice: false,
+            listenMode: stt.ListenMode.dictation,
+            partialResults: true,
+            cancelOnError: false,
+            pauseFor: const Duration(seconds: 8),
+            listenFor: const Duration(minutes: 2),
+          ),
+        );
+      }
     } catch (e, st) {
       debugPrint('STT listen exception: $e\n$st');
       if (_sessionActive && sessionId == _sessionId) {
@@ -230,6 +250,27 @@ class SttService {
     }
   }
 
+  Future<dynamic> _onNativeCall(MethodCall call) async {
+    switch (call.method) {
+      case 'onResult':
+        final args = Map<dynamic, dynamic>.from(call.arguments as Map);
+        final words = (args['words'] as String? ?? '').trim();
+        final isFinal = args['final'] == true;
+        debugPrint('STT native result final=$isFinal words="$words"');
+        _applyRecognizedWords(words, isFinal);
+        return null;
+      case 'onError':
+        final msg = call.arguments?.toString() ?? 'error_unknown';
+        _handleError(SpeechRecognitionError(msg, true));
+        return null;
+      case 'onStatus':
+        _handleStatus(call.arguments?.toString() ?? '');
+        return null;
+      default:
+        return null;
+    }
+  }
+
   void _handleSoundLevel(double level) {
     if (!_sessionActive) return;
     if (level >= _speechRmsThreshold) {
@@ -238,23 +279,25 @@ class SttService {
   }
 
   void _handleSpeechResult(SpeechRecognitionResult result) {
-    if (!_sessionActive) return;
-
     final next = _wordsFromResult(result);
     debugPrint(
       'STT result final=${result.finalResult} words="$next" '
       'alts=${result.alternates.length}',
     );
+    _applyRecognizedWords(next, result.finalResult);
+  }
+
+  void _applyRecognizedWords(String next, bool isFinal) {
+    if (!_sessionActive) return;
     if (next.isEmpty) return;
 
     if (_current.isEmpty) {
       _current = next;
     } else if (_isRefinement(_current, next)) {
-      if (next.length >= _current.length || result.finalResult) {
+      if (next.length >= _current.length || isFinal) {
         _current = next;
       }
     } else {
-      // New burst from the engine — keep the previous words and append.
       _commitCurrent();
       _current = next;
     }
@@ -262,9 +305,9 @@ class SttService {
     _heardSpeech = true;
     _restartCount = 0;
     _scheduleSilenceStop();
-    _emitText(result.finalResult);
+    _emitText(isFinal);
 
-    if (result.finalResult) {
+    if (isFinal) {
       _commitCurrent();
     }
   }
@@ -327,20 +370,39 @@ class SttService {
 
   void _handleStatus(String status) {
     debugPrint(
-      'STT status: $status session=$_sessionActive starting=$_engineStarting',
+      'STT status: $status session=$_sessionActive starting=$_engineStarting '
+      'capturing=$_capturing',
     );
+    if (status == 'downloading' || status == 'loading') {
+      _notifyStatus(status);
+      return;
+    }
+
     if (!_sessionActive) {
+      _capturing = false;
       _notifyStatus(status);
       return;
     }
 
     if (status == stt.SpeechToText.listeningStatus) {
+      _capturing = true;
+      _engineStarting = false;
+      _scheduleSilenceStop();
       _notifyStatus(status);
       return;
     }
 
     if (status == stt.SpeechToText.notListeningStatus ||
         status == stt.SpeechToText.doneStatus) {
+      _capturing = false;
+      if (_useNative) {
+        // Vosk keeps one session alive; "done" here means the engine stopped.
+        if (_engineStarting || _shouldIgnoreEngineEvent()) return;
+        _commitCurrent();
+        _emitText(true);
+        _scheduleRestart(_sessionId);
+        return;
+      }
       if (_engineStarting || _speech.isListening || _shouldIgnoreEngineEvent()) {
         return;
       }
@@ -357,13 +419,17 @@ class SttService {
     );
     if (!_sessionActive) return;
     final msg = error.errorMsg.toLowerCase();
+    if (_isPackError(msg)) {
+      _failSession(error);
+      return;
+    }
     final ignoreStale = _engineStarting || _shouldIgnoreEngineEvent();
     if (ignoreStale && !_isNetworkError(msg) && !_isLanguageError(msg)) {
       debugPrint('STT ignoring error during engine start');
       return;
     }
-    if (_isLanguageError(msg) && _localeId != null) {
-      debugPrint('STT locale $_localeId not supported; using device default');
+    if (_isLanguageError(msg)) {
+      debugPrint('STT language error on $_localeId; using device default');
       _localeId = null;
       _commitCurrent();
       _emitText(true);
@@ -372,13 +438,11 @@ class SttService {
     }
 
     if (_isRestartableError(msg)) {
-      if (_isNetworkError(msg)) {
-        _restartCount++;
-        if (_restartCount > _maxNetworkRetries && !_heardSpeech) {
-          debugPrint('STT giving up after network errors');
-          _failSession(error);
-          return;
-        }
+      _restartCount++;
+      if (_restartCount > _maxNetworkRetries && !_heardSpeech) {
+        debugPrint('STT giving up after repeated errors');
+        _failSession(error);
+        return;
       }
       _commitCurrent();
       _emitText(true);
@@ -391,11 +455,16 @@ class SttService {
 
   Future<void> _failSession(SpeechRecognitionError error) async {
     _sessionActive = false;
+    _capturing = false;
     _sessionId++;
     _engineStarting = false;
     _clearTimers();
     try {
-      await _speech.stop();
+      if (_useNative) {
+        await _native.invokeMethod('stop');
+      } else {
+        await _speech.stop();
+      }
     } catch (_) {}
     _onError?.call(error);
     _notifyStatus(stt.SpeechToText.doneStatus);
@@ -412,7 +481,7 @@ class SttService {
 
   void _scheduleSilenceStop() {
     _silenceEndTimer?.cancel();
-    if (!_sessionActive) return;
+    if (!_sessionActive || !_capturing) return;
     _silenceEndTimer = Timer(_silencePause, () {
       if (_sessionActive) {
         debugPrint('STT silence stop');
@@ -452,14 +521,7 @@ class SttService {
         msg.contains('language_unavailable');
   }
 
-  bool _localeMatches(String available, String wanted) {
-    String norm(String value) =>
-        value.replaceAll('-', '_').toLowerCase().trim();
-    final left = norm(available);
-    final right = norm(wanted);
-    if (left == right) return true;
-    if (left.startsWith('${right}_')) return true;
-    if (right.length <= 3 && left.split('_').first == right) return true;
-    return false;
+  bool _isPackError(String msg) {
+    return msg.contains('error_pack') || msg.contains('cancelled');
   }
 }

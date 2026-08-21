@@ -203,6 +203,44 @@ abstract final class AppStrings {
       ? 'Hindi available ang speech recognition.'
       : 'Speech recognition is not available.';
 
+  static String microphoneDenied(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Payagan ang mikropono para magamit ang voice input.'
+      : 'Allow the microphone to use voice input.';
+
+  static String downloadingSpeechPack(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Dina-download ang speech pack'
+      : 'Downloading speech pack';
+
+  static String loadingSpeechPack(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Inihahanda ang mikropono…'
+      : 'Preparing the microphone…';
+
+  static String speechPackProgress(
+    AppLanguage lang,
+    String label,
+    String percent,
+  ) {
+    final name = label.isEmpty
+        ? (lang == AppLanguage.filipino ? 'wikang' : 'language')
+        : label;
+    return lang == AppLanguage.filipino
+        ? 'Dina-download ang $name pack$percent. Isang beses lang ito.'
+        : 'Downloading the $name pack$percent. This only happens once.';
+  }
+
+  static String speechPackNeedInternet(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Kumonekta sa internet isang beses para i-download ang English at Filipino speech pack. Pagkatapos ay gumagana na ang mic kahit offline.'
+      : 'Connect to the internet once to download the English and Filipino speech packs. After that the mic works offline.';
+
+  static String speechPackFailed(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Hindi na-download ang speech pack. Subukan ulit kapag may internet.'
+      : 'Could not download the speech pack. Try again when you have internet.';
+
   static String settingsSubtitle(AppLanguage lang) =>
       lang == AppLanguage.filipino
       ? 'Pamahalaan ang iyong mga kagustuhan at humingi ng suporta.'

@@ -5,8 +5,44 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    private var speechCapture: SpeechCapture? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        val speechChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.taptalk/speech",
+        )
+        speechCapture = SpeechCapture(this, speechChannel)
+        speechChannel.setMethodCallHandler { call, result ->
+            val capture = speechCapture
+            if (capture == null) {
+                result.error("NO_CAPTURE", "Speech capture is not ready", null)
+                return@setMethodCallHandler
+            }
+            when (call.method) {
+                "isAvailable" -> result.success(true)
+                "hasPack" -> result.success(true)
+                "start" -> {
+                    capture.start(call.argument<String>("locale"))
+                    result.success(true)
+                }
+                "prefetch" -> {
+                    result.success(true)
+                }
+                "stop" -> {
+                    capture.stop()
+                    result.success(true)
+                }
+                "cancel" -> {
+                    capture.cancel()
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "com.taptalk/direct_sms",
@@ -42,5 +78,11 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    override fun onDestroy() {
+        speechCapture?.destroy()
+        speechCapture = null
+        super.onDestroy()
     }
 }

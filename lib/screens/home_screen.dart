@@ -58,7 +58,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _syncMicListening() {
     if (!mounted) return;
-    final active = _stt.isListening;
+    final active = _stt.isCapturing;
     if (_listening != active) {
       setState(() => _listening = active);
     }
@@ -80,9 +80,20 @@ class _HomeScreenState extends State<HomeScreen> {
         debugPrint('Home STT error: ${error.errorMsg}');
         _syncMicListening();
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(AppStrings.speechNotAvailable(app.language))),
-        );
+        final msg = error.errorMsg.toLowerCase();
+        if (msg.contains('cancelled') ||
+            msg.contains('no_match') ||
+            msg.contains('speech_timeout') ||
+            msg.contains('error_client')) {
+          return;
+        }
+        final text = msg.contains('permission')
+            ? AppStrings.microphoneDenied(app.language)
+            : msg.contains('pack')
+            ? AppStrings.speechPackFailed(app.language)
+            : null;
+        if (text == null) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
       },
     );
 
@@ -90,7 +101,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!ready) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppStrings.speechNotAvailable(app.language))),
+        SnackBar(content: Text(AppStrings.microphoneDenied(app.language))),
       );
       return;
     }
@@ -101,17 +112,15 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     _micSessionWords = '';
 
-    setState(() => _listening = true);
-
     final locale = await _stt.resolveLocale(app.language);
     if (!mounted || requestId != _micRequestId) return;
+
     final started = await _stt.startListening(
       localeId: locale,
       onResult: (words, _) {
         if (requestId != _micRequestId || !mounted) return;
         final nextWords = words.trim();
         if (nextWords.isEmpty) return;
-        // Never let a shorter, unrelated hypothesis wipe words already shown.
         if (_micSessionWords.isNotEmpty &&
             nextWords.length < _micSessionWords.length &&
             !_micSessionWords.toLowerCase().startsWith(nextWords.toLowerCase())) {
@@ -120,12 +129,10 @@ class _HomeScreenState extends State<HomeScreen> {
         _micSessionWords = nextWords;
         final composed = '$_micSessionPrefix$_micSessionWords';
         if (_textController.text == composed) return;
-        setState(() {
-          _textController.value = TextEditingValue(
-            text: composed,
-            selection: TextSelection.collapsed(offset: composed.length),
-          );
-        });
+        _textController.value = TextEditingValue(
+          text: composed,
+          selection: TextSelection.collapsed(offset: composed.length),
+        );
       },
     );
     if (requestId != _micRequestId) {
@@ -135,9 +142,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _syncMicListening();
     if (!started && mounted) {
       setState(() => _listening = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppStrings.speechNotAvailable(app.language))),
-      );
     }
   }
 
