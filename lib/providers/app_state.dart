@@ -124,6 +124,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   bool _isSpeaking = false;
   String _speakingText = '';
   int? _speakingPhraseId;
+  bool _phraseVideoFromViewOnly = false;
   int _spokenWordStart = -1;
   int _spokenWordEnd = -1;
   Timer? _readAlongTimer;
@@ -148,6 +149,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   List<FavoriteModel> _favorites = [];
   Future<void> _favoriteCloudMutation = Future<void>.value();
   DateTime? _lastFavoriteLocalMutationAt;
+  final Set<String> _locallyRemovedFavoriteKeys = {};
   List<HistoryModel> _history = [];
   List<LinkedChildModel> _linkedChildren = [];
   List<ParentNotification> _notifications = [];
@@ -322,6 +324,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   int? get speakingPhraseId => _speakingPhraseId;
   int get spokenWordStart => _spokenWordStart;
   int get spokenWordEnd => _spokenWordEnd;
+
+  /// When true, phrase-card videos stay paused so only the View dialog plays.
+  bool get phraseVideoFromViewOnly => _phraseVideoFromViewOnly;
+
+  void setPhraseVideoFromViewOnly(bool value) {
+    if (_phraseVideoFromViewOnly == value) return;
+    _phraseVideoFromViewOnly = value;
+    notifyListeners();
+  }
 
   /// Read-along highlight for a composer field only when it matches [spokenText].
   (int start, int end) composerHighlightRange(String composerText) {
@@ -908,6 +919,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
                 await _repo.mergeRemoteLearnerFavorites(
                   learnerUserId: _user!.id,
                   favorites: favorites,
+                  skipRemoteKeys: Set<String>.from(_locallyRemovedFavoriteKeys),
                 );
               }
             }
@@ -1346,6 +1358,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _categories = [];
     _phrases = [];
     _favorites = [];
+    _locallyRemovedFavoriteKeys.clear();
+    _lastFavoriteLocalMutationAt = null;
     _history = [];
     _selectedCategoryKey = 'emotions';
     _selectedSubcategoryKey = null;
@@ -2615,14 +2629,17 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> toggleFavorite(PhraseModel phrase) async {
     if (_user == null || phrase.userId != _user!.id) return;
+    final key = _favoriteDedupeKey(phrase.text, phrase.categoryKey);
     final favId = favoriteIdFor(phrase);
     if (favId != null) {
       // Update every listener immediately (Home star and Favorites filters),
       // then reconcile with the persisted list below.
       _favorites = _favorites.where((f) => f.id != favId).toList();
+      _locallyRemovedFavoriteKeys.add(key);
       notifyListeners();
       await _repo.removeFavorite(favId);
     } else {
+      _locallyRemovedFavoriteKeys.remove(key);
       final added = await _repo.addFavorite(
         userId: _user!.id,
         phraseText: phrase.text,
@@ -2651,7 +2668,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   bool get _favoriteMergeGraceActive {
     final at = _lastFavoriteLocalMutationAt;
     if (at == null) return false;
-    return DateTime.now().difference(at) < const Duration(seconds: 8);
+    return DateTime.now().difference(at) < const Duration(seconds: 20);
   }
 
   Future<void> refreshFavoritesFromCloud() async {
@@ -5345,6 +5362,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       await _repo.mergeRemoteLearnerFavorites(
         learnerUserId: learnerUserId,
         favorites: favorites,
+        skipRemoteKeys: learnerUserId == _user?.id
+            ? Set<String>.from(_locallyRemovedFavoriteKeys)
+            : const {},
       );
     } catch (e, st) {
       debugPrint('Pull learner favorites failed: $e\n$st');

@@ -14,6 +14,7 @@ import '../widgets/category_icon.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/phrase_card.dart';
 import '../widgets/taptalk_logo.dart';
+import '../widgets/view_phrase_dialog.dart';
 
 class FavoritesScreen extends StatefulWidget {
   const FavoritesScreen({super.key});
@@ -52,15 +53,18 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     FavoriteModel favorite,
     String filterKey,
   ) {
-    if (filterKey == _allCategoriesKey || favorite.categoryKey == filterKey) {
-      return true;
-    }
+    if (filterKey == _allCategoriesKey) return true;
+
+    final favoriteKey = favorite.categoryKey.trim().toLowerCase();
+    final normalizedFilter = filterKey.trim().toLowerCase();
+    if (favoriteKey == normalizedFilter) return true;
 
     // A phrase stored under a subcategory also belongs to its top-level
-    // category (for example, Breakfast appears under Food and under ALL).
+    // category (for example, Fruits appears under Food and under ALL).
     for (final category in app.categories) {
-      if (category.key == favorite.categoryKey) {
-        return category.parentKey == filterKey;
+      if (category.key.trim().toLowerCase() == favoriteKey) {
+        final parent = category.parentKey?.trim().toLowerCase();
+        return parent != null && parent == normalizedFilter;
       }
     }
     return false;
@@ -350,6 +354,11 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                           phraseId: phrase.id,
                         ),
                         onFavorite: () => app.toggleFavorite(phrase),
+                        onView: () => ViewPhraseDialog.show(
+                          context,
+                          phrase: phrase,
+                          displayText: app.localizedPhraseText(phrase),
+                        ),
                         onDelete: phrase.isBuiltin
                             ? () {}
                             : () => _confirmDeletePhrase(phrase, favorite),

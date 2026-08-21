@@ -1890,6 +1890,11 @@ class AppRepository {
   Future<void> mergeRemoteLearnerFavorites({
     required int learnerUserId,
     required List<RemoteLearnerFavorite> favorites,
+    /// When false (default), only upsert remote favorites. Deleting local
+    /// favorites that are missing remotely races with star/unstar and can
+    /// wipe or restore toggles from a stale cloud snapshot.
+    bool removeMissing = false,
+    Set<String> skipRemoteKeys = const {},
   }) async {
     if (favorites.isEmpty) return;
     final deduped = <String, RemoteLearnerFavorite>{};
@@ -1898,6 +1903,7 @@ class AppRepository {
       final categoryKey = normalizeCategoryKey(remote.categoryKey);
       if (text.isEmpty || categoryKey.isEmpty) continue;
       final key = '${text.toLowerCase()}__$categoryKey';
+      if (skipRemoteKeys.contains(key)) continue;
       final existing = deduped[key];
       final candidate = RemoteLearnerFavorite(
         phraseText: text,
@@ -1916,15 +1922,16 @@ class AppRepository {
       }
     }
 
-    final remoteKeys = deduped.keys.toSet();
-    final localFavorites = await getFavorites(learnerUserId);
-    for (final local in localFavorites) {
-      // Match remote keys (normalized) — raw dedupeKey can false-delete locals.
-      final localKey =
-          '${storedUserText(local.phraseText).toLowerCase()}__'
-          '${normalizeCategoryKey(local.categoryKey)}';
-      if (!remoteKeys.contains(localKey)) {
-        await removeFavorite(local.id);
+    if (removeMissing) {
+      final remoteKeys = deduped.keys.toSet();
+      final localFavorites = await getFavorites(learnerUserId);
+      for (final local in localFavorites) {
+        final localKey =
+            '${storedUserText(local.phraseText).toLowerCase()}__'
+            '${normalizeCategoryKey(local.categoryKey)}';
+        if (!remoteKeys.contains(localKey)) {
+          await removeFavorite(local.id);
+        }
       }
     }
 

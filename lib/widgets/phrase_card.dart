@@ -18,6 +18,7 @@ class PhraseCard extends StatefulWidget {
     required this.onDelete,
     required this.onFavorite,
     this.onEdit,
+    this.onView,
     required this.isFavorite,
     this.displayText,
     this.showFavorite = true,
@@ -33,6 +34,7 @@ class PhraseCard extends StatefulWidget {
   final VoidCallback onDelete;
   final VoidCallback onFavorite;
   final VoidCallback? onEdit;
+  final VoidCallback? onView;
   final bool isFavorite;
   final bool showFavorite;
   final bool showDelete;
@@ -63,6 +65,7 @@ class _PhraseCardState extends State<PhraseCard>
     final onDelete = widget.onDelete;
     final onFavorite = widget.onFavorite;
     final onEdit = widget.onEdit;
+    final onView = widget.onView;
     final isFavorite = widget.isFavorite;
     final showFavorite = widget.showFavorite;
     final showDelete = widget.showDelete;
@@ -81,6 +84,8 @@ class _PhraseCardState extends State<PhraseCard>
     final titleSize = dense ? 9.5 : 11.0;
     final canEdit = showEdit && !phrase.isBuiltin && onEdit != null;
     final canDelete = showDelete && !phrase.isBuiltin;
+    final canView = onView != null;
+    final showMoreMenu = canView || canEdit || canDelete;
     final phraseStyle = GoogleFonts.poppins(
       fontSize: titleSize,
       fontWeight: FontWeight.w800,
@@ -125,6 +130,8 @@ class _PhraseCardState extends State<PhraseCard>
                           ),
                           child: Selector<AppState, bool>(
                             selector: (_, app) {
+                              // View dialog owns playback while open.
+                              if (app.phraseVideoFromViewOnly) return false;
                               if (!app.isSpeaking) return false;
                               if (app.speakingPhraseId != null &&
                                   app.speakingPhraseId == phrase.id) {
@@ -156,13 +163,14 @@ class _PhraseCardState extends State<PhraseCard>
                             iconSize: dense ? 14 : 17,
                           ),
                         ),
-                      if (canEdit || canDelete)
+                      if (showMoreMenu)
                         Positioned(
                           top: dense ? 4 : 6,
                           right: dense ? 4 : 6,
                           child: _PhraseMoreButton(
                             size: dense ? 22 : 28,
                             iconSize: dense ? 14 : 17,
+                            onView: canView ? onView : null,
                             onEdit: canEdit ? onEdit : null,
                             onDelete: canDelete ? onDelete : null,
                           ),
@@ -176,6 +184,10 @@ class _PhraseCardState extends State<PhraseCard>
                   child: Center(
                     child: Selector<AppState, (bool, int, int)>(
                       selector: (_, app) {
+                        // View dialog owns read-along highlight while open.
+                        if (app.phraseVideoFromViewOnly) {
+                          return const (false, 0, 0);
+                        }
                         final text =
                             displayText ?? app.localizedPhraseText(phrase);
                         final active = app.isSpeaking &&
@@ -286,12 +298,14 @@ class _PhraseMoreButton extends StatelessWidget {
   const _PhraseMoreButton({
     required this.size,
     required this.iconSize,
+    this.onView,
     this.onEdit,
     this.onDelete,
   });
 
   final double size;
   final double iconSize;
+  final VoidCallback? onView;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
 
@@ -321,35 +335,75 @@ class _PhraseMoreButton extends StatelessWidget {
             context: context,
             position: position,
             items: [
-              if (onEdit != null) PopupMenuItem<String>(
-                value: 'edit',
-                child: Row(
-                  children: [
-                    const Icon(Icons.edit_outlined, size: 18, color: Color(0xFF5C3D2E)),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Edit',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
+              if (onView != null)
+                const PopupMenuItem<String>(
+                  value: 'view',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.visibility_outlined,
+                        size: 18,
                         color: Color(0xFF5C3D2E),
                       ),
-                    ),
-                  ],
+                      SizedBox(width: 8),
+                      Text(
+                        'View',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF5C3D2E),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              if (onDelete != null) PopupMenuItem<String>(
-                value: 'delete',
-                child: Row(
-                  children: [
-                    const Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFD64545)),
-                    const SizedBox(width: 8),
-                    const Text('Delete', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFFD64545))),
-                  ],
+              if (onEdit != null)
+                const PopupMenuItem<String>(
+                  value: 'edit',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.edit_outlined,
+                        size: 18,
+                        color: Color(0xFF5C3D2E),
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        'Edit',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF5C3D2E),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+              if (onDelete != null)
+                const PopupMenuItem<String>(
+                  value: 'delete',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.delete_outline_rounded,
+                        size: 18,
+                        color: Color(0xFFD64545),
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        'Delete',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFFD64545),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
             ],
           );
+          if (result == 'view') onView?.call();
           if (result == 'edit') onEdit?.call();
           if (result == 'delete') onDelete?.call();
         },

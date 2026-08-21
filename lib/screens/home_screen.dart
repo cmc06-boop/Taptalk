@@ -19,6 +19,7 @@ import '../widgets/panel_card.dart';
 import '../widgets/phrase_card.dart';
 import '../widgets/highlighting_text_controller.dart';
 import '../widgets/tts_speed_selector.dart';
+import '../widgets/view_phrase_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -480,6 +481,11 @@ class _HomeScreenState extends State<HomeScreen> {
                           phraseId: phrase.id,
                         ),
                         onFavorite: () => app.toggleFavorite(phrase),
+                        onView: () => ViewPhraseDialog.show(
+                          context,
+                          phrase: phrase,
+                          displayText: app.localizedPhraseText(phrase),
+                        ),
                         onEdit: () async {
                           if (phrase.isBuiltin) return;
                           final result = await EditPhraseDialog.show(
