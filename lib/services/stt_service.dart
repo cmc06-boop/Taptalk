@@ -15,8 +15,8 @@ typedef SttStatusHandler = void Function(String status);
 
 /// Speech recognition for the For Me composer.
 ///
-/// On Android this uses the Google speech API (same family as Google TTS):
-/// live words, Filipino + English together, no in-app model packs.
+/// Online (Android): Google bilingual speech API, unchanged.
+/// Offline (Android): in-app Vosk, Filipino-first with English only when clear.
 class SttService {
   SttService() {
     _active = this;
@@ -89,7 +89,8 @@ class SttService {
         _native.setMethodCallHandler(_onNativeCall);
         _useNative = true;
         _ready = true;
-        debugPrint('STT using Google bilingual speech API');
+        debugPrint('STT using native Android speech (Google online / Vosk offline)');
+        unawaited(_native.invokeMethod('prefetch'));
         return true;
       } catch (e) {
         debugPrint('STT native init failed: $e');
@@ -256,8 +257,15 @@ class SttService {
         final args = Map<dynamic, dynamic>.from(call.arguments as Map);
         final words = (args['words'] as String? ?? '').trim();
         final isFinal = args['final'] == true;
-        debugPrint('STT native result final=$isFinal words="$words"');
-        _applyRecognizedWords(words, isFinal);
+        final replaceSession = args['full'] == true;
+        debugPrint(
+          'STT native result final=$isFinal full=$replaceSession words="$words"',
+        );
+        if (replaceSession) {
+          _applyFullSessionWords(words, isFinal);
+        } else {
+          _applyRecognizedWords(words, isFinal);
+        }
         return null;
       case 'onError':
         final msg = call.arguments?.toString() ?? 'error_unknown';
@@ -285,6 +293,34 @@ class SttService {
       'alts=${result.alternates.length}',
     );
     _applyRecognizedWords(next, result.finalResult);
+  }
+
+  void _applyFullSessionWords(String next, bool isFinal) {
+    if (!_sessionActive) return;
+    if (next.isEmpty) return;
+    final previous = _combinedText().trim();
+    if (previous.isNotEmpty) {
+      final a = previous.toLowerCase();
+      final b = next.toLowerCase();
+      if (b.startsWith(a)) {
+        _committed = '';
+        _current = next;
+      } else if (a.startsWith(b) || a.contains(b)) {
+        return;
+      } else {
+        return;
+      }
+    } else {
+      _committed = '';
+      _current = next;
+    }
+    _heardSpeech = true;
+    _restartCount = 0;
+    _scheduleSilenceStop();
+    _emitText(isFinal);
+    if (isFinal) {
+      _commitCurrent();
+    }
   }
 
   void _applyRecognizedWords(String next, bool isFinal) {
@@ -374,6 +410,7 @@ class SttService {
       'capturing=$_capturing',
     );
     if (status == 'downloading' || status == 'loading') {
+      _capturing = true;
       _notifyStatus(status);
       return;
     }
@@ -396,11 +433,16 @@ class SttService {
         status == stt.SpeechToText.doneStatus) {
       _capturing = false;
       if (_useNative) {
-        // Vosk keeps one session alive; "done" here means the engine stopped.
+        // Native Google restarts internally. In-app offline is one session.
+        // "done" means the engine stopped — do not start it again.
         if (_engineStarting || _shouldIgnoreEngineEvent()) return;
         _commitCurrent();
         _emitText(true);
-        _scheduleRestart(_sessionId);
+        if (status == stt.SpeechToText.doneStatus) {
+          _sessionActive = false;
+          _clearTimers();
+          _notifyStatus(status);
+        }
         return;
       }
       if (_engineStarting || _speech.isListening || _shouldIgnoreEngineEvent()) {

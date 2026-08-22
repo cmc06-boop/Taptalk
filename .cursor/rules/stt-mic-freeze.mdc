@@ -1,0 +1,18 @@
+---
+description: Do not change online or offline mic/STT logic unless the user explicitly asks
+alwaysApply: true
+---
+
+# Mic / STT is frozen
+
+Online Google STT and offline Vosk are **done**. Do not change their logic when editing other parts of the app.
+
+Leave these files alone unless the user explicitly asks to change mic/STT:
+
+- `lib/services/stt_service.dart`
+- `android/app/src/main/kotlin/com/example/flutter_application_1/SpeechCapture.kt`
+- `android/app/src/main/kotlin/com/example/flutter_application_1/VoskOfflineEngine.kt`
+- `android/app/src/main/kotlin/com/example/flutter_application_1/SpeechPackStore.kt`
+- related STT wiring in `MainActivity.kt` (`com.taptalk/speech`)
+
+Do not "improve", refactor, retune merge/lock/silence, or touch the Google listen path as a side effect of other work.

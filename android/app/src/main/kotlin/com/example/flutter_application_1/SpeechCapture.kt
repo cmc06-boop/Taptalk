@@ -2,7 +2,11 @@ package com.example.flutter_application_1
 
 import android.app.Activity
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -14,9 +18,8 @@ import android.util.Log
 import io.flutter.plugin.common.MethodChannel
 
 /**
- * Google speech API for live STT — the same family as Google TTS.
- * Always bilingual (Filipino + English), independent of the app language
- * setting and of whatever speech pack an OEM phone has installed.
+ * Google speech API for live STT when online (unchanged).
+ * Offline uses in-app Vosk (Filipino + small English) — no phone Settings packs.
  */
 class SpeechCapture(
     private val activity: Activity,
@@ -29,13 +32,41 @@ class SpeechCapture(
     @Volatile private var startGeneration = 0
     private var lastWords = ""
     private var languageMode = 0
+    private var offlineMode = false
+    private var switchedToOffline = false
+    private var muted = false
+    private var savedSystem = -1
+    private var savedNotification = -1
+    private val vosk = VoskOfflineEngine(
+        activity,
+        onResult = { words, isFinal ->
+            if (sessionActive) {
+                notify(
+                    "onResult",
+                    hashMapOf(
+                        "words" to words,
+                        "final" to isFinal,
+                        "full" to true,
+                    ),
+                )
+            }
+        },
+        onStatus = { status ->
+            if (sessionActive || status == "done") {
+                notify("onStatus", status)
+            }
+        },
+        onError = { error ->
+            if (sessionActive) notify("onError", error)
+        },
+    )
 
     fun isAvailable(): Boolean = true
 
-    fun hasPack(locale: String?): Boolean = true
+    fun hasPack(locale: String?): Boolean = vosk.hasPack()
 
     fun prepare() {
-        // Google speech is an API, not an in-app model pack.
+        vosk.prepare()
     }
 
     fun start(locale: String?) {
@@ -43,26 +74,38 @@ class SpeechCapture(
         sessionActive = true
         lastWords = ""
         languageMode = 0
+        switchedToOffline = false
+        val wantOffline = !hasInternet()
         main.post {
             if (!stillThisStart(generation)) return@post
+            offlineMode = wantOffline
+            Log.d(TAG, "start offlineMode=$offlineMode")
+            if (offlineMode) {
+                releaseGoogleRecognizer()
+                vosk.start()
+                return@post
+            }
+            vosk.stop()
             ensureRecognizer()
             beginListening(generation)
         }
     }
 
     fun prefetch(locale: String?) {
-        prepare()
+        vosk.prepare()
     }
 
     fun stop() {
         sessionActive = false
         startGeneration++
         listening = false
+        vosk.stop()
         main.post {
             try {
                 recognizer?.stopListening()
             } catch (_: Exception) {
             }
+            restoreBeeps()
             notify("onStatus", "done")
         }
     }
@@ -71,11 +114,13 @@ class SpeechCapture(
         sessionActive = false
         startGeneration++
         listening = false
+        vosk.stop()
         main.post {
             try {
                 recognizer?.cancel()
             } catch (_: Exception) {
             }
+            restoreBeeps()
             notify("onStatus", "done")
         }
     }
@@ -84,35 +129,52 @@ class SpeechCapture(
         sessionActive = false
         startGeneration++
         listening = false
+        vosk.destroy()
         main.post {
-            try {
-                recognizer?.destroy()
-            } catch (_: Exception) {
-            }
-            recognizer = null
+            restoreBeeps()
+            releaseGoogleRecognizer()
         }
     }
 
     private fun ensureRecognizer() {
         if (recognizer != null) return
+        recognizer = createOnlineRecognizer()
+        recognizer?.setRecognitionListener(this)
+    }
+
+    private fun createOnlineRecognizer(): SpeechRecognizer {
         val google = findGoogleRecognizer()
-        recognizer = if (google != null) {
+        return if (google != null) {
             Log.d(TAG, "Using Google recognizer ${google.packageName}/${google.className}")
             SpeechRecognizer.createSpeechRecognizer(activity, google)
         } else {
             Log.d(TAG, "Using default SpeechRecognizer")
             SpeechRecognizer.createSpeechRecognizer(activity)
         }
-        recognizer?.setRecognitionListener(this)
     }
 
     private fun resetRecognizer() {
+        releaseGoogleRecognizer()
+        ensureRecognizer()
+    }
+
+    private fun releaseGoogleRecognizer() {
         try {
             recognizer?.destroy()
         } catch (_: Exception) {
         }
         recognizer = null
-        ensureRecognizer()
+        listening = false
+    }
+
+    private fun switchToOffline() {
+        if (offlineMode && switchedToOffline) return
+        offlineMode = true
+        switchedToOffline = true
+        languageMode = 0
+        releaseGoogleRecognizer()
+        vosk.start()
+        Log.d(TAG, "Switched to in-app Vosk offline recognition")
     }
 
     private fun beginListening(generation: Int) {
@@ -213,6 +275,49 @@ class SpeechCapture(
         }
     }
 
+    private fun hasInternet(): Boolean {
+        return try {
+            val cm = activity.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = cm.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(network) ?: return false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun muteBeeps() {
+        if (muted) return
+        try {
+            val am = activity.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            savedSystem = am.getStreamVolume(AudioManager.STREAM_SYSTEM)
+            savedNotification = am.getStreamVolume(AudioManager.STREAM_NOTIFICATION)
+            am.setStreamVolume(AudioManager.STREAM_SYSTEM, 0, 0)
+            am.setStreamVolume(AudioManager.STREAM_NOTIFICATION, 0, 0)
+            muted = true
+        } catch (e: Exception) {
+            Log.w(TAG, "muteBeeps failed", e)
+        }
+    }
+
+    private fun restoreBeeps() {
+        if (!muted) return
+        try {
+            val am = activity.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (savedSystem >= 0) {
+                am.setStreamVolume(AudioManager.STREAM_SYSTEM, savedSystem, 0)
+            }
+            if (savedNotification >= 0) {
+                am.setStreamVolume(AudioManager.STREAM_NOTIFICATION, savedNotification, 0)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "restoreBeeps failed", e)
+        }
+        muted = false
+        savedSystem = -1
+        savedNotification = -1
+    }
+
     private fun sendResults(bundle: Bundle?, isFinal: Boolean) {
         val matches = bundle?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
         val words = matches?.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
@@ -278,7 +383,7 @@ class SpeechCapture(
             SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> "error_language_unavailable"
             else -> "error_unknown ($error)"
         }
-        Log.d(TAG, "onError $msg")
+        Log.d(TAG, "onError $msg offlineMode=$offlineMode")
         if (!sessionActive) return
         val languageError = error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
             error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
@@ -289,13 +394,19 @@ class SpeechCapture(
             scheduleRestart(200)
             return
         }
+        val networkError = error == SpeechRecognizer.ERROR_NETWORK ||
+            error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT ||
+            error == SpeechRecognizer.ERROR_SERVER
+        if (networkError) {
+            if (!offlineMode) {
+                switchToOffline()
+            }
+            return
+        }
         val restartable = error == SpeechRecognizer.ERROR_NO_MATCH ||
             error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
             error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
-            error == SpeechRecognizer.ERROR_CLIENT ||
-            error == SpeechRecognizer.ERROR_NETWORK ||
-            error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT ||
-            error == SpeechRecognizer.ERROR_SERVER
+            error == SpeechRecognizer.ERROR_CLIENT
         if (restartable) {
             if (error == SpeechRecognizer.ERROR_CLIENT ||
                 error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY

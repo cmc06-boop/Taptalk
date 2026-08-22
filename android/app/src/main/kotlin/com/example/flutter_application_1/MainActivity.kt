@@ -15,6 +15,7 @@ class MainActivity : FlutterActivity() {
             "com.taptalk/speech",
         )
         speechCapture = SpeechCapture(this, speechChannel)
+        speechCapture?.prepare()
         speechChannel.setMethodCallHandler { call, result ->
             val capture = speechCapture
             if (capture == null) {
@@ -23,12 +24,15 @@ class MainActivity : FlutterActivity() {
             }
             when (call.method) {
                 "isAvailable" -> result.success(true)
-                "hasPack" -> result.success(true)
+                "hasPack" -> result.success(
+                    capture.hasPack(call.argument<String>("locale")),
+                )
                 "start" -> {
                     capture.start(call.argument<String>("locale"))
                     result.success(true)
                 }
                 "prefetch" -> {
+                    capture.prefetch(call.argument<String>("locale"))
                     result.success(true)
                 }
                 "stop" -> {

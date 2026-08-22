@@ -23,6 +23,9 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
     }
 
     buildTypes {
@@ -32,6 +35,60 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+}
+
+dependencies {
+    implementation("com.alphacephei:vosk-android:0.3.75") {
+        exclude(group = "net.java.dev.jna", module = "jna")
+    }
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
+}
+
+val sttCacheDirs = listOf(
+    layout.projectDirectory.dir("stt-cache"),
+    layout.projectDirectory.dir("build/stt-cache"),
+)
+val assetsDir = layout.projectDirectory.dir("src/main/assets")
+
+fun findSttZip(name: String): File? {
+    return sttCacheDirs.map { it.file(name).asFile }.firstOrNull { it.isFile && it.length() > 1_000_000 }
+}
+
+fun unpackVoskZip(zip: File, dest: File) {
+    val ready = dest.resolve("am").exists() ||
+        dest.listFiles()?.any { it.isDirectory && it.resolve("am").exists() } == true
+    if (ready) return
+    dest.mkdirs()
+    copy {
+        from(zipTree(zip))
+        into(dest)
+        includeEmptyDirs = false
+    }
+}
+
+tasks.register("prepareSttModels") {
+    doLast {
+        val enZip = findSttZip("vosk-en.zip")
+        val tlZip = findSttZip("vosk-tl.zip")
+        if (enZip == null || tlZip == null) {
+            logger.warn(
+                "Offline STT models missing. Expected vosk-en.zip and vosk-tl.zip in android/app/stt-cache.",
+            )
+            return@doLast
+        }
+        unpackVoskZip(enZip, assetsDir.dir("model-en").asFile)
+        unpackVoskZip(tlZip, assetsDir.dir("model-tl").asFile)
+    }
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn("prepareSttModels")
 }
 
 kotlin {

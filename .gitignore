@@ -47,3 +47,6 @@ app.*.map.json
 /android/app/release
 /android/app/build/
 /android/app/stt-cache/
+/android/app/libs/*.aar
+/android/app/src/main/assets/model-en/
+/android/app/src/main/assets/model-tl/
