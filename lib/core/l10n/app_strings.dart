@@ -1112,6 +1112,9 @@ abstract final class AppStrings {
   static String age(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Edad' : 'Age';
 
+  static String birthdate(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Kaarawan' : 'Birthdate';
+
   static String gradeLevel(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Antas / Grade level' : 'Grade level';
 

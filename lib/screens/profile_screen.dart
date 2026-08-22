@@ -14,7 +14,6 @@ import '../widgets/password_strength_hint.dart';
 import '../widgets/panel_card.dart';
 import '../widgets/code_qr_sheet.dart';
 import '../widgets/taptalk_result_dialog.dart';
-import '../widgets/taptalk_logo.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -27,6 +26,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _nameController = TextEditingController();
   final _addressController = TextEditingController();
   final _ageController = TextEditingController();
+  final _yearController = TextEditingController();
+  final _monthController = TextEditingController();
+  final _dayController = TextEditingController();
+  final _yearFocus = FocusNode();
+  final _monthFocus = FocusNode();
+  final _dayFocus = FocusNode();
   final _gradeLevelController = TextEditingController();
   final _emergency1Controller = TextEditingController();
   final _emergency2Controller = TextEditingController();
@@ -34,16 +39,57 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _savedAddress = '';
   String _savedAge = '';
   String _savedGradeLevel = '';
+  String _savedBirthdate = '';
+  String _birthdateIso = '';
   List<String> _savedEmergencyContacts = const [];
   bool _showSecondEmergency = false;
   bool _editing = false;
   bool _saving = false;
+  bool _showFloatingCancel = false;
+  bool _syncingLinkedDates = false;
+  final _scrollController = ScrollController();
+  final _editCancelKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_syncFloatingCancel);
+  }
+
+  void _syncFloatingCancel() {
+    var show = false;
+    if (_editing && _scrollController.hasClients) {
+      final ctx = _editCancelKey.currentContext;
+      final box = ctx?.findRenderObject();
+      final scrollBox =
+          _scrollController.position.context.notificationContext?.findRenderObject();
+      if (box is RenderBox &&
+          box.hasSize &&
+          box.attached &&
+          scrollBox is RenderBox &&
+          scrollBox.hasSize) {
+        final buttonTop = box.localToGlobal(Offset.zero).dy;
+        final viewportTop = scrollBox.localToGlobal(Offset.zero).dy;
+        show = buttonTop < viewportTop;
+      }
+    }
+    if (show != _showFloatingCancel && mounted) {
+      setState(() => _showFloatingCancel = show);
+    }
+  }
 
   @override
   void dispose() {
+    _scrollController.dispose();
     _nameController.dispose();
     _addressController.dispose();
     _ageController.dispose();
+    _yearController.dispose();
+    _monthController.dispose();
+    _dayController.dispose();
+    _yearFocus.dispose();
+    _monthFocus.dispose();
+    _dayFocus.dispose();
     _gradeLevelController.dispose();
     _emergency1Controller.dispose();
     _emergency2Controller.dispose();
@@ -55,12 +101,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final address = app.address;
     final age = app.age?.toString() ?? '';
     final gradeLevel = app.gradeLevel;
+    final birthdate = app.birthdate;
     final isLearner = app.user?.isLearner ?? false;
     final contacts = isLearner ? app.emergencyContacts : const <String>[];
     if (_savedName == name &&
         _savedAddress == address &&
         _savedAge == age &&
         _savedGradeLevel == gradeLevel &&
+        _savedBirthdate == birthdate &&
         _savedEmergencyContacts.join('|') == contacts.join('|')) {
       return;
     }
@@ -68,6 +116,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _savedAddress = address;
     _savedAge = age;
     _savedGradeLevel = gradeLevel;
+    _savedBirthdate = birthdate;
     _savedEmergencyContacts = List.from(contacts);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -82,6 +131,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
       if (_gradeLevelController.text != gradeLevel) {
         _gradeLevelController.text = gradeLevel;
+      }
+      if (_birthdateIso != birthdate ||
+          (birthdate.isNotEmpty && _yearController.text.isEmpty)) {
+        _birthdateIso = birthdate;
+        _setBirthdatePartsFromIso(birthdate);
       }
       if (!isLearner) return;
       final first = contacts.isNotEmpty ? contacts.first : '';
@@ -108,14 +162,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return AppRepository.normalizeEmergencyContacts(raw);
   }
 
-  bool _canSave(AppState app) {
-    final hasName = _nameController.text.trim().isNotEmpty;
-    final hasEmail = (app.user?.email ?? '').trim().isNotEmpty;
-    if (!(app.user?.isLearner ?? false)) {
-      return _editing && !_saving && hasName && hasEmail;
+  bool _hasUnsavedChanges(AppState app) {
+    final isLearner = app.user?.isLearner ?? false;
+    if (_nameController.text.trim() != _savedName) return true;
+    if (_addressController.text.trim() != _savedAddress) return true;
+    if (_ageController.text.trim() != _savedAge) return true;
+    if (_birthdateToSave() != _savedBirthdate) return true;
+    final date = _dateFromParts();
+    final partsEmpty = _yearController.text.isEmpty &&
+        _monthController.text.isEmpty &&
+        _dayController.text.isEmpty;
+    if (!partsEmpty && date == null) return true;
+    if (isLearner && _gradeLevelController.text.trim() != _savedGradeLevel) {
+      return true;
     }
-    final hasPrimaryContact = _emergency1Controller.text.trim().isNotEmpty;
-    return _editing && !_saving && hasName && hasEmail && hasPrimaryContact;
+    if (isLearner) {
+      return _draftEmergencyContacts.join('|') !=
+          _savedEmergencyContacts.join('|');
+    }
+    return false;
+  }
+
+  bool _canSave(AppState app) {
+    return _editing && !_saving && _hasUnsavedChanges(app);
   }
 
   void _cancelEdits() {
@@ -123,6 +192,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _addressController.text = _savedAddress;
     _ageController.text = _savedAge;
     _gradeLevelController.text = _savedGradeLevel;
+    _birthdateIso = _savedBirthdate;
+    _setBirthdatePartsFromIso(_savedBirthdate);
     _emergency1Controller.text = _savedEmergencyContacts.isNotEmpty ? _savedEmergencyContacts[0] : '';
     _emergency2Controller.text = _savedEmergencyContacts.length > 1 ? _savedEmergencyContacts[1] : '';
     _showSecondEmergency = _savedEmergencyContacts.length > 1;
@@ -131,24 +202,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _save(AppState app, AppLanguage lang) async {
-    final name = _nameController.text.trim();
-    final email = (app.user?.email ?? '').trim();
     final isLearner = app.user?.isLearner ?? false;
     final isParent = app.user?.isParent ?? false;
     final isTeacher = app.user?.isTeacher ?? false;
-    if (name.isEmpty || email.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppStrings.fillAllFields(lang))),
-      );
-      return;
-    }
-    if (isLearner && _emergency1Controller.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppStrings.emergencyContactRequired(lang))),
-      );
-      return;
-    }
-
+    final name = _nameController.text.trim();
     final contacts = isLearner ? _draftEmergencyContacts : const <String>[];
     final address = _addressController.text.trim();
     final ageRaw = _ageController.text.trim();
@@ -162,14 +219,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
         );
         return;
       }
+    } else {
+      final fromBirth = _ageFromIso(_birthdateToSave());
+      if (fromBirth != null) age = fromBirth;
     }
     setState(() => _saving = true);
-    final err = await app.updateProfileName(_nameController.text);
+    String? err;
+    if (name.isNotEmpty) {
+      err = await app.updateProfileName(_nameController.text);
+    } else {
+      _nameController.text = _savedName;
+    }
     if (err == null && (isLearner || isParent || isTeacher)) {
+      final birthIso = _birthdateToSave();
+      _birthdateIso = birthIso;
       await app.updateProfileExtras(
         address: address,
         age: age,
         gradeLevel: isLearner ? gradeLevel : '',
+        birthdate: birthIso,
       );
     }
     if (err == null && isLearner) {
@@ -189,6 +257,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _savedAddress = address;
     _savedAge = age?.toString() ?? '';
     _savedGradeLevel = isLearner ? gradeLevel : '';
+    _savedBirthdate = _birthdateIso;
     if (isLearner) {
       _savedEmergencyContacts = List.from(contacts);
     }
@@ -198,6 +267,314 @@ class _ProfileScreenState extends State<ProfileScreen> {
       context,
       title: AppStrings.profileUpdatedTitle(lang),
       message: AppStrings.profileUpdated(lang),
+    );
+  }
+
+  Future<void> _pickBirthdate() async {
+    if (!_editing || _saving) return;
+    final parsed = _dateFromParts() ?? DateTime.tryParse(_birthdateIso);
+    final now = DateTime.now();
+    var initial = parsed ?? DateTime(now.year - 8, now.month, now.day);
+    if (initial.isAfter(now)) initial = now;
+    if (initial.isBefore(DateTime(1920))) initial = DateTime(1920);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(1920),
+      lastDate: now,
+    );
+    if (picked == null || !mounted) return;
+    _applyPickedBirthdate(picked);
+  }
+
+  void _applyPickedBirthdate(DateTime picked) {
+    final iso = _isoDate(picked);
+    final age = _ageFromDate(picked);
+    _syncingLinkedDates = true;
+    _yearController.text = picked.year.toString();
+    _monthController.text = picked.month.toString().padLeft(2, '0');
+    _dayController.text = picked.day.toString().padLeft(2, '0');
+    _birthdateIso = iso;
+    if (age != null) {
+      _ageController.text = age.toString();
+    }
+    _syncingLinkedDates = false;
+    setState(() {});
+  }
+
+  void _setBirthdatePartsFromIso(String iso) {
+    _syncingLinkedDates = true;
+    final parsed = DateTime.tryParse(iso);
+    if (parsed == null) {
+      _yearController.clear();
+      _monthController.clear();
+      _dayController.clear();
+    } else {
+      _yearController.text = parsed.year.toString();
+      _monthController.text = parsed.month.toString().padLeft(2, '0');
+      _dayController.text = parsed.day.toString().padLeft(2, '0');
+    }
+    _syncingLinkedDates = false;
+  }
+
+  DateTime? _dateFromParts() {
+    if (_yearController.text.length != 4) return null;
+    final year = int.tryParse(_yearController.text);
+    final month = int.tryParse(_monthController.text);
+    final day = int.tryParse(_dayController.text);
+    if (year == null || month == null || day == null) return null;
+    if (year < 1920) return null;
+    if (month < 1 || month > 12) return null;
+    final maxDay = DateTime(year, month + 1, 0).day;
+    if (day < 1 || day > maxDay) return null;
+    final date = DateTime(year, month, day);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    if (date.isAfter(today)) return null;
+    return date;
+  }
+
+  String _birthdateToSave() {
+    final date = _dateFromParts();
+    if (date != null) return _isoDate(date);
+    if (_yearController.text.isEmpty &&
+        _monthController.text.isEmpty &&
+        _dayController.text.isEmpty) {
+      return '';
+    }
+    return _birthdateIso;
+  }
+
+  void _applyBirthdateToAge() {
+    if (_syncingLinkedDates) return;
+    final date = _dateFromParts();
+    if (date == null) return;
+    final age = _ageFromDate(date);
+    _syncingLinkedDates = true;
+    _birthdateIso = _isoDate(date);
+    if (age != null && _ageController.text != age.toString()) {
+      _ageController.text = age.toString();
+    }
+    _syncingLinkedDates = false;
+  }
+
+  void _applyAgeToBirthdate() {
+    if (_syncingLinkedDates) return;
+    final age = int.tryParse(_ageController.text.trim());
+    if (age == null || age < 1 || age > 120) return;
+    final now = DateTime.now();
+    var month = int.tryParse(_monthController.text);
+    var day = int.tryParse(_dayController.text);
+    month ??= now.month;
+    day ??= now.day;
+    month = month.clamp(1, 12);
+    final maxThisYear = DateTime(now.year, month + 1, 0).day;
+    final dayThisYear = day.clamp(1, maxThisYear);
+    var year = now.year - age;
+    if (now.month < month || (now.month == month && now.day < dayThisYear)) {
+      year -= 1;
+    }
+    if (year < 1920) year = 1920;
+    if (year > now.year) year = now.year;
+    final maxDay = DateTime(year, month + 1, 0).day;
+    day = day.clamp(1, maxDay);
+    _syncingLinkedDates = true;
+    _yearController.text = year.toString();
+    if (_monthController.text.isNotEmpty) {
+      _monthController.text = month.toString().padLeft(2, '0');
+    }
+    if (_dayController.text.isNotEmpty) {
+      _dayController.text = day.toString().padLeft(2, '0');
+    }
+    if (_monthController.text.isNotEmpty && _dayController.text.isNotEmpty) {
+      _birthdateIso = _isoDate(DateTime(year, month, day));
+    }
+    _syncingLinkedDates = false;
+  }
+
+  void _onYearChanged(String value) {
+    if (_syncingLinkedDates) return;
+    if (value.length == 4) {
+      final year = int.tryParse(value);
+      final nowYear = DateTime.now().year;
+      if (year != null) {
+        var next = year;
+        if (next < 1920) next = 1920;
+        if (next > nowYear) next = nowYear;
+        if (next.toString() != value) {
+          _syncingLinkedDates = true;
+          _yearController.value = TextEditingValue(
+            text: next.toString(),
+            selection: const TextSelection.collapsed(offset: 4),
+          );
+          _syncingLinkedDates = false;
+        }
+      }
+      _monthFocus.requestFocus();
+    }
+    _applyBirthdateToAge();
+    setState(() {});
+  }
+
+  void _onMonthChanged(String value) {
+    if (_syncingLinkedDates) return;
+    if (value.length == 1) {
+      final n = int.tryParse(value);
+      if (n != null && n >= 2 && n <= 9) {
+        _syncingLinkedDates = true;
+        _monthController.value = TextEditingValue(
+          text: '0$n',
+          selection: const TextSelection.collapsed(offset: 2),
+        );
+        _syncingLinkedDates = false;
+        _dayFocus.requestFocus();
+      }
+    } else if (value.length == 2) {
+      var n = int.tryParse(value) ?? 0;
+      if (n == 0) n = 1;
+      if (n > 12) n = 12;
+      final padded = n.toString().padLeft(2, '0');
+      if (padded != value) {
+        _syncingLinkedDates = true;
+        _monthController.value = TextEditingValue(
+          text: padded,
+          selection: const TextSelection.collapsed(offset: 2),
+        );
+        _syncingLinkedDates = false;
+      }
+      _dayFocus.requestFocus();
+    }
+    _applyBirthdateToAge();
+    setState(() {});
+  }
+
+  void _onDayChanged(String value) {
+    if (_syncingLinkedDates) return;
+    if (value.length == 1) {
+      final n = int.tryParse(value);
+      if (n != null && n >= 4 && n <= 9) {
+        _syncingLinkedDates = true;
+        _dayController.value = TextEditingValue(
+          text: '0$n',
+          selection: const TextSelection.collapsed(offset: 2),
+        );
+        _syncingLinkedDates = false;
+      }
+    } else if (value.length == 2) {
+      var n = int.tryParse(value) ?? 0;
+      final year = int.tryParse(_yearController.text);
+      final month = int.tryParse(_monthController.text);
+      var maxDay = 31;
+      if (year != null && month != null && month >= 1 && month <= 12) {
+        maxDay = DateTime(year, month + 1, 0).day;
+      }
+      if (n == 0) n = 1;
+      if (n > maxDay) n = maxDay;
+      final padded = n.toString().padLeft(2, '0');
+      if (padded != value) {
+        _syncingLinkedDates = true;
+        _dayController.value = TextEditingValue(
+          text: padded,
+          selection: const TextSelection.collapsed(offset: 2),
+        );
+        _syncingLinkedDates = false;
+      }
+    }
+    _applyBirthdateToAge();
+    setState(() {});
+  }
+
+  Widget _birthdateEditor(TapTalkThemeToken theme, AppLanguage lang) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          AppStrings.birthdate(lang),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: GoogleFonts.poppins(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: theme.textMain.withValues(alpha: 0.85),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+            _DatePartField(
+              controller: _yearController,
+              focusNode: _yearFocus,
+              enabled: _editing,
+              theme: theme,
+              hint: 'YYYY',
+              maxLength: 4,
+              width: 52,
+              onChanged: _editing ? _onYearChanged : null,
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              child: Text(
+                '/',
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: theme.textMain.withValues(alpha: 0.45),
+                ),
+              ),
+            ),
+            _DatePartField(
+              controller: _monthController,
+              focusNode: _monthFocus,
+              enabled: _editing,
+              theme: theme,
+              hint: 'MM',
+              maxLength: 2,
+              width: 36,
+              onChanged: _editing ? _onMonthChanged : null,
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              child: Text(
+                '/',
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: theme.textMain.withValues(alpha: 0.45),
+                ),
+              ),
+            ),
+            _DatePartField(
+              controller: _dayController,
+              focusNode: _dayFocus,
+              enabled: _editing,
+              theme: theme,
+              hint: 'DD',
+              maxLength: 2,
+              width: 36,
+              onChanged: _editing ? _onDayChanged : null,
+            ),
+            IconButton(
+              onPressed: _editing && !_saving ? _pickBirthdate : null,
+              tooltip: AppStrings.birthdate(lang),
+              padding: const EdgeInsets.all(4),
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              visualDensity: VisualDensity.compact,
+              icon: Icon(
+                Icons.calendar_month_rounded,
+                size: 18,
+                color: _editing
+                    ? theme.bgAccent
+                    : theme.textMain.withValues(alpha: 0.35),
+              ),
+            ),
+          ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -224,58 +601,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _syncFromUser(app);
 
     return LearnerScaffold(
-      title: AppStrings.appName(lang),
-      titleWidget: const TapTalkHeaderWordmark(),
+      title: AppStrings.profile(lang),
+      titleWidget: SizedBox(
+        height: 85,
+        child: Center(
+          child: Text(
+            AppStrings.profile(lang),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.poppins(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: theme.textMain,
+            ),
+          ),
+        ),
+      ),
       currentRoute: AppRoute.profile,
+      headerContentHeight: 85,
       headerBottomSpacing: 0,
       bodyTopOffset: -4,
       showBottomNav: true,
-      body: ListView(
-        padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
+      body: Stack(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              0,
-              AppSpacing.lg,
-              0,
-            ),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(AppSpacing.md),
-              decoration: BoxDecoration(
-                color: theme.bgMid.withValues(alpha: 0.55),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    AppStrings.myProfile(lang),
-                    style: GoogleFonts.poppins(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      color: theme.textMain,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    AppStrings.profileSubtitle(lang),
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      color: theme.textMain.withValues(alpha: 0.72),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          PanelCard(
+          ListView(
+            controller: _scrollController,
+            padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
+            children: [
+              PanelCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Expanded(
                       child: Text(
@@ -284,54 +643,52 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           fontSize: 15,
                           fontWeight: FontWeight.w800,
                           color: theme.textMain,
+                          height: 1.1,
                         ),
                       ),
                     ),
-                    if (_editing)
-                      TextButton(
-                        onPressed: _saving ? null : _cancelEdits,
-                        style: TextButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: theme.textMain,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.md,
-                            vertical: AppSpacing.xs,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                          ),
+                    TextButton(
+                      key: _editCancelKey,
+                      onPressed: _editing
+                          ? (_saving ? null : _cancelEdits)
+                          : () {
+                              setState(() => _editing = true);
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                _syncFloatingCancel();
+                              });
+                            },
+                      style: TextButton.styleFrom(
+                        backgroundColor: _editing
+                            ? Colors.transparent
+                            : theme.bgAccent.withValues(alpha: 0.10),
+                        foregroundColor: theme.textMain,
+                        minimumSize: Size.zero,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 6,
                         ),
-                        child: Text(
-                          AppStrings.cancel(lang),
-                          style: GoogleFonts.poppins(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: Text(
+                        _editing
+                            ? AppStrings.cancel(lang)
+                            : AppStrings.edit(lang),
+                        style: GoogleFonts.poppins(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
-                    if (!_editing)
-                      TextButton(
-                        onPressed: () => setState(() => _editing = true),
-                        style: TextButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: theme.textMain,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.md,
-                            vertical: AppSpacing.xs,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                          ),
-                        ),
-                        child: Text(
-                          AppStrings.edit(lang),
-                          style: GoogleFonts.poppins(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
+                    ),
                   ],
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  AppStrings.profileSubtitle(lang),
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    color: theme.textMain.withValues(alpha: 0.72),
+                    height: 1.35,
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.md),
                 _ProfileField(
@@ -360,6 +717,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     onChanged: _editing ? (_) => setState(() {}) : null,
                   ),
                   const SizedBox(height: AppSpacing.md),
+                  _birthdateEditor(theme, lang),
+                  const SizedBox(height: AppSpacing.md),
                   if (user?.isLearner ?? false)
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -375,7 +734,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               FilteringTextInputFormatter.digitsOnly,
                               LengthLimitingTextInputFormatter(3),
                             ],
-                            onChanged: _editing ? (_) => setState(() {}) : null,
+                            onChanged: _editing
+                                ? (value) {
+                                    _applyAgeToBirthdate();
+                                    setState(() {});
+                                  }
+                                : null,
                           ),
                         ),
                         const SizedBox(width: AppSpacing.sm),
@@ -401,7 +765,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         FilteringTextInputFormatter.digitsOnly,
                         LengthLimitingTextInputFormatter(3),
                       ],
-                      onChanged: _editing ? (_) => setState(() {}) : null,
+                      onChanged: _editing
+                          ? (value) {
+                              _applyAgeToBirthdate();
+                              setState(() {});
+                            }
+                          : null,
                     ),
                 ],
                 if (user?.isLearner ?? false) ...[
@@ -468,16 +837,49 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(height: AppSpacing.xs),
                   Row(
                     children: [
-                      Expanded(
-                        child: Text(
-                          app.profileCode,
-                          style: GoogleFonts.poppins(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: theme.textMain,
+                      Flexible(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            app.profileCode,
+                            maxLines: 1,
+                            style: GoogleFonts.poppins(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: theme.textMain,
+                            ),
                           ),
                         ),
                       ),
+                      IconButton(
+                        onPressed: app.profileCode.isEmpty
+                            ? null
+                            : () async {
+                                await Clipboard.setData(
+                                  ClipboardData(text: app.profileCode),
+                                );
+                                if (!context.mounted) return;
+                                await TapTalkResultDialog.showSuccess(
+                                  context,
+                                  title: AppStrings.copiedTitle(lang),
+                                  message: AppStrings.copied(lang),
+                                );
+                              },
+                        tooltip: AppStrings.copy(lang),
+                        padding: const EdgeInsets.all(4),
+                        constraints: const BoxConstraints(
+                          minWidth: 28,
+                          minHeight: 28,
+                        ),
+                        visualDensity: VisualDensity.compact,
+                        icon: Icon(
+                          Icons.copy_rounded,
+                          size: 16,
+                          color: theme.bgAccent,
+                        ),
+                      ),
+                      const Spacer(),
                       OutlinedButton(
                         onPressed: app.profileCode.isEmpty
                             ? null
@@ -509,40 +911,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           color: theme.textMain.withValues(alpha: 0.85),
                         ),
                       ),
-                      const SizedBox(width: AppSpacing.sm),
-                      FilledButton(
-                        onPressed: app.profileCode.isEmpty
-                            ? null
-                            : () async {
-                                await Clipboard.setData(
-                                  ClipboardData(text: app.profileCode),
-                                );
-                                if (!context.mounted) return;
-                                await TapTalkResultDialog.showSuccess(
-                                  context,
-                                  title: AppStrings.copiedTitle(lang),
-                                  message: AppStrings.copied(lang),
-                                );
-                              },
-                        style: FilledButton.styleFrom(
-                          backgroundColor: theme.bgAccent,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.lg,
-                            vertical: AppSpacing.sm,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                          ),
-                        ),
-                        child: Text(
-                          AppStrings.copy(lang),
-                          style: GoogleFonts.poppins(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
                     ],
                   ),
                   const SizedBox(height: AppSpacing.sm),
@@ -556,84 +924,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ],
                 const SizedBox(height: AppSpacing.lg),
-                if (_editing)
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: _saving ? null : _cancelEdits,
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: theme.textMain,
-                            minimumSize: const Size.fromHeight(48),
-                            side: BorderSide(
-                              color: theme.textMain.withValues(alpha: 0.25),
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.circular(AppSpacing.radiusMd),
-                            ),
-                          ),
-                          child: Text(
-                            AppStrings.cancel(lang),
-                            style: GoogleFonts.poppins(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
+                if (_editing && (_hasUnsavedChanges(app) || _saving))
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton(
+                      onPressed: _canSave(app) ? () => _save(app, lang) : null,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: theme.bgAccent,
+                        foregroundColor: Colors.white,
+                        minimumSize: Size.zero,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 8,
+                        ),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(AppSpacing.radiusSm),
                         ),
                       ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: FilledButton(
-                          onPressed:
-                              _canSave(app) ? () => _save(app, lang) : null,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: theme.bgAccent,
-                            foregroundColor: Colors.white,
-                            minimumSize: const Size.fromHeight(48),
-                            shape: RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.circular(AppSpacing.radiusMd),
+                      child: _saving
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Text(
+                              AppStrings.saveChanges(lang),
+                              style: GoogleFonts.poppins(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
-                          ),
-                          child: _saving
-                              ? const SizedBox(
-                                  width: 22,
-                                  height: 22,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : Text(
-                                  AppStrings.saveChanges(lang),
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                        ),
-                      ),
-                    ],
-                  )
-                else
-                  FilledButton(
-                    onPressed: null,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: theme.bgAccent,
-                      foregroundColor: Colors.white,
-                      minimumSize: const Size.fromHeight(48),
-                      shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(AppSpacing.radiusMd),
-                      ),
-                    ),
-                    child: Text(
-                      AppStrings.saveChanges(lang),
-                      style: GoogleFonts.poppins(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ),
                     ),
                   ),
               ],
@@ -679,6 +1004,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
             ),
           ),
+            ],
+          ),
+          if (_editing && _showFloatingCancel)
+            Positioned(
+              right: AppSpacing.lg,
+              top: AppSpacing.sm,
+              child: Material(
+                color: Colors.white,
+                elevation: 4,
+                borderRadius: BorderRadius.circular(20),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: _saving ? null : _cancelEdits,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 13,
+                      vertical: 7,
+                    ),
+                    child: Text(
+                      AppStrings.cancel(lang),
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: theme.textMain,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -823,6 +1178,94 @@ class _EditPasswordDialogState extends State<_EditPasswordDialog> {
   }
 }
 
+String _isoDate(DateTime d) {
+  final y = d.year.toString().padLeft(4, '0');
+  final m = d.month.toString().padLeft(2, '0');
+  final day = d.day.toString().padLeft(2, '0');
+  return '$y-$m-$day';
+}
+
+int? _ageFromDate(DateTime birth) {
+  final now = DateTime.now();
+  var age = now.year - birth.year;
+  final hadBirthday = now.month > birth.month ||
+      (now.month == birth.month && now.day >= birth.day);
+  if (!hadBirthday) age--;
+  if (age < 1 || age > 120) return null;
+  return age;
+}
+
+int? _ageFromIso(String iso) {
+  final parsed = DateTime.tryParse(iso);
+  if (parsed == null) return null;
+  return _ageFromDate(parsed);
+}
+
+class _DatePartField extends StatelessWidget {
+  const _DatePartField({
+    required this.controller,
+    required this.focusNode,
+    required this.enabled,
+    required this.theme,
+    required this.hint,
+    required this.maxLength,
+    required this.width,
+    this.onChanged,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final bool enabled;
+  final TapTalkThemeToken theme;
+  final String hint;
+  final int maxLength;
+  final double width;
+  final ValueChanged<String>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      child: TextField(
+        controller: controller,
+        focusNode: focusNode,
+        enabled: enabled,
+        onChanged: onChanged,
+        keyboardType: TextInputType.number,
+        textAlign: TextAlign.center,
+        inputFormatters: [
+          FilteringTextInputFormatter.digitsOnly,
+          LengthLimitingTextInputFormatter(maxLength),
+        ],
+        style: GoogleFonts.poppins(
+          fontSize: 12,
+          fontWeight: FontWeight.w400,
+          color: theme.textMain,
+        ),
+        decoration: InputDecoration(
+          isDense: true,
+          filled: true,
+          fillColor: Colors.white,
+          hintText: hint,
+          hintStyle: GoogleFonts.poppins(
+            fontSize: 11,
+            fontWeight: FontWeight.w400,
+            color: theme.textMain.withValues(alpha: 0.4),
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 4,
+            vertical: AppSpacing.sm,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+            borderSide: BorderSide.none,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ProfileReadOnlyValue extends StatelessWidget {
   const _ProfileReadOnlyValue({
     required this.label,
@@ -851,8 +1294,8 @@ class _ProfileReadOnlyValue extends StatelessWidget {
         Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md,
-            vertical: AppSpacing.md,
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.sm,
           ),
           decoration: BoxDecoration(
             color: Colors.white,
@@ -861,7 +1304,7 @@ class _ProfileReadOnlyValue extends StatelessWidget {
           child: Text(
             value,
             style: GoogleFonts.poppins(
-              fontSize: 14,
+              fontSize: 12,
               fontWeight: FontWeight.w400,
               color: theme.textMain,
             ),
@@ -923,22 +1366,23 @@ class _ProfileField extends StatelessWidget {
           keyboardType: keyboardType,
           inputFormatters: inputFormatters,
           style: GoogleFonts.poppins(
-            fontSize: 14,
+            fontSize: 12,
             fontWeight: FontWeight.w400,
             color: theme.textMain,
           ),
           decoration: InputDecoration(
+            isDense: true,
             filled: true,
             fillColor: Colors.white,
             hintText: hintText,
             hintStyle: GoogleFonts.poppins(
-              fontSize: 13,
+              fontSize: 12,
               fontWeight: FontWeight.w400,
               color: theme.textMain.withValues(alpha: 0.45),
             ),
             contentPadding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.md,
-              vertical: AppSpacing.md,
+              horizontal: AppSpacing.sm,
+              vertical: AppSpacing.sm,
             ),
             suffixIcon: onToggleObscure == null
                 ? null

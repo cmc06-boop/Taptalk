@@ -132,7 +132,7 @@ class CategoryGridCard extends StatelessWidget {
                         ? Image.asset(
                             imagePath,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, _e, _s) =>
+                            errorBuilder: (_, e, s) =>
                                 _FallbackIcon(category: category),
                           )
                         : _FallbackIcon(category: category),

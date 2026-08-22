@@ -11,7 +11,6 @@ import '../data/models/history_model.dart';
 import '../data/repositories/app_repository.dart';
 import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
-import '../widgets/taptalk_logo.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -147,17 +146,42 @@ class _HistoryScreenState extends State<HistoryScreen> {
         if (widgets.isNotEmpty) {
           widgets.add(const SizedBox(height: AppSpacing.sm));
         }
+        final dateLabel = Text(
+          dateFormat.format(day),
+          style: GoogleFonts.poppins(
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
+            color: theme.textMain,
+          ),
+        );
         widgets.add(
           Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-            child: Text(
-              dateFormat.format(day),
-              style: GoogleFonts.poppins(
-                fontSize: 14,
-                fontWeight: FontWeight.w800,
-                color: theme.textMain,
-              ),
-            ),
+            child: previousDay == null
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(child: dateLabel),
+                      TextButton(
+                        onPressed: () => _clearAll(lang),
+                        style: TextButton.styleFrom(
+                          foregroundColor: theme.bgAccent,
+                          padding: EdgeInsets.zero,
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: Text(
+                          AppStrings.clearAll(lang),
+                          style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: theme.bgAccent,
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                : dateLabel,
           ),
         );
         previousDay = day;
@@ -181,9 +205,25 @@ class _HistoryScreenState extends State<HistoryScreen> {
     _mergeNewHistory(app.history);
 
     return LearnerScaffold(
-      title: AppStrings.appName(lang),
-      titleWidget: const TapTalkHeaderWordmark(),
+      title: AppStrings.history(lang),
+      titleWidget: SizedBox(
+        height: 85,
+        child: Center(
+          child: Text(
+            AppStrings.history(lang),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.poppins(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: theme.textMain,
+            ),
+          ),
+        ),
+      ),
       currentRoute: AppRoute.history,
+      headerContentHeight: 85,
       headerBottomSpacing: 0,
       bodyTopOffset: -4,
       body: RefreshIndicator(
@@ -198,36 +238,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
             AppSpacing.xxl,
           ),
           children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(AppSpacing.md),
-              decoration: BoxDecoration(
-                color: theme.bgMid.withValues(alpha: 0.55),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    AppStrings.history(lang),
-                    style: GoogleFonts.poppins(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      color: theme.textMain,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    AppStrings.historySubtitle(lang),
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      color: theme.textMain.withValues(alpha: 0.72),
-                      height: 1.35,
-                    ),
-                  ),
-                ],
-              ),
-            ),
             if (_items.isEmpty)
               SizedBox(
                 width: double.infinity,
@@ -243,28 +253,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 ),
               )
             else ...[
-              const SizedBox(height: AppSpacing.md),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => _clearAll(lang),
-                  style: TextButton.styleFrom(
-                    foregroundColor: theme.bgAccent,
-                    padding: EdgeInsets.zero,
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: Text(
-                    AppStrings.clearAll(lang),
-                    style: GoogleFonts.poppins(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: theme.bgAccent,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xs),
               ..._buildDatedHistory(lang, theme),
             ],
           ],
@@ -317,121 +305,174 @@ class _HistoryCard extends StatelessWidget {
         ),
         child: const Icon(Icons.delete_outline_rounded, color: Colors.white),
       ),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.md,
-        ),
-        decoration: BoxDecoration(
-          color: theme.bgMid.withValues(alpha: 0.88),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => _showFullInfo(
+            context,
+            phraseText: phraseText,
+            chipLabel: item.isLessonEntry ? lessonClassName! : categoryLabel,
+            lessonTitle: lessonTitle,
+          ),
           borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-              color: theme.textMain.withValues(alpha: 0.18),
-              blurRadius: 3,
-              spreadRadius: 0.15,
-              offset: Offset.zero,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg,
+              vertical: 16,
             ),
-          ],
+            decoration: BoxDecoration(
+              color: theme.bgMid.withValues(alpha: 0.88),
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: theme.textMain.withValues(alpha: 0.07),
+                  blurRadius: 2,
+                  spreadRadius: 0,
+                  offset: const Offset(0, 1),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: _categoryChip(
+                        item.isLessonEntry ? lessonClassName! : categoryLabel,
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Text(
+                      formattedTime,
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: theme.textMain.withValues(alpha: 0.58),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  phraseText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: theme.textMain,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: onSpeak,
-                  borderRadius: BorderRadius.circular(10),
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: AppSpacing.xs),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (item.isLessonEntry) ...[
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.sm,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: theme.bgAccent,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Text(
-                              lessonClassName!,
-                              style: GoogleFonts.poppins(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                          if (item.text.trim() !=
-                              item.lessonContext!.lessonTitle.trim()) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              lessonTitle!,
-                              style: GoogleFonts.poppins(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: theme.textMain.withValues(alpha: 0.75),
-                              ),
-                            ),
-                          ],
-                        ] else
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.sm,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: theme.bgAccent,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Text(
-                              categoryLabel,
-                              style: GoogleFonts.poppins(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        const SizedBox(height: AppSpacing.sm),
-                        Text(
-                          phraseText,
-                          style: GoogleFonts.poppins(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: theme.textMain,
-                            height: 1.3,
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(
-                            left: AppSpacing.sm,
-                            top: 2,
-                          ),
-                          child: Text(
-                            formattedTime,
-                            style: GoogleFonts.poppins(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                              color: theme.textMain.withValues(alpha: 0.58),
-                            ),
-                          ),
-                        ),
-                      ],
+      ),
+    );
+  }
+
+  Widget _categoryChip(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: 4,
+      ),
+      decoration: BoxDecoration(
+        color: theme.bgAccent,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: GoogleFonts.poppins(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
+
+  void _showFullInfo(
+    BuildContext context, {
+    required String phraseText,
+    required String chipLabel,
+    required String? lessonTitle,
+  }) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 14, 12, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    _categoryChip(chipLabel),
+                    const Spacer(),
+                    Text(
+                      formattedTime,
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: theme.textMain.withValues(alpha: 0.58),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: theme.textMain.withValues(alpha: 0.7),
+                      ),
+                    ),
+                  ],
+                ),
+                if (item.isLessonEntry &&
+                    lessonTitle != null &&
+                    item.text.trim() !=
+                        item.lessonContext!.lessonTitle.trim()) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    lessonTitle,
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: theme.textMain.withValues(alpha: 0.75),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: AppSpacing.md),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 280),
+                  child: SingleChildScrollView(
+                    child: Text(
+                      phraseText,
+                      style: GoogleFonts.poppins(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: theme.textMain,
+                        height: 1.4,
+                      ),
                     ),
                   ),
                 ),
-              ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

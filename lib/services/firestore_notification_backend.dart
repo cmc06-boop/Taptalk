@@ -655,6 +655,10 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     if (gradeLevel != null && gradeLevel.isNotEmpty) {
       payload['gradeLevel'] = gradeLevel;
     }
+    final birthdate = profile.birthdate?.trim();
+    if (birthdate != null && birthdate.isNotEmpty) {
+      payload['birthdate'] = birthdate;
+    }
     await FirebaseFirestore.instance
         .collection(userProfileCollectionName)
         .doc(profile.firebaseUid.trim())
@@ -742,6 +746,7 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       address: data['address'] as String?,
       age: (data['age'] as num?)?.toInt(),
       gradeLevel: data['gradeLevel'] as String?,
+      birthdate: data['birthdate'] as String?,
     );
   }
 

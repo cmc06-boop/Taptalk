@@ -144,6 +144,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   String _address = '';
   int? _age;
   String _gradeLevel = '';
+  String _birthdate = '';
 
   List<CategoryModel> _categories = [];
   List<PhraseModel> _phrases = [];
@@ -348,6 +349,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   String get address => _address;
   int? get age => _age;
   String get gradeLevel => _gradeLevel;
+  String get birthdate => _birthdate;
 
   /// First name from sign-up (For Me welcome). Never uses email.
   String welcomeFirstName(AppLanguage lang) {
@@ -789,8 +791,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _startLearnerEnrollmentSync() async {
-    if (_user == null || !_user!.isLearner || !CloudScope.syncMonitoring)
+    if (_user == null || !_user!.isLearner || !CloudScope.syncMonitoring) {
       return;
+    }
     final uid = await _learnerFirebaseUidForSync();
     if (uid == null || uid.isEmpty) return;
     await _notificationSync.startLearnerEnrollmentSync(
@@ -877,6 +880,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       _age = null;
     }
     _gradeLevel = (settings['grade_level'] as String?)?.trim() ?? '';
+    _birthdate = (settings['birthdate'] as String?)?.trim() ?? '';
   }
 
   Future<void> _startPersonalBoardSync() async {
@@ -974,8 +978,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _startTeacherMonitoringSync() async {
-    if (_user == null || !_user!.isTeacher || !CloudScope.syncMonitoring)
+    if (_user == null || !_user!.isTeacher || !CloudScope.syncMonitoring) {
       return;
+    }
     final teacherFirebaseUid = await _resolveAccountFirebaseUid();
     if (teacherFirebaseUid == null) return;
     await _notificationSync.startTeacherMonitoringSync(
@@ -1023,8 +1028,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _startTeacherJoinRequestSync() async {
-    if (_user == null || !_user!.isTeacher || !CloudScope.syncMonitoring)
+    if (_user == null || !_user!.isTeacher || !CloudScope.syncMonitoring) {
       return;
+    }
     final teacherFirebaseUid = await _resolveAccountFirebaseUid();
     if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) return;
     await _syncJoinRequestsFromCloudForTeacher();
@@ -1048,8 +1054,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _startLearnerJoinRequestSync() async {
-    if (_user == null || !_user!.isLearner || !CloudScope.syncMonitoring)
+    if (_user == null || !_user!.isLearner || !CloudScope.syncMonitoring) {
       return;
+    }
     final uid = await _learnerFirebaseUidForSync();
     if (uid == null || uid.isEmpty) return;
     await _notificationSync.startLearnerJoinRequestSync(
@@ -1370,6 +1377,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _address = '';
     _age = null;
     _gradeLevel = '';
+    _birthdate = '';
   }
 
   void _resetAccountSession() {
@@ -1536,6 +1544,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         address: _address.isEmpty ? null : _address,
         age: _age,
         gradeLevel: _gradeLevel.isEmpty ? null : _gradeLevel,
+        birthdate: _birthdate.isEmpty ? null : _birthdate,
       ),
     );
 
@@ -1583,6 +1592,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       gradeLevel: (profile.gradeLevel?.trim().isNotEmpty ?? false)
           ? profile.gradeLevel
           : cloudSource.gradeLevel,
+      birthdate: (profile.birthdate?.trim().isNotEmpty ?? false)
+          ? profile.birthdate
+          : cloudSource.birthdate,
     );
   }
 
@@ -2531,8 +2543,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> renameCustomCategory(CategoryModel category, String name) async {
-    if (_user == null || !isCustomCategory(category) || name.trim().isEmpty)
+    if (_user == null || !isCustomCategory(category) || name.trim().isEmpty) {
       return;
+    }
     await _repo.renameCategory(_user!.id, category.key, name);
     await _refreshPersonalBoard();
     notifyListeners();
@@ -3100,8 +3113,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   void _startPendingActivitySyncTimer() {
     _pendingActivitySyncTimer?.cancel();
-    if (_user == null || !_user!.isLearner || !CloudScope.syncMonitoring)
+    if (_user == null || !_user!.isLearner || !CloudScope.syncMonitoring) {
       return;
+    }
     _pendingActivitySyncTimer = Timer.periodic(
       MonitoringConstants.pendingActivitySyncInterval,
       (_) => unawaited(_syncPendingLearnerActivityToCloud()),
@@ -4771,8 +4785,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _refreshEnrolledClassTeacherNamesFromCloud() async {
     if (_user == null || !_user!.isLearner) return;
-    if (!CloudScope.syncMonitoring || !_notificationSync.isCloudAvailable)
+    if (!CloudScope.syncMonitoring || !_notificationSync.isCloudAvailable) {
       return;
+    }
     if (await NetworkStatus.isOffline()) return;
 
     final classes = await _repo.getEnrolledClasses(_user!.id);
@@ -4896,8 +4911,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _pruneEnrollmentsForDeletedCloudClasses(
     int learnerUserId,
   ) async {
-    if (!CloudScope.syncMonitoring || !_notificationSync.isCloudAvailable)
+    if (!CloudScope.syncMonitoring || !_notificationSync.isCloudAvailable) {
       return;
+    }
     final local = await _repo.getEnrolledClasses(learnerUserId);
     for (final enrolled in local) {
       final code = AppRepository.normalizeClassCode(enrolled.classCode);
@@ -5931,18 +5947,23 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     required String address,
     int? age,
     required String gradeLevel,
+    String birthdate = '',
   }) async {
     if (_user == null) return AppStrings.notSignedIn(_language);
+    final trimmedBirth = birthdate.trim();
     await _repo.updateUserSettings(
       _user!.id,
       address: address,
       age: age,
       clearAge: age == null,
       gradeLevel: gradeLevel,
+      birthdate: trimmedBirth,
+      clearBirthdate: trimmedBirth.isEmpty,
     );
     _address = address.trim();
     _age = age;
     _gradeLevel = gradeLevel.trim();
+    _birthdate = trimmedBirth;
     if (CloudScope.syncMonitoring) {
       await FirebaseService.instance.initialize();
       await _notificationSync.initialize();

@@ -402,6 +402,7 @@ class RemoteUserProfile {
     this.address,
     this.age,
     this.gradeLevel,
+    this.birthdate,
   });
 
   final String firebaseUid;
@@ -416,6 +417,7 @@ class RemoteUserProfile {
   final String? address;
   final int? age;
   final String? gradeLevel;
+  final String? birthdate;
 }
 
 /// Phrase tap / history event synced for cross-device monitoring.

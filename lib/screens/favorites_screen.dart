@@ -13,7 +13,6 @@ import '../providers/app_state.dart';
 import '../widgets/category_icon.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/phrase_card.dart';
-import '../widgets/taptalk_logo.dart';
 import '../widgets/view_phrase_dialog.dart';
 
 class FavoritesScreen extends StatefulWidget {
@@ -135,6 +134,20 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     }
   }
 
+  double _favoritesCategoryItemWidth(String label) {
+    final style = GoogleFonts.poppins(
+      fontSize: 9.7,
+      height: 1.2,
+      fontWeight: FontWeight.w700,
+    );
+    final painter = TextPainter(
+      text: TextSpan(text: label, style: style),
+      maxLines: 1,
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return painter.width.ceilToDouble().clamp(36.0, 200.0) + 2;
+  }
+
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
@@ -154,9 +167,25 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
         .toList();
 
     return LearnerScaffold(
-      title: AppStrings.appName(lang),
-      titleWidget: const TapTalkHeaderWordmark(),
+      title: AppStrings.favorites(lang),
+      titleWidget: SizedBox(
+        height: 85,
+        child: Center(
+          child: Text(
+            AppStrings.favorites(lang),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.poppins(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: theme.textMain,
+            ),
+          ),
+        ),
+      ),
       currentRoute: AppRoute.favorites,
+      headerContentHeight: 85,
       headerBottomSpacing: 0,
       bodyTopOffset: -4,
       onMicTap: () => app.setRoute(AppRoute.home),
@@ -173,7 +202,13 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
                 child: Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.all(AppSpacing.md),
+                  clipBehavior: Clip.hardEdge,
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.md,
+                    AppSpacing.md,
+                    AppSpacing.md,
+                    AppSpacing.sm,
+                  ),
                   decoration: BoxDecoration(
                     color: theme.bgMid.withValues(alpha: 0.55),
                     borderRadius: BorderRadius.circular(14),
@@ -182,20 +217,64 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        AppStrings.favorites(lang),
+                        AppStrings.categories(lang),
                         style: GoogleFonts.poppins(
-                          fontSize: 22,
+                          fontSize: 14,
                           fontWeight: FontWeight.w800,
                           color: theme.textMain,
                         ),
                       ),
                       const SizedBox(height: AppSpacing.xs),
-                      Text(
-                        AppStrings.favoritesHint(lang),
-                        style: GoogleFonts.poppins(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w400,
-                          color: theme.textMain.withValues(alpha: 0.78),
+                      SizedBox(
+                        height: 64,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          padding: EdgeInsets.zero,
+                          itemCount: topLevelCategories.length + 1,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(width: 15),
+                          itemBuilder: (context, i) {
+                            if (i == 0) {
+                              final active = filterKey == _allCategoriesKey;
+                              final allLabel = AppStrings.all(lang);
+                              return _FavoritesCategoryItem(
+                                width: _favoritesCategoryItemWidth(allLabel),
+                                active: active,
+                                label: allLabel,
+                                accent: theme.bgAccent,
+                                textColor: theme.textMain,
+                                icon: Icon(
+                                  Icons.grid_view_rounded,
+                                  size: 18,
+                                  color: active
+                                      ? Colors.white
+                                      : theme.bgAccent,
+                                ),
+                                onTap: () => setState(
+                                  () => _filterCategoryKey = _allCategoriesKey,
+                                ),
+                              );
+                            }
+                            final cat = topLevelCategories[i - 1];
+                            final active = cat.key == filterKey;
+                            final catLabel = app.localizedCategoryName(cat);
+                            return _FavoritesCategoryItem(
+                              width: _favoritesCategoryItemWidth(catLabel),
+                              active: active,
+                              label: catLabel,
+                              accent: theme.bgAccent,
+                              textColor: theme.textMain,
+                              icon: CategoryIcon(
+                                category: cat,
+                                size: 18,
+                                color: active
+                                    ? Colors.white
+                                    : theme.bgAccent,
+                              ),
+                              onTap: () =>
+                                  setState(() => _filterCategoryKey = cat.key),
+                            );
+                          },
                         ),
                       ),
                     ],
@@ -205,169 +284,165 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
               const SizedBox(height: AppSpacing.lg),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-                child: Text(
-                  AppStrings.categories(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                    color: theme.textMain,
-                  ),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              SizedBox(
-                height: 48,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.lg,
-                  ),
-                  itemCount: topLevelCategories.length + 1,
-                  separatorBuilder: (_, _) =>
-                      const SizedBox(width: AppSpacing.sm),
-                  itemBuilder: (context, i) {
-                    if (i == 0) {
-                      final active = filterKey == _allCategoriesKey;
-                      return FilterChip(
-                        selected: active,
-                        showCheckmark: false,
-                        label: Text(AppStrings.all(lang)),
-                        labelStyle: GoogleFonts.poppins(
-                          fontSize: 12,
-                          fontWeight: active
-                              ? FontWeight.w700
-                              : FontWeight.w600,
-                          color: active ? Colors.white : theme.textMain,
-                        ),
-                        selectedColor: theme.bgAccent,
-                        backgroundColor: Colors.white.withValues(alpha: 0.88),
-                        elevation: active ? 0 : 2,
-                        shadowColor: theme.textMain.withValues(alpha: 0.16),
-                        side: active
-                            ? BorderSide(color: theme.bgMid, width: 1.5)
-                            : BorderSide.none,
-                        onSelected: (_) => setState(
-                          () => _filterCategoryKey = _allCategoriesKey,
-                        ),
-                      );
-                    }
-                    final cat = topLevelCategories[i - 1];
-                    final active = cat.key == filterKey;
-                    return FilterChip(
-                      selected: active,
-                      showCheckmark: false,
-                      avatar: CategoryIcon(
-                        category: cat,
-                        size: 16,
-                        color: active ? Colors.white : cat.accentColor,
-                      ),
-                      label: Text(app.localizedCategoryName(cat)),
-                      labelStyle: GoogleFonts.poppins(
-                        fontSize: 12,
-                        fontWeight: active ? FontWeight.w700 : FontWeight.w600,
-                        color: active ? Colors.white : theme.textMain,
-                      ),
-                      selectedColor: theme.bgAccent,
-                      backgroundColor: Colors.white.withValues(alpha: 0.88),
-                      elevation: active ? 0 : 2,
-                      shadowColor: theme.textMain.withValues(alpha: 0.16),
-                      side: active
-                          ? BorderSide(color: theme.bgMid, width: 1.5)
-                          : BorderSide.none,
-                      onSelected: (_) =>
-                          setState(() => _filterCategoryKey = cat.key),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: AppSpacing.lg),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-                child: Text(
-                  AppStrings.favoritePhrases(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                    color: theme.textMain,
-                  ),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              if (favoriteItems.isEmpty)
-                SizedBox(
-                  width: double.infinity,
-                  height: MediaQuery.sizeOf(context).height * 0.38,
-                  child: Center(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.xl,
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Text(
-                            AppStrings.emptyFavoritesDesign(lang),
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.poppins(
-                              fontSize: 14,
-                              color: theme.bgAccent.withValues(alpha: 0.85),
-                              height: 1.5,
-                            ),
-                          ),
-                        ],
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      AppStrings.favoritePhrases(lang),
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: theme.textMain,
+                        height: 1.1,
                       ),
                     ),
-                  ),
-                )
-              else
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.lg,
-                  ),
-                  child: GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate: AppSpacing.phraseGridDelegate(context),
-                    itemCount: favoriteItems.length,
-                    itemBuilder: (context, i) {
-                      final favorite = favoriteItems[i];
-                      final phrase = _displayPhrase(app, favorite);
-                      return PhraseCard(
-                        key: ValueKey(
-                          'fav_${favorite.id}_${favorite.dedupeKey}_${lang.name}_${app.languageRevision}',
+                    const SizedBox(height: 20),
+                    if (favoriteItems.isEmpty)
+                      SizedBox(
+                        width: double.infinity,
+                        height: MediaQuery.sizeOf(context).height * 0.38,
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.xl,
+                            ),
+                            child: Text(
+                              AppStrings.emptyFavoritesDesign(lang),
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                color: theme.bgAccent.withValues(alpha: 0.85),
+                                height: 1.5,
+                              ),
+                            ),
+                          ),
                         ),
-                        phrase: phrase,
-                        dense: denseGrid,
-                        isFavorite: true,
-                        onTap: () => speakWithFeedback(
-                          context,
-                          app.localizedPhraseText(phrase),
-                          record: true,
-                          phraseId: phrase.id,
-                        ),
-                        onSpeak: () => speakWithFeedback(
-                          context,
-                          app.localizedPhraseText(phrase),
-                          record: true,
-                          phraseId: phrase.id,
-                        ),
-                        onFavorite: () => app.toggleFavorite(phrase),
-                        onView: () => ViewPhraseDialog.show(
-                          context,
-                          phrase: phrase,
-                          displayText: app.localizedPhraseText(phrase),
-                        ),
-                        onDelete: phrase.isBuiltin
-                            ? () {}
-                            : () => _confirmDeletePhrase(phrase, favorite),
-                      );
-                    },
-                  ),
+                      )
+                    else
+                      GridView.builder(
+                        padding: EdgeInsets.zero,
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate: AppSpacing.phraseGridDelegate(context),
+                        itemCount: favoriteItems.length,
+                        itemBuilder: (context, i) {
+                          final favorite = favoriteItems[i];
+                          final phrase = _displayPhrase(app, favorite);
+                          return PhraseCard(
+                            key: ValueKey(
+                              'fav_${favorite.id}_${favorite.dedupeKey}_${lang.name}_${app.languageRevision}',
+                            ),
+                            phrase: phrase,
+                            dense: denseGrid,
+                            isFavorite: true,
+                            onTap: () => speakWithFeedback(
+                              context,
+                              app.localizedPhraseText(phrase),
+                              record: true,
+                              phraseId: phrase.id,
+                            ),
+                            onSpeak: () => speakWithFeedback(
+                              context,
+                              app.localizedPhraseText(phrase),
+                              record: true,
+                              phraseId: phrase.id,
+                            ),
+                            onFavorite: () => app.toggleFavorite(phrase),
+                            onView: () => ViewPhraseDialog.show(
+                              context,
+                              phrase: phrase,
+                              displayText: app.localizedPhraseText(phrase),
+                            ),
+                            onDelete: phrase.isBuiltin
+                                ? () {}
+                                : () => _confirmDeletePhrase(phrase, favorite),
+                          );
+                        },
+                      ),
+                  ],
                 ),
+              ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FavoritesCategoryItem extends StatelessWidget {
+  const _FavoritesCategoryItem({
+    required this.width,
+    required this.active,
+    required this.label,
+    required this.accent,
+    required this.textColor,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final double width;
+  final bool active;
+  final String label;
+  final Color accent;
+  final Color textColor;
+  final Widget icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: width,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: active ? accent : accent.withValues(alpha: 0.07),
+                boxShadow: [
+                  BoxShadow(
+                    color: accent.withValues(alpha: active ? 0.38 : 0.05),
+                    blurRadius: active ? 6 : 3,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+              ),
+              child: Center(child: icon),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              maxLines: 1,
+              softWrap: false,
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.visible,
+              style: GoogleFonts.poppins(
+                fontSize: 9.7,
+                height: 1.2,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w600,
+                color: active ? accent : textColor,
+              ),
+            ),
+            const SizedBox(height: 3),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              width: active ? 12 : 0,
+              height: 2,
+              decoration: BoxDecoration(
+                color: accent,
+                borderRadius: BorderRadius.circular(99),
+              ),
+            ),
+          ],
         ),
       ),
     );

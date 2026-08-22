@@ -823,6 +823,10 @@ class AppRepository {
     if (remoteGrade.isNotEmpty) {
       await updateUserSettings(userId, gradeLevel: remoteGrade);
     }
+    final remoteBirthdate = profile.birthdate?.trim() ?? '';
+    if (remoteBirthdate.isNotEmpty) {
+      await updateUserSettings(userId, birthdate: remoteBirthdate);
+    }
     return findUserById(userId);
   }
 
@@ -880,6 +884,8 @@ class AppRepository {
     int? age,
     bool clearAge = false,
     String? gradeLevel,
+    String? birthdate,
+    bool clearBirthdate = false,
     int? historyClearedAtMs,
   }) async {
     final db = await _dbHelper.database;
@@ -908,6 +914,11 @@ class AppRepository {
       settings['age'] = age;
     }
     if (gradeLevel != null) settings['grade_level'] = gradeLevel.trim();
+    if (clearBirthdate) {
+      settings.remove('birthdate');
+    } else if (birthdate != null) {
+      settings['birthdate'] = birthdate.trim();
+    }
     if (historyClearedAtMs != null) {
       settings['history_cleared_at_ms'] = historyClearedAtMs;
     }

@@ -9,7 +9,6 @@ import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/language_dropdown_field.dart';
 import '../widgets/panel_card.dart';
-import '../widgets/taptalk_logo.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -35,9 +34,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final lang = app.language;
 
     return LearnerScaffold(
-      title: AppStrings.appName(lang),
-      titleWidget: const TapTalkHeaderWordmark(),
+      title: AppStrings.settings(lang),
+      titleWidget: SizedBox(
+        height: 85,
+        child: Center(
+          child: Text(
+            AppStrings.settings(lang),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.poppins(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: theme.textMain,
+            ),
+          ),
+        ),
+      ),
       currentRoute: AppRoute.settings,
+      headerContentHeight: 85,
       headerBottomSpacing: 0,
       bodyTopOffset: -4,
       showBottomNav: true,
@@ -48,7 +63,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
             child: Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(AppSpacing.md),
+              clipBehavior: Clip.hardEdge,
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                AppSpacing.md,
+                AppSpacing.md,
+                AppSpacing.sm,
+              ),
               decoration: BoxDecoration(
                 color: theme.bgMid.withValues(alpha: 0.55),
                 borderRadius: BorderRadius.circular(14),
@@ -58,9 +79,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    AppStrings.settings(lang),
+                    AppStrings.preferences(lang),
                     style: GoogleFonts.poppins(
-                      fontSize: 22,
+                      fontSize: 15,
                       fontWeight: FontWeight.w800,
                       color: theme.textMain,
                     ),
@@ -74,33 +95,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       height: 1.35,
                     ),
                   ),
+                  const SizedBox(height: AppSpacing.md),
+                  LanguageDropdownField(
+                    value: lang,
+                    label: AppStrings.language(lang),
+                    onChanged: app.setLanguage,
+                  ),
                 ],
               ),
             ),
           ),
-          const SizedBox(height: AppSpacing.sm),
-          PanelCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  AppStrings.preferences(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: theme.textMain,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                LanguageDropdownField(
-                  value: lang,
-                  label: AppStrings.language(lang),
-                  onChanged: app.setLanguage,
-                ),
-              ],
-            ),
-          ),
+          const SizedBox(height: AppSpacing.lg),
           _SettingsAccordion(
             key: const ValueKey('settings_accordion_help'),
             title: AppStrings.helpSupport(lang),
@@ -134,6 +139,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: AppStrings.theme(lang),
             expanded: _openAccordionIndex == 2,
             onToggle: () => _onAccordionTap(2),
+            expandedPadding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.sm,
+              AppSpacing.md,
+              AppSpacing.sm,
+            ),
             child: _ThemePickerGrid(
               selectedKey: theme.key,
               onSelect: app.setTheme,
@@ -185,69 +196,65 @@ class _ThemePickerGrid extends StatelessWidget {
     final app = context.watch<AppState>();
     final accent = app.theme.bgAccent;
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        const crossAxisCount = 2;
-        const spacing = AppSpacing.sm;
-        final itemWidth =
-            (constraints.maxWidth - spacing) / crossAxisCount;
+    final themes = TapTalkThemes.all;
 
-        return Wrap(
-          spacing: spacing,
-          runSpacing: spacing,
-          children: TapTalkThemes.all.map((t) {
-            final selected = t.key == selectedKey;
-            final label = app.localizedThemeName(t.key, t.name);
-            return SizedBox(
-              width: itemWidth,
-              child: Material(
-                color: Colors.white.withValues(alpha: 0.92),
-                borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: () => onSelect(t.key),
-                  child: Ink(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                      border: Border.all(
-                        color: selected ? accent : Colors.transparent,
-                        width: 2,
-                      ),
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.sm,
-                      vertical: AppSpacing.sm,
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 18,
-                          height: 18,
-                          decoration: BoxDecoration(
-                            color: t.bgAccent,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        Expanded(
-                          child: Text(
-                            label,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.poppins(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: t.textMain,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      itemCount: themes.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: AppSpacing.sm,
+        mainAxisSpacing: AppSpacing.sm,
+        mainAxisExtent: 40,
+      ),
+      itemBuilder: (context, index) {
+        final t = themes[index];
+        final selected = t.key == selectedKey;
+        final label = app.localizedThemeName(t.key, t.name);
+        return Material(
+          color: Colors.white.withValues(alpha: 0.92),
+          borderRadius: BorderRadius.circular(10),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () => onSelect(t.key),
+            child: Ink(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: selected ? accent : Colors.transparent,
+                  width: 2,
                 ),
               ),
-            );
-          }).toList(),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+              child: Row(
+                children: [
+                  Container(
+                    width: 14,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: t.bgAccent,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: t.textMain,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         );
       },
     );
@@ -261,12 +268,14 @@ class _SettingsAccordion extends StatelessWidget {
     required this.expanded,
     required this.onToggle,
     required this.child,
+    this.expandedPadding,
   });
 
   final String title;
   final bool expanded;
   final VoidCallback onToggle;
   final Widget child;
+  final EdgeInsetsGeometry? expandedPadding;
 
   Color _expandedBodyColor(TapTalkThemeToken theme) {
     return Color.alphaBlend(
@@ -286,7 +295,7 @@ class _SettingsAccordion extends StatelessWidget {
       ),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+          borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
               color: theme.bgAccent.withValues(alpha: 0.22),
@@ -296,7 +305,7 @@ class _SettingsAccordion extends StatelessWidget {
           ],
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+          borderRadius: BorderRadius.circular(12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
@@ -318,7 +327,7 @@ class _SettingsAccordion extends StatelessWidget {
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.poppins(
-                              fontSize: 15,
+                              fontSize: 14,
                               fontWeight: FontWeight.w800,
                               color: Colors.white,
                             ),
@@ -342,7 +351,8 @@ class _SettingsAccordion extends StatelessWidget {
                 Container(
                   width: double.infinity,
                   color: _expandedBodyColor(theme),
-                  padding: const EdgeInsets.all(AppSpacing.md),
+                  padding: expandedPadding ??
+                      const EdgeInsets.all(AppSpacing.md),
                   child: child,
                 ),
             ],
