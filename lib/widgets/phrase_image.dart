@@ -11,6 +11,7 @@ import 'package:video_player/video_player.dart';
 import '../core/theme/theme_tokens.dart';
 import '../core/utils/phrase_image_storage.dart';
 import '../core/utils/phrase_video_poster.dart';
+import '../core/utils/phrase_video_speak_sync.dart';
 
 export '../core/utils/phrase_image_storage.dart' show isPhraseVideoPath;
 
@@ -50,6 +51,7 @@ class PhraseImage extends StatefulWidget {
     this.aspectRatio = 1.35,
     this.fill = false,
     this.playing = false,
+    this.keepReady = false,
   });
 
   final String? imagePath;
@@ -57,6 +59,8 @@ class PhraseImage extends StatefulWidget {
   final double aspectRatio;
   final bool fill;
   final bool playing;
+  /// View dialog: keep a paused 720p decoder so Speak starts immediately.
+  final bool keepReady;
 
   @override
   State<PhraseImage> createState() => _PhraseImageState();
@@ -214,6 +218,7 @@ class _PhraseImageState extends State<PhraseImage> {
           assetFallback: raw.toLowerCase().startsWith('assets/') ? raw : null,
           theme: widget.theme,
           playing: widget.playing,
+          keepReady: widget.keepReady,
         ),
       );
     }
@@ -273,6 +278,7 @@ class _PhraseVideoView extends StatefulWidget {
     required this.sourceKey,
     required this.theme,
     required this.playing,
+    this.keepReady = false,
     this.assetFallback,
   });
 
@@ -282,6 +288,7 @@ class _PhraseVideoView extends StatefulWidget {
   final String? assetFallback;
   final TapTalkThemeToken theme;
   final bool playing;
+  final bool keepReady;
 
   @override
   State<_PhraseVideoView> createState() => _PhraseVideoViewState();
@@ -397,7 +404,7 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
       updateKeepAlive();
     }
 
-    if (widget.playing) {
+    if (widget.playing || widget.keepReady) {
       await _initPlayer();
       return;
     }
@@ -407,7 +414,7 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
 
   Future<void> _initPlayer() async {
     if (_hasLivePlayer) return;
-    if (!widget.playing && _posterPath != null) return;
+    if (!widget.playing && !widget.keepReady && _posterPath != null) return;
     if (_initializing) return;
     _initializing = true;
 
@@ -469,6 +476,19 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
       await controller.setVolume(0);
       await controller.setLooping(false);
       await controller.seekTo(Duration.zero);
+      if (widget.playing) {
+        controller.addListener(_onTick);
+        _controller = controller;
+        _failCount = 0;
+        if (mounted && gen == _gen) {
+          setState(() => _ready = true);
+          updateKeepAlive();
+        }
+        await _startFullClip();
+        if (_posterPath == null) await _capturePoster(gen);
+        return;
+      }
+
       await controller.play();
       for (var i = 0; i < 8; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -478,10 +498,8 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
         }
         if (controller.value.size.width > 0) break;
       }
-      if (!widget.playing) {
-        await controller.pause();
-        await controller.seekTo(Duration.zero);
-      }
+      await controller.pause();
+      await controller.seekTo(Duration.zero);
 
       controller.addListener(_onTick);
       _controller = controller;
@@ -491,17 +509,11 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
         updateKeepAlive();
       }
 
-      if (widget.playing) {
-        await _startFullClip();
-        if (_posterPath == null) await _capturePoster(gen);
-        return;
-      }
-
       await _capturePoster(gen);
       if (!mounted || gen != _gen) return;
       if (widget.playing) {
         await _startFullClip();
-      } else {
+      } else if (!widget.keepReady) {
         final missedPoster = _posterPath == null;
         await _releasePlayerKeepReady();
         if (missedPoster && mounted && _failCount < 3) {
@@ -534,7 +546,7 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
       }
     } finally {
       _initializing = false;
-      if (!widget.playing || !_hasLivePlayer) {
+      if (!_hasLivePlayer) {
         _releaseGate();
       }
     }
@@ -607,6 +619,7 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
       await c.seekTo(Duration.zero);
       await c.setLooping(false);
       await c.play();
+      PhraseVideoSpeakSync.signalReady();
     } catch (_) {}
   }
 
@@ -654,6 +667,7 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
       await c.seekTo(Duration.zero);
     } catch (_) {}
     if (!widget.playing) {
+      if (widget.keepReady) return;
       await _releasePlayerKeepReady();
     }
   }

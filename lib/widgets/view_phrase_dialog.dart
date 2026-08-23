@@ -131,6 +131,7 @@ class _ViewPhraseDialogState extends State<ViewPhraseDialog> {
                               theme: theme,
                               fill: true,
                               playing: playing,
+                              keepReady: isVideo,
                             );
                           },
                         ),

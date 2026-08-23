@@ -9,6 +9,7 @@ import 'dart:async';
 import '../core/l10n/app_strings.dart';
 import '../core/utils/auth_validation.dart';
 import '../core/utils/phrase_image_storage.dart';
+import '../core/utils/phrase_video_speak_sync.dart';
 import '../core/l10n/content_localization.dart';
 import '../data/models/category_model.dart';
 import '../core/navigation/route_transitions.dart';
@@ -657,6 +658,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _speakingPhraseId = null;
     _spokenWordStart = -1;
     _spokenWordEnd = -1;
+    PhraseVideoSpeakSync.disarm();
   }
 
   Future<void> _init() async {
@@ -6069,6 +6071,16 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     return null;
   }
 
+  bool _phraseHasVideo(int? phraseId) {
+    if (phraseId == null) return false;
+    for (final phrase in _phrases) {
+      if (phrase.id == phraseId) {
+        return isPhraseVideoPath(phrase.imagePath);
+      }
+    }
+    return false;
+  }
+
   Future<bool> speakText(
     String text, {
     bool record = false,
@@ -6117,7 +6129,17 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _isSpeaking = true;
     _spokenWordStart = -1;
     _spokenWordEnd = -1;
+    final waitForVideo = _phraseHasVideo(phraseId);
+    if (waitForVideo) PhraseVideoSpeakSync.arm();
     notifyListeners();
+    if (waitForVideo) {
+      await PhraseVideoSpeakSync.wait();
+      if (gen != _ttsGeneration) {
+        PhraseVideoSpeakSync.disarm();
+        if (_speechPaused) return true;
+        return false;
+      }
+    }
 
     final completed = await _speakUntilDone(gen: gen, fullText: spoken);
     if (gen != _ttsGeneration) {
@@ -6175,7 +6197,17 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
     _speakingText = fullText;
     _isSpeaking = true;
+    final waitForVideo = _phraseHasVideo(_speakingPhraseId);
+    if (waitForVideo) PhraseVideoSpeakSync.arm();
     notifyListeners();
+    if (waitForVideo) {
+      await PhraseVideoSpeakSync.wait();
+      if (gen != _ttsGeneration) {
+        PhraseVideoSpeakSync.disarm();
+        if (_speechPaused) return true;
+        return false;
+      }
+    }
 
     final completed = await _speakUntilDone(gen: gen, fullText: fullText);
     if (gen != _ttsGeneration) {
