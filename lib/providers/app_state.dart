@@ -141,6 +141,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   List<String> _emergencyContacts = [];
   String _profileCode = '';
   String _welcomeFirstName = '';
+  String _profileLastName = '';
+  bool _hasStoredLastName = false;
   String _address = '';
   int? _age;
   String _gradeLevel = '';
@@ -350,6 +352,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   int? get age => _age;
   String get gradeLevel => _gradeLevel;
   String get birthdate => _birthdate;
+
+  /// First name as stored (sign-up / profile), including multiple given names.
+  String get profileFirstName => _welcomeFirstName.trim();
+
+  /// Last name as stored on profile. Extra words in first name stay there.
+  String get profileLastName {
+    if (_hasStoredLastName) return _profileLastName.trim();
+    return '';
+  }
 
   /// First name from sign-up (For Me welcome). Never uses email.
   String welcomeFirstName(AppLanguage lang) {
@@ -736,6 +747,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     _startMonitoringConnectivitySync();
+    unawaited(_flushPendingProfileToCloud());
 
     if (needsMonitoringSync) {
       await _syncPendingLearnerActivityToCloud();
@@ -832,6 +844,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _applyLiveUserProfileFromCloud(RemoteUserProfile profile) async {
     if (_user == null) return;
+    if (await _isProfileCloudPending()) {
+      await _flushPendingProfileToCloud();
+      return;
+    }
     final previousLanguage = _language;
 
     final updated = await _repo.applyRemoteUserProfile(
@@ -881,6 +897,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
     _gradeLevel = (settings['grade_level'] as String?)?.trim() ?? '';
     _birthdate = (settings['birthdate'] as String?)?.trim() ?? '';
+    if (settings.containsKey('last_name')) {
+      _profileLastName = (settings['last_name'] as String?)?.trim() ?? '';
+      _hasStoredLastName = true;
+    } else {
+      _profileLastName = '';
+      _hasStoredLastName = false;
+    }
   }
 
   Future<void> _startPersonalBoardSync() async {
@@ -1378,6 +1401,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _age = null;
     _gradeLevel = '';
     _birthdate = '';
+    _profileLastName = '';
+    _hasStoredLastName = false;
   }
 
   void _resetAccountSession() {
@@ -1503,6 +1528,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _syncUserProfileToCloud() async {
     if (_user == null) return;
+    if (await NetworkStatus.isOffline() || NetworkStatus.isCloudBlocked) return;
     if (AppRepository.isStubEmail(_user!.email)) return;
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
@@ -1545,6 +1571,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         age: _age,
         gradeLevel: _gradeLevel.isEmpty ? null : _gradeLevel,
         birthdate: _birthdate.isEmpty ? null : _birthdate,
+        lastName: profileLastName,
       ),
     );
 
@@ -1556,6 +1583,60 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         contacts: _emergencyContacts,
         profileCode: profileCode,
       );
+    }
+  }
+
+  Future<bool> _isProfileCloudPending() async {
+    if (_user == null) return false;
+    final settings = await _repo.getUserSettings(_user!.id);
+    return settings['profile_cloud_pending'] == true;
+  }
+
+  Future<void> _markProfileCloudPending() async {
+    if (_user == null || !CloudScope.syncMonitoring) return;
+    await _repo.updateUserSettings(_user!.id, profileCloudPending: true);
+  }
+
+  Future<void> _clearProfileCloudPending() async {
+    if (_user == null) return;
+    await _repo.updateUserSettings(_user!.id, profileCloudPending: false);
+  }
+
+  /// Saves locally first; cloud upload happens now if online, or later when
+  /// connectivity returns.
+  Future<void> _enqueueProfileCloudSync() async {
+    if (_user == null || !CloudScope.syncMonitoring) return;
+    await _markProfileCloudPending();
+    unawaited(_flushPendingProfileToCloud());
+  }
+
+  Future<void> _flushPendingProfileToCloud() async {
+    if (_user == null || !CloudScope.syncMonitoring) return;
+    if (!await _isProfileCloudPending()) return;
+    if (await NetworkStatus.isOffline() || NetworkStatus.isCloudBlocked) return;
+    try {
+      await FirebaseService.instance.initialize();
+      await _notificationSync.initialize();
+      await _syncUserProfileToCloud();
+      if (_user!.isLearner) {
+        final learnerFirebaseUid =
+            _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+        if (learnerFirebaseUid != null && learnerFirebaseUid.isNotEmpty) {
+          final profileCode = _profileCode.isNotEmpty
+              ? _profileCode
+              : await _repo.ensureLearnerProfileCode(_user!.id);
+          await _notificationSync.updateLearnerReferencesOnCloud(
+            learnerFirebaseUid: learnerFirebaseUid,
+            learnerName: _user!.fullName,
+            learnerProfileCode: profileCode,
+          );
+          await _resyncLearnerEnrollmentsToCloud();
+        }
+      }
+      await _clearProfileCloudPending();
+    } catch (e, st) {
+      debugPrint('Pending profile cloud sync failed: $e\n$st');
+      NetworkStatus.markCloudUnreachable();
     }
   }
 
@@ -1595,6 +1676,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       birthdate: (profile.birthdate?.trim().isNotEmpty ?? false)
           ? profile.birthdate
           : cloudSource.birthdate,
+      lastName: profile.lastName != null
+          ? profile.lastName
+          : cloudSource.lastName,
     );
   }
 
@@ -1633,6 +1717,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _restoreUserProfileFromCloud() async {
     if (_user == null) return;
     if (await NetworkStatus.isOffline()) return;
+    if (await _isProfileCloudPending()) {
+      await _flushPendingProfileToCloud();
+      if (await _isProfileCloudPending()) return;
+    }
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
     if (!_notificationSync.isCloudAvailable) return;
@@ -2217,6 +2305,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   Future<String?> register({
     required String fullName,
     required String firstName,
+    String lastName = '',
     required String email,
     required String password,
     required String role,
@@ -2225,6 +2314,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       return await _registerImpl(
         fullName: fullName,
         firstName: firstName,
+        lastName: lastName,
         email: email,
         password: password,
         role: role,
@@ -2238,6 +2328,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   Future<String?> _registerImpl({
     required String fullName,
     required String firstName,
+    String lastName = '',
     required String email,
     required String password,
     required String role,
@@ -2285,6 +2376,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       _user = await _repo.registerUser(
         fullName: fullName,
         firstName: firstName,
+        lastName: lastName,
         email: normalizedEmail,
         password: password,
         role: role,
@@ -2303,6 +2395,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await prefs.setInt('user_id', _user!.id);
     _resetAccountSession();
     _welcomeFirstName = firstName.trim();
+    _profileLastName = lastName.trim();
+    _hasStoredLastName = true;
     if (role == 'learner') {
       _theme = TapTalkThemes.appDefault;
       await _setLanguageOnboardingDone(_user!.id, false);
@@ -2824,6 +2918,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
     _monitoringSyncInFlight = true;
     try {
+      await _flushPendingProfileToCloud();
       final pending = await _repo.getUnsyncedHistory(_user!.id);
       for (final item in pending) {
         if (await NetworkStatus.isOffline()) break;
@@ -2879,6 +2974,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
+    await _flushPendingProfileToCloud();
 
     if (_user!.isOnlineAccount &&
         _hasPersonalBoardRole() &&
@@ -5889,36 +5985,27 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   String get profileCode => (_user?.isLearner ?? false) ? _profileCode : '';
 
-  Future<String?> updateProfileName(String fullName) async {
+  Future<String?> updateProfileName({
+    required String firstName,
+    required String lastName,
+  }) async {
     if (_user == null) return AppStrings.notSignedIn(_language);
-    final trimmed = fullName.trim();
-    if (trimmed.isEmpty) return AppStrings.fillAllFields(_language);
-    final updatedFirstName = trimmed.split(RegExp(r'\s+')).first;
-    await _repo.updateUserFullName(_user!.id, trimmed);
-    await _repo.updateUserSettings(_user!.id, firstName: updatedFirstName);
-    _user = _user!.copyWith(fullName: trimmed);
-    _welcomeFirstName = updatedFirstName;
-    if (CloudScope.syncMonitoring) {
-      await FirebaseService.instance.initialize();
-      await _notificationSync.initialize();
-      await _syncUserProfileToCloud();
-      if (_user!.isLearner) {
-        final learnerFirebaseUid =
-            _user!.firebaseUid ?? FirebaseService.instance.currentUid;
-        if (learnerFirebaseUid != null && learnerFirebaseUid.isNotEmpty) {
-          final profileCode = _profileCode.isNotEmpty
-              ? _profileCode
-              : await _repo.ensureLearnerProfileCode(_user!.id);
-          await _notificationSync.updateLearnerReferencesOnCloud(
-            learnerFirebaseUid: learnerFirebaseUid,
-            learnerName: trimmed,
-            learnerProfileCode: profileCode,
-          );
-          await _resyncLearnerEnrollmentsToCloud();
-        }
-      }
-    }
+    final first = firstName.trim();
+    final last = lastName.trim();
+    final full = '$first $last'.trim();
+    if (full.isEmpty) return AppStrings.fillAllFields(_language);
+    await _repo.updateUserFullName(_user!.id, full);
+    await _repo.updateUserSettings(
+      _user!.id,
+      firstName: first,
+      lastName: last,
+    );
+    _user = _user!.copyWith(fullName: full);
+    _welcomeFirstName = first;
+    _profileLastName = last;
+    _hasStoredLastName = true;
     notifyListeners();
+    await _enqueueProfileCloudSync();
     return null;
   }
 
@@ -5927,19 +6014,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final cleaned = AppRepository.normalizeEmergencyContacts(contacts);
     await _repo.updateEmergencyContacts(_user!.id, cleaned);
     _emergencyContacts = cleaned;
-    if (_user!.isLearner && CloudScope.syncMonitoring) {
-      final learnerFirebaseUid =
-          _user!.firebaseUid ?? FirebaseService.instance.currentUid;
-      if (learnerFirebaseUid != null && learnerFirebaseUid.isNotEmpty) {
-        await _notificationSync.syncLearnerEmergencyContacts(
-          learnerUserId: _user!.id,
-          learnerName: _user!.fullName,
-          learnerFirebaseUid: learnerFirebaseUid,
-          contacts: cleaned,
-        );
-      }
-    }
     notifyListeners();
+    await _enqueueProfileCloudSync();
     return null;
   }
 
@@ -5964,12 +6040,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _age = age;
     _gradeLevel = gradeLevel.trim();
     _birthdate = trimmedBirth;
-    if (CloudScope.syncMonitoring) {
-      await FirebaseService.instance.initialize();
-      await _notificationSync.initialize();
-      await _syncUserProfileToCloud();
-    }
     notifyListeners();
+    await _enqueueProfileCloudSync();
     return null;
   }
 

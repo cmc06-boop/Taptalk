@@ -53,9 +53,9 @@ abstract final class AppSpacing {
     final w = MediaQuery.sizeOf(context).width;
     final textScale = MediaQuery.textScalerOf(context).scale(12) / 12;
     final scaleBoost = textScale > 1.05 ? (textScale - 1) * 0.12 : 0.0;
-    if (w >= 1100) return 0.84 - scaleBoost;
-    if (w >= 600) return 0.78 - scaleBoost;
-    return 0.78 - scaleBoost;
+    if (w >= 1100) return 0.79 - scaleBoost;
+    if (w >= 600) return 0.73 - scaleBoost;
+    return 0.73 - scaleBoost;
   }
 
   static SliverGridDelegateWithFixedCrossAxisCount phraseGridDelegate(
@@ -69,10 +69,24 @@ abstract final class AppSpacing {
     );
   }
 
-  /// Category picker grid: 3 columns on phone, 5 on tablet and wider.
-  static int categoryGridColumns(BuildContext context) {
+  /// Same column count as phrase cards (2 on phone). Slightly shorter tiles.
+  static double categoryGridChildAspectRatio(BuildContext context) {
     final w = MediaQuery.sizeOf(context).width;
-    if (w >= 600) return 5;
-    return 3;
+    final textScale = MediaQuery.textScalerOf(context).scale(12) / 12;
+    final scaleBoost = textScale > 1.05 ? (textScale - 1) * 0.12 : 0.0;
+    if (w >= 1100) return 0.84 - scaleBoost;
+    if (w >= 600) return 0.78 - scaleBoost;
+    return 0.78 - scaleBoost;
+  }
+
+  static SliverGridDelegateWithFixedCrossAxisCount categoryGridDelegate(
+    BuildContext context,
+  ) {
+    return SliverGridDelegateWithFixedCrossAxisCount(
+      crossAxisCount: phraseGridColumns(context),
+      crossAxisSpacing: sm,
+      mainAxisSpacing: sm,
+      childAspectRatio: categoryGridChildAspectRatio(context),
+    );
   }
 }

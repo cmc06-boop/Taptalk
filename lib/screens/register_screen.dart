@@ -119,6 +119,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             fullName:
                 '${_firstName.text.trim()} ${_lastName.text.trim()}'.trim(),
             firstName: _firstName.text.trim(),
+            lastName: _lastName.text.trim(),
             email: _email.text,
             password: _password.text,
             role: _role,

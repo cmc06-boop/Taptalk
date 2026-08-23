@@ -120,15 +120,8 @@ class _ViewPhraseDialogState extends State<ViewPhraseDialog> {
                         width: 256,
                         height: 180,
                         child: Selector<AppState, bool>(
-                          selector: (_, state) {
-                            if (!isVideo) return false;
-                            if (!state.isSpeaking) return false;
-                            if (state.speakingPhraseId != null &&
-                                state.speakingPhraseId == phrase.id) {
-                              return true;
-                            }
-                            return state.speakingText.trim() == text.trim();
-                          },
+                          selector: (_, state) =>
+                              isVideo && state.isSpeaking,
                           builder: (_, playing, _) {
                             return PhraseImage(
                               key: ValueKey(

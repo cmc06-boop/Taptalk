@@ -14,20 +14,19 @@ import '../core/utils/phrase_video_poster.dart';
 
 export '../core/utils/phrase_image_storage.dart' show isPhraseVideoPath;
 
-/// Limits how many video decoders initialize at once (not how many stay alive).
+/// Serializes hardware video decoders. Cheap Unisoc chips can hold ~1 AVC
+/// decoder; overlapping initialize() wedges playback for every card.
 class _VideoInitGate {
-  static const _max = 2;
+  static const _max = 1;
   static int _active = 0;
   static final _waiters = Queue<Completer<void>>();
 
   static Future<void> acquire() async {
-    if (_active < _max) {
-      _active++;
-      return;
+    while (_active >= _max) {
+      final c = Completer<void>();
+      _waiters.add(c);
+      await c.future;
     }
-    final c = Completer<void>();
-    _waiters.add(c);
-    await c.future;
     _active++;
   }
 
@@ -41,9 +40,8 @@ class _VideoInitGate {
 
 /// Displays a phrase image or muted video preview.
 ///
-/// Videos are copied into app documents on first load, then played from that
-/// local file so they work offline. Once a video is ready it stays retained
-/// (keep-alive) — no park/evict flicker while scrolling.
+/// Videos are copied into app documents on first load. The first decoded
+/// frame is saved as a PNG poster so later visits skip the decoder until Speak.
 class PhraseImage extends StatefulWidget {
   const PhraseImage({
     super.key,
@@ -68,18 +66,14 @@ class _PhraseImageState extends State<PhraseImage> {
   String? _resolvedPath;
   bool _resolving = false;
 
-  static bool _isHomeVideoAsset(String path) {
-    final lower = path.toLowerCase();
-    return lower.startsWith('assets/videos/home/') && isPhraseVideoPath(lower);
-  }
-
   @override
   void initState() {
     super.initState();
     final raw = widget.imagePath?.trim();
-    if (raw != null && _isHomeVideoAsset(raw)) {
-      // Sticky path immediately so every Home card can start loading.
-      _resolvedPath = cachedPhraseImagePathSync(raw) ?? raw;
+    if (raw != null && isPhraseVideoPath(raw)) {
+      _resolvedPath = cachedPhraseImagePathSync(raw) ??
+          existingPhraseImagePath(raw) ??
+          (raw.toLowerCase().startsWith('assets/') ? raw : null);
       _resolving = false;
     } else {
       _resolvedPath = existingPhraseImagePath(widget.imagePath);
@@ -92,8 +86,10 @@ class _PhraseImageState extends State<PhraseImage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.imagePath != widget.imagePath) {
       final raw = widget.imagePath?.trim();
-      if (raw != null && _isHomeVideoAsset(raw)) {
-        _resolvedPath = cachedPhraseImagePathSync(raw) ?? raw;
+      if (raw != null && isPhraseVideoPath(raw)) {
+        _resolvedPath = cachedPhraseImagePathSync(raw) ??
+            existingPhraseImagePath(raw) ??
+            (raw.toLowerCase().startsWith('assets/') ? raw : null);
         _resolving = false;
       } else {
         _resolvedPath = existingPhraseImagePath(widget.imagePath);
@@ -115,9 +111,12 @@ class _PhraseImageState extends State<PhraseImage> {
     }
 
     if (isPhraseVideoPath(raw)) {
-      // Home: sticky path. Never swap later — that remounts players.
-      if (_isHomeVideoAsset(raw)) {
-        final sticky = _resolvedPath ?? cachedPhraseImagePathSync(raw) ?? raw;
+      // Sticky path: swapping cache/asset remounts the player and drops posters.
+      final sticky = _resolvedPath ??
+          cachedPhraseImagePathSync(raw) ??
+          existingPhraseImagePath(raw) ??
+          (raw.toLowerCase().startsWith('assets/') ? raw : null);
+      if (sticky != null) {
         if (mounted && (_resolvedPath != sticky || _resolving)) {
           setState(() {
             _resolvedPath = sticky;
@@ -126,17 +125,6 @@ class _PhraseImageState extends State<PhraseImage> {
         }
         unawaited(ensureLocalPhraseMediaPath(raw));
         unawaited(warmPhraseVideoPosterDirectory());
-        return;
-      }
-
-      final cached = cachedPhraseImagePathSync(raw);
-      if (cached != null) {
-        if (mounted && _resolvedPath != cached) {
-          setState(() {
-            _resolvedPath = cached;
-            _resolving = false;
-          });
-        }
         return;
       }
 
@@ -149,10 +137,6 @@ class _PhraseImageState extends State<PhraseImage> {
         playable = null;
       }
       if (playable != null &&
-          playable.toLowerCase().startsWith('assets/') &&
-          isPhraseVideoPath(playable)) {
-        // Materialize failed — still try asset playback.
-      } else if (playable != null &&
           !playable.toLowerCase().startsWith('assets/') &&
           !isRemotePhraseImagePath(playable) &&
           !kIsWeb &&
@@ -214,7 +198,8 @@ class _PhraseImageState extends State<PhraseImage> {
     }
 
     if (isPhraseVideoPath(raw)) {
-      final path = _resolvedPath ?? (_isHomeVideoAsset(raw) ? raw : null);
+      final path = _resolvedPath ??
+          (raw.toLowerCase().startsWith('assets/') ? raw : null);
       if (path == null || isRemotePhraseImagePath(path)) {
         return _Placeholder(
           theme: widget.theme,
@@ -225,11 +210,10 @@ class _PhraseImageState extends State<PhraseImage> {
         child: _PhraseVideoView(
           key: ValueKey('video_$raw'),
           path: path,
+          sourceKey: raw,
           assetFallback: raw.toLowerCase().startsWith('assets/') ? raw : null,
           theme: widget.theme,
           playing: widget.playing,
-          // Home: keep-alive only after first frame so viewport cards can load.
-          retainWhileAlive: !_isHomeVideoAsset(raw),
         ),
       );
     }
@@ -286,18 +270,18 @@ class _PhraseVideoView extends StatefulWidget {
   const _PhraseVideoView({
     super.key,
     required this.path,
+    required this.sourceKey,
     required this.theme,
     required this.playing,
     this.assetFallback,
-    this.retainWhileAlive = true,
   });
 
   final String path;
+  /// Stable key for the first-frame poster (original phrase imagePath).
+  final String sourceKey;
   final String? assetFallback;
   final TapTalkThemeToken theme;
   final bool playing;
-  /// When false (Home), keep-alive only after [_ready].
-  final bool retainWhileAlive;
 
   @override
   State<_PhraseVideoView> createState() => _PhraseVideoViewState();
@@ -308,8 +292,8 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
   final GlobalKey _captureKey = GlobalKey();
   VideoPlayerController? _controller;
   bool _ready = false;
-  /// Frozen first-frame PNG (Home). Frees the decoder so later cards can load
-  /// while already-ready cards stay retained with no on/off flicker.
+  /// Frozen first-frame PNG. Decoder is released after capture so other
+  /// on-screen cards can load. Playback uses a live player only while speaking.
   String? _posterPath;
   bool _runToEnd = false;
   int _gen = 0;
@@ -318,15 +302,10 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
   int _failCount = 0;
   Timer? _retryTimer;
 
-  String get _posterKey => widget.assetFallback ?? widget.path;
-
-  bool get _isHomeClip {
-    final raw = _posterKey.toLowerCase();
-    return raw.startsWith('assets/videos/home/') && isPhraseVideoPath(raw);
-  }
+  String get _posterKey => widget.sourceKey;
 
   @override
-  bool get wantKeepAlive => widget.retainWhileAlive || _ready;
+  bool get wantKeepAlive => _posterPath != null;
 
   @override
   void initState() {
@@ -340,7 +319,7 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
         _ready = true;
       });
       updateKeepAlive();
-      if (widget.playing || _runToEnd) unawaited(_initPlayer());
+      if (widget.playing) unawaited(_ensurePlaying());
     }));
     _init();
   }
@@ -356,8 +335,12 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
       _init();
       return;
     }
-    if (!oldWidget.playing && widget.playing) {
-      unawaited(_ensurePlaying());
+    if (widget.playing) {
+      if (!oldWidget.playing || !_hasLivePlayer) {
+        unawaited(_ensurePlaying());
+      }
+    } else if (oldWidget.playing && !widget.playing) {
+      unawaited(_freeze());
     }
   }
 
@@ -387,6 +370,12 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
       !_controller!.value.hasError;
 
   Future<void> _ensurePlaying() async {
+    var waited = 0;
+    while (_initializing && waited < 80) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      if (!mounted) return;
+      waited++;
+    }
     if (!_hasLivePlayer) {
       await _initPlayer();
     }
@@ -398,49 +387,40 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
     if (_hasLivePlayer) return;
     if (_initializing) return;
 
-    if (_isHomeClip) {
-      await _loadHomePreview();
+    await warmPhraseVideoPosterDirectory();
+    final poster = _posterPath ?? cachedPhraseVideoPosterPathSync(_posterKey);
+    if (poster != null && mounted) {
+      setState(() {
+        _posterPath = poster;
+        _ready = true;
+      });
+      updateKeepAlive();
+    }
+
+    if (widget.playing) {
+      await _initPlayer();
       return;
     }
-
+    if (poster != null) return;
     await _initPlayer();
-  }
-
-  Future<void> _loadHomePreview() async {
-    _initializing = true;
-    try {
-      await warmPhraseVideoPosterDirectory();
-      final poster =
-          _posterPath ?? cachedPhraseVideoPosterPathSync(_posterKey);
-      if (!mounted) return;
-      if (poster != null) {
-        setState(() {
-          _posterPath = poster;
-          _ready = true;
-        });
-        updateKeepAlive();
-        if (widget.playing || _runToEnd) {
-          await _initPlayer();
-        }
-        return;
-      }
-      await _initPlayer();
-    } finally {
-      _initializing = false;
-    }
   }
 
   Future<void> _initPlayer() async {
     if (_hasLivePlayer) return;
+    if (!widget.playing && _posterPath != null) return;
+    if (_initializing) return;
+    _initializing = true;
 
     final gen = ++_gen;
 
     await _VideoInitGate.acquire();
     if (!mounted || gen != _gen) {
+      _initializing = false;
       _VideoInitGate.release();
       return;
     }
     if (_hasLivePlayer) {
+      _initializing = false;
       _VideoInitGate.release();
       return;
     }
@@ -450,7 +430,6 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
     try {
       final local = await ensureLocalPhraseMediaPath(path) ?? path;
       if (!mounted || gen != _gen) {
-        _releaseGate();
         return;
       }
 
@@ -469,7 +448,7 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
       try {
         await controller.initialize().timeout(const Duration(seconds: 12));
       } catch (_) {
-        await controller.dispose();
+        await _disposeControllerInstance(controller);
         final fallback = widget.assetFallback;
         if (fallback != null &&
             fallback != playPath &&
@@ -483,23 +462,23 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
       }
 
       if (!mounted || gen != _gen) {
-        await controller.dispose();
-        _releaseGate();
+        await _disposeControllerInstance(controller);
         return;
       }
 
       await controller.setVolume(0);
       await controller.setLooping(false);
-
       await controller.seekTo(Duration.zero);
       await controller.play();
-      await Future<void>.delayed(const Duration(milliseconds: 80));
-      if (!mounted || gen != _gen) {
-        await controller.dispose();
-        _releaseGate();
-        return;
+      for (var i = 0; i < 8; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        if (!mounted || gen != _gen) {
+          await _disposeControllerInstance(controller);
+          return;
+        }
+        if (controller.value.size.width > 0) break;
       }
-      if (!widget.playing && !_runToEnd) {
+      if (!widget.playing) {
         await controller.pause();
         await controller.seekTo(Duration.zero);
       }
@@ -511,77 +490,104 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
         setState(() => _ready = true);
         updateKeepAlive();
       }
-      if (widget.playing || _runToEnd) {
+
+      if (widget.playing) {
         await _startFullClip();
-      } else if (_isHomeClip) {
-        unawaited(_captureHomePosterAndRelease(gen));
+        if (_posterPath == null) await _capturePoster(gen);
+        return;
+      }
+
+      await _capturePoster(gen);
+      if (!mounted || gen != _gen) return;
+      if (widget.playing) {
+        await _startFullClip();
+      } else {
+        final missedPoster = _posterPath == null;
+        await _releasePlayerKeepReady();
+        if (missedPoster && mounted && _failCount < 3) {
+          _failCount++;
+          _retryTimer?.cancel();
+          _retryTimer = Timer(Duration(milliseconds: 500 * _failCount), () {
+            if (!mounted) return;
+            _init();
+          });
+        }
       }
     } catch (e, st) {
       debugPrint('Phrase video init failed ($path): $e\n$st');
       final c = _controller;
       _controller = null;
-      try {
-        await c?.dispose();
-      } catch (_) {}
+      await _disposeControllerInstance(c);
       if (mounted && gen == _gen) {
         _failCount++;
         if (_ready && _posterPath == null) {
           setState(() => _ready = false);
         }
-        final delayMs = (500 * _failCount).clamp(500, 3000);
-        _retryTimer?.cancel();
-        _retryTimer = Timer(Duration(milliseconds: delayMs), () {
-          if (!mounted || gen != _gen) return;
-          _init();
-        });
+        if (_failCount <= 2) {
+          final delayMs = (800 * _failCount).clamp(800, 3000);
+          _retryTimer?.cancel();
+          _retryTimer = Timer(Duration(milliseconds: delayMs), () {
+            if (!mounted) return;
+            _init();
+          });
+        }
       }
     } finally {
-      _releaseGate();
+      _initializing = false;
+      if (!widget.playing || !_hasLivePlayer) {
+        _releaseGate();
+      }
     }
   }
 
-  /// Snapshot the painted first frame (no native thumbnail plugin), cache it,
-  /// then free the decoder so remaining Home cards can initialize.
-  Future<void> _captureHomePosterAndRelease(int gen) async {
-    if (!_isHomeClip || widget.playing || _runToEnd) return;
-    if (_posterPath != null) {
-      _releasePlayerKeepReady();
-      return;
-    }
-
-    // Let the VideoPlayer paint at least one frame.
-    await Future<void>.delayed(const Duration(milliseconds: 120));
-    if (!mounted || gen != _gen || widget.playing || _runToEnd) return;
-
-    try {
-      final boundary = _captureKey.currentContext?.findRenderObject()
-          as RenderRepaintBoundary?;
-      if (boundary == null || !boundary.hasSize) return;
-      final image = await boundary.toImage(pixelRatio: 1.5);
-      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      image.dispose();
-      if (bytes == null) return;
-      final saved = await savePhraseVideoPosterBytes(
-        _posterKey,
-        bytes.buffer.asUint8List(),
+  Future<void> _capturePoster(int gen) async {
+    if (_posterPath != null) return;
+    for (var attempt = 0; attempt < 4; attempt++) {
+      await WidgetsBinding.instance.endOfFrame;
+      await Future<void>.delayed(
+        Duration(milliseconds: attempt == 0 ? 80 : 140),
       );
-      if (!mounted || gen != _gen || widget.playing || _runToEnd) return;
-      if (saved == null) return;
-      _posterPath = saved;
-      _releasePlayerKeepReady();
-    } catch (e, st) {
-      debugPrint('Home poster capture failed ($_posterKey): $e\n$st');
+      if (!mounted || gen != _gen) return;
+      try {
+        final boundary = _captureKey.currentContext?.findRenderObject()
+            as RenderRepaintBoundary?;
+        if (boundary == null || !boundary.hasSize) continue;
+        final image = await boundary.toImage(pixelRatio: 1.5);
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        image.dispose();
+        if (bytes == null) continue;
+        final saved = await savePhraseVideoPosterBytes(
+          _posterKey,
+          bytes.buffer.asUint8List(),
+        );
+        if (!mounted || gen != _gen) return;
+        if (saved == null) continue;
+        _posterPath = saved;
+        if (mounted) setState(() {});
+        updateKeepAlive();
+        return;
+      } catch (e, st) {
+        debugPrint('Phrase video poster capture failed ($_posterKey): $e\n$st');
+      }
     }
   }
 
-  void _releasePlayerKeepReady() {
+  Future<void> _disposeControllerInstance(VideoPlayerController? c) async {
+    c?.removeListener(_onTick);
+    try {
+      await c?.dispose();
+    } catch (_) {}
+    // Unisoc needs the previous AVC decoder fully gone before the next init.
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+  }
+
+  Future<void> _releasePlayerKeepReady() async {
     _retryTimer?.cancel();
     _gen++;
     _runToEnd = false;
     final c = _controller;
     _controller = null;
-    c?.removeListener(_onTick);
-    c?.dispose();
+    await _disposeControllerInstance(c);
     _releaseGate();
     if (mounted) setState(() {});
     updateKeepAlive();
@@ -612,14 +618,16 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
       final broken = _controller;
       _controller = null;
       if (_posterPath == null) _ready = false;
-      broken?.removeListener(_onTick);
-      broken?.dispose();
+      unawaited(() async {
+        await _disposeControllerInstance(broken);
+        _releaseGate();
+      }());
       if (mounted) {
         setState(() {});
         updateKeepAlive();
         if (_posterPath == null) {
           _retryTimer?.cancel();
-          _retryTimer = Timer(const Duration(milliseconds: 600), () {
+          _retryTimer = Timer(const Duration(milliseconds: 800), () {
             if (!mounted) return;
             _init();
           });
@@ -645,8 +653,8 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
       await c.pause();
       await c.seekTo(Duration.zero);
     } catch (_) {}
-    if (_isHomeClip && _posterPath != null && !widget.playing) {
-      _releasePlayerKeepReady();
+    if (!widget.playing) {
+      await _releasePlayerKeepReady();
     }
   }
 
@@ -657,9 +665,12 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
     _ready = false;
     final c = _controller;
     _controller = null;
-    c?.removeListener(_onTick);
-    c?.dispose();
-    _releaseGate();
+    final held = _gateHeld;
+    _gateHeld = false;
+    unawaited(() async {
+      await _disposeControllerInstance(c);
+      if (held) _VideoInitGate.release();
+    }());
   }
 
   @override

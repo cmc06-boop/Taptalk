@@ -197,9 +197,8 @@ class AppRepository {
   }) {
     final stored = (settings['first_name'] as String?)?.trim() ?? '';
     if (stored.isNotEmpty && !looksLikeEmail(stored)) return stored;
-    final parts = fullName.trim().split(RegExp(r'\s+'));
-    final first = parts.isNotEmpty ? parts.first.trim() : '';
-    if (first.isNotEmpty && !looksLikeEmail(first)) return first;
+    final full = fullName.trim();
+    if (full.isNotEmpty && !looksLikeEmail(full)) return full;
     return '';
   }
 
@@ -677,6 +676,7 @@ class AppRepository {
   Future<UserModel> registerUser({
     required String fullName,
     required String firstName,
+    String lastName = '',
     required String email,
     required String password,
     required String role,
@@ -687,6 +687,7 @@ class AppRepository {
       'language': 'English',
       'tts_speed': TtsSpeedOptions.defaultSpeed,
       'first_name': firstName.trim(),
+      'last_name': lastName.trim(),
     };
     if (role == 'learner') {
       settings['profile_code'] = generateProfileCode();
@@ -803,7 +804,14 @@ class AppRepository {
     }
     final remoteFirstName = profile.firstName?.trim() ?? '';
     if (remoteFirstName.isNotEmpty) {
-      await updateUserSettings(userId, firstName: remoteFirstName);
+      final settings = await getUserSettings(userId);
+      final localFirst = (settings['first_name'] as String?)?.trim() ?? '';
+      final remoteIsShorterPrefix = localFirst.isNotEmpty &&
+          localFirst.toLowerCase() != remoteFirstName.toLowerCase() &&
+          localFirst.toLowerCase().startsWith('${remoteFirstName.toLowerCase()} ');
+      if (!remoteIsShorterPrefix) {
+        await updateUserSettings(userId, firstName: remoteFirstName);
+      }
     }
     final remoteLanguage = profile.language?.trim();
     if (remoteLanguage != null && remoteLanguage.isNotEmpty) {
@@ -826,6 +834,17 @@ class AppRepository {
     final remoteBirthdate = profile.birthdate?.trim() ?? '';
     if (remoteBirthdate.isNotEmpty) {
       await updateUserSettings(userId, birthdate: remoteBirthdate);
+    }
+    if (profile.lastName != null) {
+      final remoteLast = profile.lastName!.trim();
+      final settings = await getUserSettings(userId);
+      final localFirst = (settings['first_name'] as String?)?.trim() ?? '';
+      final stolenFromFirst = remoteLast.isNotEmpty &&
+          localFirst.toLowerCase().contains(' ') &&
+          localFirst.toLowerCase().endsWith(' ${remoteLast.toLowerCase()}');
+      if (!stolenFromFirst) {
+        await updateUserSettings(userId, lastName: remoteLast);
+      }
     }
     return findUserById(userId);
   }
@@ -886,7 +905,9 @@ class AppRepository {
     String? gradeLevel,
     String? birthdate,
     bool clearBirthdate = false,
+    String? lastName,
     int? historyClearedAtMs,
+    bool? profileCloudPending,
   }) async {
     final db = await _dbHelper.database;
     final user = await findUserById(userId);
@@ -907,6 +928,7 @@ class AppRepository {
     if (ttsSpeed != null) settings['tts_speed'] = ttsSpeed;
     if (profileCode != null) settings['profile_code'] = profileCode;
     if (firstName != null) settings['first_name'] = firstName.trim();
+    if (lastName != null) settings['last_name'] = lastName.trim();
     if (address != null) settings['address'] = address.trim();
     if (clearAge) {
       settings.remove('age');
@@ -921,6 +943,11 @@ class AppRepository {
     }
     if (historyClearedAtMs != null) {
       settings['history_cleared_at_ms'] = historyClearedAtMs;
+    }
+    if (profileCloudPending == true) {
+      settings['profile_cloud_pending'] = true;
+    } else if (profileCloudPending == false) {
+      settings.remove('profile_cloud_pending');
     }
     await db.update(
       'users',

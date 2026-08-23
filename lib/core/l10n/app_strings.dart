@@ -1122,6 +1122,16 @@ abstract final class AppStrings {
       ? 'Maglagay ng wastong edad (1–120).'
       : 'Enter a valid age (1–120).';
 
+  static String invalidGradeLevel(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Maglagay ng wastong grade (1–12).'
+      : 'Enter a valid grade (1–12).';
+
+  static String invalidContactNumber(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Maglagay ng wastong numero (hal. 09xx xxx xxxx).'
+      : 'Enter a valid mobile number (e.g. 09xx xxx xxxx).';
+
   static String profileCode(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'PROFILE CODE' : 'PROFILE CODE';
 

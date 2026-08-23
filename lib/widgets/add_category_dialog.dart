@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
-import '../providers/app_state.dart';
+import '../providers/app_state.dart';     
 
 /// Collects a new category name, saves it, and returns the new category key.
 /// Owns its [TextEditingController] and disposes it when the route is removed.

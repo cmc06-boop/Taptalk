@@ -245,7 +245,7 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
                         padding: EdgeInsets.zero,
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate: AppSpacing.phraseGridDelegate(context),
+                        gridDelegate: AppSpacing.categoryGridDelegate(context),
                         itemCount: app.topLevelCategories
                             .where((category) => !_pendingDeletedKeys.contains(category.key))
                             .length,

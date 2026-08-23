@@ -23,7 +23,8 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  final _nameController = TextEditingController();
+  final _firstNameController = TextEditingController();
+  final _lastNameController = TextEditingController();
   final _addressController = TextEditingController();
   final _ageController = TextEditingController();
   final _yearController = TextEditingController();
@@ -35,6 +36,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _gradeLevelController = TextEditingController();
   final _emergency1Controller = TextEditingController();
   final _emergency2Controller = TextEditingController();
+  String _savedFirstName = '';
+  String _savedLastName = '';
   String _savedName = '';
   String _savedAddress = '';
   String _savedAge = '';
@@ -81,7 +84,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
-    _nameController.dispose();
+    _firstNameController.dispose();
+    _lastNameController.dispose();
     _addressController.dispose();
     _ageController.dispose();
     _yearController.dispose();
@@ -96,8 +100,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.dispose();
   }
 
+  void _applyNameToControllers({required String first, required String last}) {
+    if (_firstNameController.text != first) {
+      _firstNameController.text = first;
+    }
+    if (_lastNameController.text != last) {
+      _lastNameController.text = last;
+    }
+  }
+
+  String get _composedName =>
+      '${_firstNameController.text.trim()} ${_lastNameController.text.trim()}'
+          .trim();
+
   void _syncFromUser(AppState app) {
+    if (_editing || _saving) return;
     final name = app.user?.fullName ?? '';
+    final firstName = app.profileFirstName;
+    final lastName = app.profileLastName;
     final address = app.address;
     final age = app.age?.toString() ?? '';
     final gradeLevel = app.gradeLevel;
@@ -105,6 +125,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final isLearner = app.user?.isLearner ?? false;
     final contacts = isLearner ? app.emergencyContacts : const <String>[];
     if (_savedName == name &&
+        _savedFirstName == firstName &&
+        _savedLastName == lastName &&
         _savedAddress == address &&
         _savedAge == age &&
         _savedGradeLevel == gradeLevel &&
@@ -113,6 +135,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
     _savedName = name;
+    _savedFirstName = firstName;
+    _savedLastName = lastName;
     _savedAddress = address;
     _savedAge = age;
     _savedGradeLevel = gradeLevel;
@@ -120,9 +144,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _savedEmergencyContacts = List.from(contacts);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (_nameController.text != name) {
-        _nameController.text = name;
-      }
+      _applyNameToControllers(first: firstName, last: lastName);
       if (_addressController.text != address) {
         _addressController.text = address;
       }
@@ -164,7 +186,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   bool _hasUnsavedChanges(AppState app) {
     final isLearner = app.user?.isLearner ?? false;
-    if (_nameController.text.trim() != _savedName) return true;
+    if (_firstNameController.text.trim() != _savedFirstName) return true;
+    if (_lastNameController.text.trim() != _savedLastName) return true;
     if (_addressController.text.trim() != _savedAddress) return true;
     if (_ageController.text.trim() != _savedAge) return true;
     if (_birthdateToSave() != _savedBirthdate) return true;
@@ -188,7 +211,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _cancelEdits() {
-    _nameController.text = _savedName;
+    _applyNameToControllers(first: _savedFirstName, last: _savedLastName);
     _addressController.text = _savedAddress;
     _ageController.text = _savedAge;
     _gradeLevelController.text = _savedGradeLevel;
@@ -205,7 +228,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final isLearner = app.user?.isLearner ?? false;
     final isParent = app.user?.isParent ?? false;
     final isTeacher = app.user?.isTeacher ?? false;
-    final name = _nameController.text.trim();
+    final name = _composedName;
+    final firstName = _firstNameController.text.trim();
+    final lastName = _lastNameController.text.trim();
+    if ((firstName.isNotEmpty && !AuthValidation.isValidFullName(firstName)) ||
+        (lastName.isNotEmpty && !AuthValidation.isValidFullName(lastName))) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.invalidFullName(lang))),
+      );
+      return;
+    }
     final contacts = isLearner ? _draftEmergencyContacts : const <String>[];
     final address = _addressController.text.trim();
     final ageRaw = _ageController.text.trim();
@@ -223,12 +255,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final fromBirth = _ageFromIso(_birthdateToSave());
       if (fromBirth != null) age = fromBirth;
     }
+    if (isLearner && gradeLevel.isNotEmpty) {
+      final grade = int.tryParse(gradeLevel);
+      if (grade == null || grade < 1 || grade > 12) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppStrings.invalidGradeLevel(lang))),
+        );
+        return;
+      }
+    }
+    if (isLearner) {
+      final contactsToCheck = <String>[
+        _emergency1Controller.text.trim(),
+        if (_showSecondEmergency) _emergency2Controller.text.trim(),
+      ];
+      for (final raw in contactsToCheck) {
+        if (raw.isEmpty) continue;
+        if (AppRepository.emergencyPhoneKey(raw) == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(AppStrings.invalidContactNumber(lang))),
+          );
+          return;
+        }
+      }
+    }
     setState(() => _saving = true);
     String? err;
     if (name.isNotEmpty) {
-      err = await app.updateProfileName(_nameController.text);
+      err = await app.updateProfileName(
+        firstName: firstName,
+        lastName: lastName,
+      );
     } else {
-      _nameController.text = _savedName;
+      _applyNameToControllers(first: _savedFirstName, last: _savedLastName);
     }
     if (err == null && (isLearner || isParent || isTeacher)) {
       final birthIso = _birthdateToSave();
@@ -253,7 +312,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
       return;
     }
-    _savedName = _nameController.text.trim();
+    _savedName = name;
+    _savedFirstName = firstName;
+    _savedLastName = lastName;
     _savedAddress = address;
     _savedAge = age?.toString() ?? '';
     _savedGradeLevel = isLearner ? gradeLevel : '';
@@ -499,79 +560,78 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
         const SizedBox(height: AppSpacing.xs),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.sm,
+          ),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
             children: [
-            _DatePartField(
-              controller: _yearController,
-              focusNode: _yearFocus,
-              enabled: _editing,
-              theme: theme,
-              hint: 'YYYY',
-              maxLength: 4,
-              width: 52,
-              onChanged: _editing ? _onYearChanged : null,
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 3),
-              child: Text(
+              _DatePartField(
+                controller: _yearController,
+                focusNode: _yearFocus,
+                enabled: _editing,
+                theme: theme,
+                hint: 'YYYY',
+                maxLength: 4,
+                width: 34,
+                embedded: true,
+                onChanged: _editing ? _onYearChanged : null,
+              ),
+              Text(
                 '/',
                 style: GoogleFonts.poppins(
                   fontSize: 12,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w400,
                   color: theme.textMain.withValues(alpha: 0.45),
                 ),
               ),
-            ),
-            _DatePartField(
-              controller: _monthController,
-              focusNode: _monthFocus,
-              enabled: _editing,
-              theme: theme,
-              hint: 'MM',
-              maxLength: 2,
-              width: 36,
-              onChanged: _editing ? _onMonthChanged : null,
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 3),
-              child: Text(
+              _DatePartField(
+                controller: _monthController,
+                focusNode: _monthFocus,
+                enabled: _editing,
+                theme: theme,
+                hint: 'MM',
+                maxLength: 2,
+                width: 20,
+                embedded: true,
+                onChanged: _editing ? _onMonthChanged : null,
+              ),
+              Text(
                 '/',
                 style: GoogleFonts.poppins(
                   fontSize: 12,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w400,
                   color: theme.textMain.withValues(alpha: 0.45),
                 ),
               ),
-            ),
-            _DatePartField(
-              controller: _dayController,
-              focusNode: _dayFocus,
-              enabled: _editing,
-              theme: theme,
-              hint: 'DD',
-              maxLength: 2,
-              width: 36,
-              onChanged: _editing ? _onDayChanged : null,
-            ),
-            IconButton(
-              onPressed: _editing && !_saving ? _pickBirthdate : null,
-              tooltip: AppStrings.birthdate(lang),
-              padding: const EdgeInsets.all(4),
-              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-              visualDensity: VisualDensity.compact,
-              icon: Icon(
-                Icons.calendar_month_rounded,
-                size: 18,
-                color: _editing
-                    ? theme.bgAccent
-                    : theme.textMain.withValues(alpha: 0.35),
+              _DatePartField(
+                controller: _dayController,
+                focusNode: _dayFocus,
+                enabled: _editing,
+                theme: theme,
+                hint: 'DD',
+                maxLength: 2,
+                width: 20,
+                embedded: true,
+                onChanged: _editing ? _onDayChanged : null,
               ),
-            ),
-          ],
+              const Spacer(),
+              GestureDetector(
+                onTap: _editing && !_saving ? _pickBirthdate : null,
+                child: Icon(
+                  Icons.calendar_month_rounded,
+                  size: 16,
+                  color: _editing
+                      ? theme.bgAccent
+                      : theme.textMain.withValues(alpha: 0.35),
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -630,6 +690,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
             children: [
               PanelCard(
+            margin: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            borderRadius: 14,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -660,8 +722,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       style: TextButton.styleFrom(
                         backgroundColor: _editing
                             ? Colors.transparent
-                            : theme.bgAccent.withValues(alpha: 0.10),
-                        foregroundColor: theme.textMain,
+                            : Color.lerp(theme.bgAccent, Colors.black, 0.12),
+                        foregroundColor:
+                            _editing ? theme.textMain : Colors.white,
                         minimumSize: Size.zero,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
@@ -691,12 +754,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
                 const SizedBox(height: AppSpacing.md),
-                _ProfileField(
-                  label: AppStrings.fullName(lang),
-                  controller: _nameController,
-                  theme: theme,
-                  enabled: _editing,
-                  onChanged: _editing ? (_) => setState(() {}) : null,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _ProfileField(
+                        label: AppStrings.firstName(lang),
+                        controller: _firstNameController,
+                        theme: theme,
+                        enabled: _editing,
+                        keyboardType: TextInputType.name,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r"[A-Za-zÀ-ÿÑñ\s'-]"),
+                          ),
+                          LengthLimitingTextInputFormatter(40),
+                        ],
+                        onChanged: _editing ? (_) => setState(() {}) : null,
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: _ProfileField(
+                        label: AppStrings.lastName(lang),
+                        controller: _lastNameController,
+                        theme: theme,
+                        enabled: _editing,
+                        keyboardType: TextInputType.name,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r"[A-Za-zÀ-ÿÑñ\s'-]"),
+                          ),
+                          LengthLimitingTextInputFormatter(40),
+                        ],
+                        onChanged: _editing ? (_) => setState(() {}) : null,
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: AppSpacing.md),
                 _ProfileReadOnlyValue(
@@ -717,13 +811,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     onChanged: _editing ? (_) => setState(() {}) : null,
                   ),
                   const SizedBox(height: AppSpacing.md),
-                  _birthdateEditor(theme, lang),
-                  const SizedBox(height: AppSpacing.md),
                   if (user?.isLearner ?? false)
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
+                          flex: 4,
+                          child: _birthdateEditor(theme, lang),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          flex: 1,
                           child: _ProfileField(
                             label: AppStrings.age(lang),
                             controller: _ageController,
@@ -744,33 +842,52 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         const SizedBox(width: AppSpacing.sm),
                         Expanded(
+                          flex: 3,
                           child: _ProfileField(
                             label: AppStrings.gradeLevel(lang),
                             controller: _gradeLevelController,
                             theme: theme,
                             enabled: _editing,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                              LengthLimitingTextInputFormatter(2),
+                            ],
                             onChanged: _editing ? (_) => setState(() {}) : null,
                           ),
                         ),
                       ],
                     )
                   else
-                    _ProfileField(
-                      label: AppStrings.age(lang),
-                      controller: _ageController,
-                      theme: theme,
-                      enabled: _editing,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(3),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: _birthdateEditor(theme, lang),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          flex: 1,
+                          child: _ProfileField(
+                            label: AppStrings.age(lang),
+                            controller: _ageController,
+                            theme: theme,
+                            enabled: _editing,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                              LengthLimitingTextInputFormatter(3),
+                            ],
+                            onChanged: _editing
+                                ? (value) {
+                                    _applyAgeToBirthdate();
+                                    setState(() {});
+                                  }
+                                : null,
+                          ),
+                        ),
                       ],
-                      onChanged: _editing
-                          ? (value) {
-                              _applyAgeToBirthdate();
-                              setState(() {});
-                            }
-                          : null,
                     ),
                 ],
                 if (user?.isLearner ?? false) ...[
@@ -792,6 +909,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     enabled: _editing,
                     showLabel: false,
                     hintText: AppStrings.emergencyContactHint(lang, 1),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9+\s]')),
+                      LengthLimitingTextInputFormatter(16),
+                    ],
                     onChanged: _editing ? (_) => setState(() {}) : null,
                   ),
                   if (_showSecondEmergency) ...[
@@ -804,6 +925,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       enabled: _editing,
                       showLabel: false,
                       hintText: AppStrings.emergencyContactHint(lang, 2),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9+\s]')),
+                        LengthLimitingTextInputFormatter(16),
+                      ],
                       onChanged: _editing ? (_) => setState(() {}) : null,
                     ),
                   ],
@@ -965,6 +1090,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
           PanelCard(
+            borderRadius: 14,
             padding: const EdgeInsets.symmetric(
               horizontal: AppSpacing.md,
               vertical: AppSpacing.md,
@@ -985,19 +1111,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   style: TextButton.styleFrom(
                     backgroundColor: Colors.white,
                     foregroundColor: theme.textMain,
+                    minimumSize: Size.zero,
                     padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.md,
-                      vertical: AppSpacing.sm,
+                      horizontal: 14,
+                      vertical: 8,
                     ),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                   ),
                   child: Text(
                     AppStrings.editPassword(lang),
                     style: GoogleFonts.poppins(
                       fontSize: 12,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
@@ -1110,7 +1238,33 @@ class _EditPasswordDialogState extends State<_EditPasswordDialog> {
     final theme = widget.app.theme;
 
     return AlertDialog(
-      title: Text(AppStrings.editPassword(lang)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      titlePadding: const EdgeInsets.fromLTRB(20, 12, 8, 0),
+      contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+      actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              AppStrings.editPassword(lang),
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w700,
+                fontSize: 16,
+                color: theme.textMain,
+              ),
+            ),
+          ),
+          IconButton(
+            onPressed: _busy ? null : () => Navigator.pop(context),
+            icon: const Icon(Icons.close_rounded, size: 20),
+            color: theme.textMain,
+            tooltip: AppStrings.cancel(lang),
+            padding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+          ),
+        ],
+      ),
       content: SizedBox(
         width: double.maxFinite,
         child: SingleChildScrollView(
@@ -1122,6 +1276,10 @@ class _EditPasswordDialogState extends State<_EditPasswordDialog> {
                 controller: _current,
                 theme: theme,
                 obscure: _obscureCurrent,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.sm,
+                  vertical: 6,
+                ),
                 onToggleObscure: () =>
                     setState(() => _obscureCurrent = !_obscureCurrent),
               ),
@@ -1131,6 +1289,10 @@ class _EditPasswordDialogState extends State<_EditPasswordDialog> {
                 controller: _next,
                 theme: theme,
                 obscure: _obscureNext,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.sm,
+                  vertical: 6,
+                ),
                 onToggleObscure: () => setState(() => _obscureNext = !_obscureNext),
               ),
               PasswordStrengthHint(
@@ -1143,6 +1305,10 @@ class _EditPasswordDialogState extends State<_EditPasswordDialog> {
                 controller: _confirm,
                 theme: theme,
                 obscure: _obscureConfirm,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.sm,
+                  vertical: 6,
+                ),
                 onToggleObscure: () =>
                     setState(() => _obscureConfirm = !_obscureConfirm),
               ),
@@ -1210,6 +1376,7 @@ class _DatePartField extends StatelessWidget {
     required this.hint,
     required this.maxLength,
     required this.width,
+    this.embedded = false,
     this.onChanged,
   });
 
@@ -1220,12 +1387,14 @@ class _DatePartField extends StatelessWidget {
   final String hint;
   final int maxLength;
   final double width;
+  final bool embedded;
   final ValueChanged<String>? onChanged;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       width: width,
+      height: embedded ? 16 : null,
       child: TextField(
         controller: controller,
         focusNode: focusNode,
@@ -1233,6 +1402,7 @@ class _DatePartField extends StatelessWidget {
         onChanged: onChanged,
         keyboardType: TextInputType.number,
         textAlign: TextAlign.center,
+        textAlignVertical: TextAlignVertical.center,
         inputFormatters: [
           FilteringTextInputFormatter.digitsOnly,
           LengthLimitingTextInputFormatter(maxLength),
@@ -1244,22 +1414,27 @@ class _DatePartField extends StatelessWidget {
         ),
         decoration: InputDecoration(
           isDense: true,
-          filled: true,
-          fillColor: Colors.white,
+          isCollapsed: embedded,
+          filled: !embedded,
+          fillColor: embedded ? Colors.transparent : Colors.white,
           hintText: hint,
           hintStyle: GoogleFonts.poppins(
             fontSize: 11,
             fontWeight: FontWeight.w400,
             color: theme.textMain.withValues(alpha: 0.4),
           ),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 4,
-            vertical: AppSpacing.sm,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-            borderSide: BorderSide.none,
-          ),
+          contentPadding: embedded
+              ? EdgeInsets.zero
+              : const EdgeInsets.symmetric(
+                  horizontal: 4,
+                  vertical: AppSpacing.sm,
+                ),
+          border: embedded
+              ? InputBorder.none
+              : OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide.none,
+                ),
         ),
       ),
     );
@@ -1299,7 +1474,7 @@ class _ProfileReadOnlyValue extends StatelessWidget {
           ),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+            borderRadius: BorderRadius.circular(8),
           ),
           child: Text(
             value,
@@ -1328,6 +1503,7 @@ class _ProfileField extends StatelessWidget {
     this.showLabel = true,
     this.enabled = true,
     this.inputFormatters,
+    this.contentPadding,
   });
 
   final String label;
@@ -1341,6 +1517,7 @@ class _ProfileField extends StatelessWidget {
   final bool showLabel;
   final bool enabled;
   final List<TextInputFormatter>? inputFormatters;
+  final EdgeInsetsGeometry? contentPadding;
 
   @override
   Widget build(BuildContext context) {
@@ -1380,21 +1557,34 @@ class _ProfileField extends StatelessWidget {
               fontWeight: FontWeight.w400,
               color: theme.textMain.withValues(alpha: 0.45),
             ),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.sm,
-              vertical: AppSpacing.sm,
-            ),
+            contentPadding: contentPadding ??
+                const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.sm,
+                  vertical: AppSpacing.sm,
+                ),
+            suffixIconConstraints: onToggleObscure == null
+                ? null
+                : const BoxConstraints(minWidth: 32, minHeight: 32),
             suffixIcon: onToggleObscure == null
                 ? null
                 : IconButton(
                     icon: Icon(
-                      obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                      obscure
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      size: 18,
                       color: theme.textMain.withValues(alpha: 0.55),
                     ),
                     onPressed: onToggleObscure,
+                    padding: EdgeInsets.zero,
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(
+                      minWidth: 32,
+                      minHeight: 32,
+                    ),
                   ),
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+              borderRadius: BorderRadius.circular(8),
               borderSide: BorderSide.none,
             ),
           ),

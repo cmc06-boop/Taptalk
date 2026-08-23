@@ -48,12 +48,7 @@ class PhraseCard extends StatefulWidget {
 class _PhraseCardState extends State<PhraseCard>
     with AutomaticKeepAliveClientMixin {
   @override
-  bool get wantKeepAlive {
-    // Home has ~58 videos — keeping every card alive starves decoders online.
-    // Retention is handled by the video view after a successful load.
-    if (widget.phrase.categoryKey == 'home') return false;
-    return isPhraseVideoPath(widget.phrase.imagePath);
-  }
+  bool get wantKeepAlive => false;
 
   @override
   Widget build(BuildContext context) {
@@ -93,92 +88,115 @@ class _PhraseCardState extends State<PhraseCard>
       height: 1.12,
     );
 
-    return Material(
-      color: theme.bgMid,
-      elevation: 0,
-      shadowColor: theme.textMain.withValues(alpha: 0.12),
-      borderRadius: BorderRadius.circular(cardRadius),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
+    final mediaRadius = dense ? 8.0 : 10.0;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.bgMid,
         borderRadius: BorderRadius.circular(cardRadius),
-        child: Ink(
-          decoration: BoxDecoration(
-            color: theme.bgMid,
-            borderRadius: BorderRadius.circular(cardRadius),
-            boxShadow: [
-              BoxShadow(
-                color: theme.textMain.withValues(alpha: dense ? 0.08 : 0.1),
-                blurRadius: dense ? 8 : 14,
-                offset: Offset(0, dense ? 3 : 5),
-              ),
-            ],
+        boxShadow: [
+          BoxShadow(
+            color: Color.lerp(theme.bgAccent, theme.textMain, 0.35)!
+                .withValues(alpha: 0.42),
+            blurRadius: 5,
+            spreadRadius: 0,
+            offset: Offset.zero,
           ),
-          child: Padding(
-            padding: EdgeInsets.all(edgePad),
+        ],
+      ),
+      child: Material(
+        color: theme.bgMid,
+        elevation: 0,
+        shadowColor: Colors.transparent,
+        borderRadius: BorderRadius.circular(cardRadius),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(cardRadius),
+          child: Ink(
+            decoration: BoxDecoration(
+              color: theme.bgMid,
+              borderRadius: BorderRadius.circular(cardRadius),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Expanded(
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Positioned.fill(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(
-                            dense ? AppSpacing.radiusSm : AppSpacing.radiusMd,
-                          ),
-                          child: Selector<AppState, bool>(
-                            selector: (_, app) {
-                              // View dialog owns playback while open.
-                              if (app.phraseVideoFromViewOnly) return false;
-                              if (!app.isSpeaking) return false;
-                              if (app.speakingPhraseId != null &&
-                                  app.speakingPhraseId == phrase.id) {
-                                return true;
-                              }
-                              final text = displayText ??
-                                  app.localizedPhraseText(phrase);
-                              return app.speakingText.trim() == text.trim();
-                            },
-                            builder: (_, playing, _) {
-                              return PhraseImage(
-                                imagePath: phrase.imagePath,
-                                theme: theme,
-                                fill: true,
-                                playing: playing,
-                              );
-                            },
-                          ),
-                        ),
-                      ),
-                      if (showFavorite)
-                        Positioned(
-                          top: dense ? 4 : 6,
-                          left: dense ? 4 : 6,
-                          child: _StarButton(
-                            active: isFavorite,
-                            onTap: onFavorite,
-                            size: dense ? 22 : 28,
-                            iconSize: dense ? 14 : 17,
+                  child: Padding(
+                    padding: EdgeInsets.only(bottom: dense ? 4 : 5),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      clipBehavior: Clip.hardEdge,
+                      children: [
+                        Positioned.fill(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.only(
+                              topLeft: Radius.circular(cardRadius),
+                              topRight: Radius.circular(cardRadius),
+                              bottomLeft: Radius.circular(mediaRadius),
+                              bottomRight: Radius.circular(mediaRadius),
+                            ),
+                            child: Selector<AppState, bool>(
+                              selector: (_, app) {
+                                // View dialog owns playback while open.
+                                if (app.phraseVideoFromViewOnly) return false;
+                                if (!app.isSpeaking) return false;
+                                if (app.speakingPhraseId != null &&
+                                    app.speakingPhraseId == phrase.id) {
+                                  return true;
+                                }
+                                final text = displayText ??
+                                    app.localizedPhraseText(phrase);
+                                return app.speakingText.trim() == text.trim();
+                              },
+                              builder: (_, playing, _) {
+                                return PhraseImage(
+                                  imagePath: phrase.imagePath,
+                                  theme: theme,
+                                  fill: true,
+                                  playing: playing,
+                                );
+                              },
+                            ),
                           ),
                         ),
-                      if (showMoreMenu)
-                        Positioned(
-                          top: dense ? 4 : 6,
-                          right: dense ? 4 : 6,
-                          child: _PhraseMoreButton(
-                            size: dense ? 22 : 28,
-                            iconSize: dense ? 14 : 17,
-                            onView: canView ? onView : null,
-                            onEdit: canEdit ? onEdit : null,
-                            onDelete: canDelete ? onDelete : null,
+                        if (showFavorite)
+                          Positioned(
+                            top: dense ? 4 : 6,
+                            left: dense ? 4 : 6,
+                            child: _StarButton(
+                              active: isFavorite,
+                              onTap: onFavorite,
+                              size: dense ? 22 : 28,
+                              iconSize: dense ? 14 : 17,
+                            ),
                           ),
-                        ),
-                    ],
+                        if (showMoreMenu)
+                          Positioned(
+                            top: dense ? 4 : 6,
+                            right: dense ? 4 : 6,
+                            child: _PhraseMoreButton(
+                              size: dense ? 22 : 28,
+                              iconSize: dense ? 14 : 17,
+                              onView: canView ? onView : null,
+                              onEdit: canEdit ? onEdit : null,
+                              onDelete: canDelete ? onDelete : null,
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
-                SizedBox(height: dense ? 3 : AppSpacing.xs),
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  edgePad,
+                  dense ? 4 : 6,
+                  edgePad,
+                  edgePad,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
                 SizedBox(
                   height: dense ? 28 : 32,
                   child: Center(
@@ -228,68 +246,70 @@ class _PhraseCardState extends State<PhraseCard>
                   ),
                 ),
                 SizedBox(height: dense ? 3 : AppSpacing.xs),
-                SizedBox(
-                  height: actionHeight,
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final speakWidth = constraints.maxWidth;
-                      final iconOnlySpeak = dense || speakWidth < 72;
-                      final speakStyle = FilledButton.styleFrom(
-                        backgroundColor: theme.bgAccent,
-                        foregroundColor: Colors.white,
-                        minimumSize: Size(0, actionHeight),
-                        padding: EdgeInsets.symmetric(
-                          horizontal: iconOnlySpeak ? 0 : AppSpacing.xs,
-                        ),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(
-                            dense ? 8 : AppSpacing.radiusSm,
+                Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: dense ? 6 : 10,
+                  ),
+                  child: SizedBox(
+                    height: actionHeight,
+                    width: double.infinity,
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final iconOnlySpeak =
+                            dense || constraints.maxWidth < 72;
+                        final speakStyle = FilledButton.styleFrom(
+                          backgroundColor: theme.bgAccent,
+                          foregroundColor: Colors.white,
+                          minimumSize: Size(0, actionHeight),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: iconOnlySpeak ? 0 : AppSpacing.xs,
                           ),
-                        ),
-                        elevation: 0,
-                      );
-
-                      return Row(
-                        children: [
-                          Expanded(
-                            child: iconOnlySpeak
-                                ? FilledButton(
-                                    onPressed: onSpeak,
-                                    style: speakStyle,
-                                    child: Icon(
-                                      Icons.volume_up_rounded,
-                                      size: actionIcon,
-                                    ),
-                                  )
-                                : FilledButton.icon(
-                                    onPressed: onSpeak,
-                                    style: speakStyle,
-                                    icon: Icon(
-                                      Icons.volume_up_rounded,
-                                      size: actionIcon,
-                                    ),
-                                    label: Text(
-                                      AppStrings.speak(lang),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: GoogleFonts.poppins(
-                                        fontSize: labelSize,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(
+                              dense ? 8 : AppSpacing.radiusSm,
+                            ),
+                          ),
+                          elevation: 0,
+                        );
+                        return iconOnlySpeak
+                            ? FilledButton(
+                                onPressed: onSpeak,
+                                style: speakStyle,
+                                child: Icon(
+                                  Icons.volume_up_rounded,
+                                  size: actionIcon,
+                                ),
+                              )
+                            : FilledButton.icon(
+                                onPressed: onSpeak,
+                                style: speakStyle,
+                                icon: Icon(
+                                  Icons.volume_up_rounded,
+                                  size: actionIcon,
+                                ),
+                                label: Text(
+                                  AppStrings.speak(lang),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: labelSize,
+                                    fontWeight: FontWeight.w700,
                                   ),
-                          ),
-                        ],
-                      );
-                    },
+                                ),
+                              );
+                      },
+                    ),
                   ),
                 ),
-              ],
-            ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
+    ),
     );
   }
 }

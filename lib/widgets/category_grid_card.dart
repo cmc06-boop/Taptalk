@@ -125,22 +125,25 @@ class CategoryGridCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Expanded(
-                  child: ClipRRect(
-                    borderRadius:
-                        BorderRadius.circular(AppSpacing.radiusMd),
-                    child: imagePath != null
-                        ? Image.asset(
-                            imagePath,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, e, s) =>
-                                _FallbackIcon(category: category),
-                          )
-                        : _FallbackIcon(category: category),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(2, 2, 2, 0),
+                    child: ClipRRect(
+                      borderRadius:
+                          BorderRadius.circular(AppSpacing.radiusMd),
+                      child: imagePath != null
+                          ? Image.asset(
+                              imagePath,
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, e, s) =>
+                                  _FallbackIcon(category: category),
+                            )
+                          : _FallbackIcon(category: category),
+                    ),
                   ),
                 ),
-                const SizedBox(height: AppSpacing.xs),
+                const SizedBox(height: 1),
                 SizedBox(
-                  height: 32,
+                  height: 28,
                   child: Row(
                     children: [
                     Expanded(child: Center(child: Text(
@@ -418,7 +421,7 @@ class _FallbackIcon extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
       ),
       child: Center(
-        child: Icon(category.icon, size: 36, color: color),
+        child: Icon(category.icon, size: 30, color: color),
       ),
     );
   }

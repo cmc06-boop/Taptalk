@@ -251,7 +251,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   key: ValueKey(
                     'subcats_${lang.name}_${app.languageRevision}_${app.selectedCategoryKey}',
                   ),
-                  gridDelegate: AppSpacing.phraseGridDelegate(context),
+                  gridDelegate: AppSpacing.categoryGridDelegate(context),
                   delegate: SliverChildBuilderDelegate(
                     (context, i) {
                       final sub = app.subcategoriesForSelected[i];
