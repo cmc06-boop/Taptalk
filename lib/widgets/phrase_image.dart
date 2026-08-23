@@ -475,7 +475,9 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
 
       await controller.setVolume(0);
       await controller.setLooping(false);
-      await controller.seekTo(Duration.zero);
+      if (controller.value.position > Duration.zero) {
+        await controller.seekTo(Duration.zero);
+      }
       if (widget.playing) {
         controller.addListener(_onTick);
         _controller = controller;
@@ -490,16 +492,27 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
       }
 
       await controller.play();
-      for (var i = 0; i < 8; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-        if (!mounted || gen != _gen) {
-          await _disposeControllerInstance(controller);
-          return;
+      await WidgetsBinding.instance.endOfFrame;
+      if (controller.value.size.width <= 0) {
+        for (var i = 0; i < 4; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 32));
+          if (!mounted || gen != _gen) {
+            await _disposeControllerInstance(controller);
+            return;
+          }
+          if (controller.value.size.width > 0) break;
         }
-        if (controller.value.size.width > 0) break;
+      } else {
+        await Future<void>.delayed(const Duration(milliseconds: 32));
+      }
+      if (!mounted || gen != _gen) {
+        await _disposeControllerInstance(controller);
+        return;
       }
       await controller.pause();
-      await controller.seekTo(Duration.zero);
+      if (controller.value.position > Duration.zero) {
+        await controller.seekTo(Duration.zero);
+      }
 
       controller.addListener(_onTick);
       _controller = controller;
@@ -554,17 +567,23 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
 
   Future<void> _capturePoster(int gen) async {
     if (_posterPath != null) return;
-    for (var attempt = 0; attempt < 4; attempt++) {
+    for (var attempt = 0; attempt < 3; attempt++) {
       await WidgetsBinding.instance.endOfFrame;
       await Future<void>.delayed(
-        Duration(milliseconds: attempt == 0 ? 80 : 140),
+        Duration(milliseconds: attempt == 0 ? 32 : 80),
       );
       if (!mounted || gen != _gen) return;
       try {
         final boundary = _captureKey.currentContext?.findRenderObject()
             as RenderRepaintBoundary?;
         if (boundary == null || !boundary.hasSize) continue;
-        final image = await boundary.toImage(pixelRatio: 1.5);
+        final videoSize = _controller?.value.size ?? Size.zero;
+        final boxW = boundary.size.width;
+        final targetW = videoSize.width > 0 ? videoSize.width : 1280;
+        final pixelRatio = boxW <= 0
+            ? 3.0
+            : (targetW / boxW).clamp(2.0, 6.0);
+        final image = await boundary.toImage(pixelRatio: pixelRatio);
         final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
         image.dispose();
         if (bytes == null) continue;
@@ -616,8 +635,10 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
     if (c == null || !c.value.isInitialized) return;
     _runToEnd = true;
     try {
-      await c.seekTo(Duration.zero);
       await c.setLooping(false);
+      if (c.value.position > const Duration(milliseconds: 40)) {
+        await c.seekTo(Duration.zero);
+      }
       await c.play();
       PhraseVideoSpeakSync.signalReady();
     } catch (_) {}
@@ -723,6 +744,8 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
         width: double.infinity,
         height: double.infinity,
         gaplessPlayback: true,
+        filterQuality: FilterQuality.high,
+        isAntiAlias: true,
         errorBuilder: (_, _, _) => const SizedBox.expand(),
       );
     }

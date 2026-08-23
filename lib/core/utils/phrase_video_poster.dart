@@ -24,7 +24,12 @@ Future<void> warmPhraseVideoPosterDirectory() async {
 File _posterFile(String source) {
   final digest = sha256.convert(utf8.encode(source)).toString();
   return File(
-    p.join(_docs!, 'phrase_images', 'posters', '${digest.substring(0, 24)}.png'),
+    p.join(
+      _docs!,
+      'phrase_images',
+      'posters',
+      '${digest.substring(0, 24)}_hq.png',
+    ),
   );
 }
 
