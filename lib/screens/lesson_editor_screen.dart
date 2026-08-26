@@ -16,6 +16,7 @@ import '../widgets/panel_card.dart';
 import '../widgets/phrase_card.dart';
 import '../widgets/phrase_composer_panel.dart';
 import '../widgets/edit_phrase_dialog.dart';
+import '../widgets/view_phrase_dialog.dart';
 
 class LessonEditorScreen extends StatefulWidget {
   const LessonEditorScreen({
@@ -320,6 +321,11 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
                       speak: true,
                     ),
                     onFavorite: () {},
+                    onView: () => ViewPhraseDialog.show(
+                      context,
+                      phrase: phrase,
+                      displayText: displayText,
+                    ),
                     onEdit: () => _editPhrase(lessonPhrase),
                     onDelete: () => _deletePhrase(lessonPhrase),
                   );

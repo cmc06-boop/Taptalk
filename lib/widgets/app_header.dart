@@ -160,6 +160,37 @@ class AppHeader extends StatelessWidget {
   }
 }
 
+/// Page name for [AppHeader.titleWidget], sized to the same 85px block the
+/// branded wordmark occupies so every page's body starts at the same height.
+class AppHeaderTitle extends StatelessWidget {
+  const AppHeaderTitle(this.label, {super.key});
+
+  static const double height = 85;
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = context.watch<AppState>().theme;
+    return SizedBox(
+      height: height,
+      child: Center(
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: GoogleFonts.poppins(
+            fontSize: 22,
+            fontWeight: FontWeight.w800,
+            color: theme.textMain,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _CircleIconButton extends StatelessWidget {
   const _CircleIconButton({
     required this.icon,

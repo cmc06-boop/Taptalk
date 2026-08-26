@@ -214,6 +214,36 @@ class _FrequentlyUsedSectionState extends State<FrequentlyUsedSection> {
             ),
           )
         else ...[
+          if (hasMore)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => _showAllPhrasesSheet(
+                    grouped: grouped,
+                    categoryKeys: categoryKeys,
+                    selectedKey: selectedKey,
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                      vertical: AppSpacing.xs,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    AppStrings.seeAll(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: theme.bgAccent,
+                    ),
+                  ),
+                ),
+              ),
+            ),
           for (final stat in previewItems)
             _PhraseStatCard(
               theme: theme,
@@ -221,35 +251,6 @@ class _FrequentlyUsedSectionState extends State<FrequentlyUsedSection> {
               phrase: widget.labelForPhrase(stat),
               count: stat.count,
             ),
-          if (hasMore) ...[
-            const SizedBox(height: AppSpacing.xs),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: () => _showAllPhrasesSheet(
-                  grouped: grouped,
-                  categoryKeys: categoryKeys,
-                  selectedKey: selectedKey,
-                ),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.sm,
-                    vertical: AppSpacing.xs,
-                  ),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                child: Text(
-                  AppStrings.seeAll(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: theme.bgAccent,
-                  ),
-                ),
-              ),
-            ),
-          ],
         ],
       ],
     );
@@ -448,9 +449,15 @@ class _PhraseStatCard extends StatelessWidget {
         vertical: AppSpacing.md,
       ),
       decoration: BoxDecoration(
-        color: theme.bgMid.withValues(alpha: 0.22),
+        color: theme.bgMid.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(_cardRadius),
-        border: Border.all(color: const Color(0xFFE9EEF2)),
+        boxShadow: [
+          BoxShadow(
+            color: theme.textMain.withValues(alpha: 0.07),
+            blurRadius: 2,
+            offset: const Offset(0, 1),
+          ),
+        ],
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
@@ -459,7 +466,7 @@ class _PhraseStatCard extends StatelessWidget {
             child: Text(
               phrase,
               style: GoogleFonts.poppins(
-                fontSize: 14,
+                fontSize: 12.5,
                 fontWeight: FontWeight.w600,
                 color: theme.textMain,
                 height: 1.3,

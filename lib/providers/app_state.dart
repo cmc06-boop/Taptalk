@@ -277,12 +277,18 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   bool _isShowing(AppRoute route) {
     final nav = navigatorKey.currentState;
     if (nav == null) return _route == route;
+    return _topRouteName(nav) == route.name;
+  }
+
+  /// Reads the topmost route name without popping anything — the predicate
+  /// returns true on the first route it visits.
+  String? _topRouteName(NavigatorState nav) {
     String? name;
     nav.popUntil((current) {
       name = current.settings.name;
       return true;
     });
-    return name == route.name;
+    return name;
   }
 
   Future<void> _waitForRouteIdle() async {
@@ -1184,21 +1190,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         request.teacherFirebaseUid?.trim() ??
         (await _resolveAccountFirebaseUid()) ??
         '';
-    if (learnerFirebaseUid.isNotEmpty && teacherFirebaseUid.isNotEmpty) {
-      final teacherName = await _repo.teacherDisplayNameForUserId(_user!.id);
-      await _notificationSync.syncClassEnrollment(
-        classId: request.classId,
-        classCode: request.classCode,
-        className: request.className,
-        teacherFirebaseUid: teacherFirebaseUid,
-        learnerUserId: request.learnerUserId,
-        learnerName: request.learnerName,
-        learnerFirebaseUid: learnerFirebaseUid,
-        teacherName: AppRepository.isGenericAccountName(teacherName)
-            ? null
-            : teacherName,
-      );
-    }
     final respondedAt = DateTime.now();
     await _repo.updateJoinRequestStatus(
       requestId: requestId,
@@ -1206,21 +1197,40 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       respondedAt: respondedAt,
     );
     if (learnerFirebaseUid.isNotEmpty && teacherFirebaseUid.isNotEmpty) {
-      await _notificationSync.syncClassJoinRequest(
-        event: ClassJoinRequestCloudEvent(
+      final teacherName = await _repo.teacherDisplayNameForUserId(_user!.id);
+      _pushToCloudInBackground(
+        'Class enrollment',
+        () => _notificationSync.syncClassEnrollment(
           classId: request.classId,
           classCode: request.classCode,
           className: request.className,
           teacherFirebaseUid: teacherFirebaseUid,
-          teacherUserId: request.teacherUserId,
           learnerUserId: request.learnerUserId,
           learnerName: request.learnerName,
           learnerFirebaseUid: learnerFirebaseUid,
-          status: ClassJoinRequest.statusToString(
-            ClassJoinRequestStatus.accepted,
+          teacherName: AppRepository.isGenericAccountName(teacherName)
+              ? null
+              : teacherName,
+        ),
+      );
+      _pushToCloudInBackground(
+        'Join request accept',
+        () => _notificationSync.syncClassJoinRequest(
+          event: ClassJoinRequestCloudEvent(
+            classId: request.classId,
+            classCode: request.classCode,
+            className: request.className,
+            teacherFirebaseUid: teacherFirebaseUid,
+            teacherUserId: request.teacherUserId,
+            learnerUserId: request.learnerUserId,
+            learnerName: request.learnerName,
+            learnerFirebaseUid: learnerFirebaseUid,
+            status: ClassJoinRequest.statusToString(
+              ClassJoinRequestStatus.accepted,
+            ),
+            requestedAt: request.requestedAt,
+            respondedAt: respondedAt,
           ),
-          requestedAt: request.requestedAt,
-          respondedAt: respondedAt,
         ),
       );
     }
@@ -1254,21 +1264,24 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         (await _resolveAccountFirebaseUid()) ??
         '';
     if (learnerFirebaseUid.isNotEmpty && teacherFirebaseUid.isNotEmpty) {
-      await _notificationSync.syncClassJoinRequest(
-        event: ClassJoinRequestCloudEvent(
-          classId: request.classId,
-          classCode: request.classCode,
-          className: request.className,
-          teacherFirebaseUid: teacherFirebaseUid,
-          teacherUserId: request.teacherUserId,
-          learnerUserId: request.learnerUserId,
-          learnerName: request.learnerName,
-          learnerFirebaseUid: learnerFirebaseUid,
-          status: ClassJoinRequest.statusToString(
-            ClassJoinRequestStatus.rejected,
+      _pushToCloudInBackground(
+        'Join request reject',
+        () => _notificationSync.syncClassJoinRequest(
+          event: ClassJoinRequestCloudEvent(
+            classId: request.classId,
+            classCode: request.classCode,
+            className: request.className,
+            teacherFirebaseUid: teacherFirebaseUid,
+            teacherUserId: request.teacherUserId,
+            learnerUserId: request.learnerUserId,
+            learnerName: request.learnerName,
+            learnerFirebaseUid: learnerFirebaseUid,
+            status: ClassJoinRequest.statusToString(
+              ClassJoinRequestStatus.rejected,
+            ),
+            requestedAt: request.requestedAt,
+            respondedAt: respondedAt,
           ),
-          requestedAt: request.requestedAt,
-          respondedAt: respondedAt,
         ),
       );
     }
@@ -1276,6 +1289,18 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _joinRequestsRevision++;
     notifyListeners();
     return null;
+  }
+
+  /// Firestore's set() only completes once the server acknowledges it, so
+  /// awaiting a join-request push stalls the UI indefinitely on a weak
+  /// connection. The local DB is already updated and Firestore flushes queued
+  /// writes on reconnect, so these go out without blocking the caller.
+  void _pushToCloudInBackground(String label, Future<void> Function() push) {
+    unawaited(
+      Future(push).catchError((Object e, StackTrace st) {
+        debugPrint('$label cloud push pending: $e\n$st');
+      }),
+    );
   }
 
   Future<void> _syncTeacherAlertsFromCloud() async {
@@ -1926,6 +1951,20 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       _pageStack.removeLast();
     }
     _route = _pageStack.last;
+    _popDetailRoutes(nav);
+  }
+
+  /// Detail pages opened with a bare [Navigator.push] (the child monitoring
+  /// page, the lesson editor) carry no route name, so [_pageStack] never sees
+  /// them and they survive a pop-back. Drop them so tapping a menu item always
+  /// lands on that route's own screen instead of the last detail page opened.
+  void _popDetailRoutes(NavigatorState? nav) {
+    if (nav == null) return;
+    var guard = 0;
+    while (nav.canPop() && _topRouteName(nav) == null && guard < 20) {
+      nav.pop();
+      guard++;
+    }
   }
 
   void _scheduleRouteRefresh(AppRoute route) {
@@ -2874,35 +2913,41 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }) async {
     if (!CloudScope.syncMonitoring) return;
     if (_user == null || !_user!.isLearner) return;
-    if (await NetworkStatus.isOffline() || NetworkStatus.isCloudBlocked) return;
-    await FirebaseService.instance.initialize();
-    await _notificationSync.initialize();
-    if (!_notificationSync.isCloudAvailable) return;
-    final uid = await _learnerFirebaseUidForSync();
-    if (uid == null || uid.isEmpty) return;
-    final effectiveCategoryKey = AppRepository.isLessonCategoryKey(categoryKey)
-        ? categoryKey
-        : AppRepository.normalizeCategoryKey(categoryKey);
-    final syncKey = AppRepository.remoteActivitySyncKey(
-      createdAt: createdAt,
-      phraseText: phraseText,
-      categoryKey: effectiveCategoryKey,
-    );
-    final pushed = await _notificationSync.pushLearnerActivity(
-      LearnerActivityCloudEvent(
-        learnerFirebaseUid: uid,
-        phraseText: phraseText,
-        categoryKey: categoryKey,
+    // Same as the pending queue: the 2-minute cloud-block cooldown is from
+    // profile sync, not activity. Leaving the row unsynced is enough retry.
+    if (await NetworkStatus.isOffline()) return;
+    try {
+      await FirebaseService.instance.initialize();
+      await _notificationSync.initialize();
+      if (!_notificationSync.isCloudAvailable) return;
+      final uid = await _learnerFirebaseUidForSync();
+      if (uid == null || uid.isEmpty) return;
+      final effectiveCategoryKey = AppRepository.isLessonCategoryKey(categoryKey)
+          ? categoryKey
+          : AppRepository.normalizeCategoryKey(categoryKey);
+      final syncKey = AppRepository.remoteActivitySyncKey(
         createdAt: createdAt,
-        className: className,
-        lessonTitle: lessonTitle,
-      ),
-    );
-    if (pushed) {
-      await _repo.markHistoryCloudSynced(
-        historyId: historyId,
-        syncKey: syncKey,
+        phraseText: phraseText,
+        categoryKey: effectiveCategoryKey,
       );
+      final pushed = await _notificationSync.pushLearnerActivity(
+        LearnerActivityCloudEvent(
+          learnerFirebaseUid: uid,
+          phraseText: phraseText,
+          categoryKey: categoryKey,
+          createdAt: createdAt,
+          className: className,
+          lessonTitle: lessonTitle,
+        ),
+      );
+      if (pushed) {
+        await _repo.markHistoryCloudSynced(
+          historyId: historyId,
+          syncKey: syncKey,
+        );
+      }
+    } catch (e, st) {
+      debugPrint('Push history item to cloud failed: $e\n$st');
     }
   }
 
@@ -2911,7 +2956,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (!CloudScope.syncMonitoring) return;
     if (_user == null || !_user!.isLearner) return;
     if (_monitoringSyncInFlight) return;
-    if (await NetworkStatus.isOffline() || NetworkStatus.isCloudBlocked) return;
+    // Deliberately ignores [NetworkStatus.isCloudBlocked]: that cooldown is set
+    // by an unrelated profile-sync failure and was starving this queue for two
+    // minutes at a time, which is exactly when it needs to drain.
+    if (await NetworkStatus.isOffline()) return;
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
     if (!_notificationSync.isCloudAvailable) return;
@@ -2957,6 +3005,17 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state != AppLifecycleState.resumed) return;
+    // Timers are unreliable while backgrounded, so a learner who used phrases
+    // offline could sit on a full queue until the next connectivity event.
+    if (_user != null && _user!.isLearner && CloudScope.syncMonitoring) {
+      unawaited(_syncPendingLearnerActivityToCloud());
+    }
+  }
+
   void _startMonitoringConnectivitySync() {
     _connectivitySubscription?.cancel();
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((
@@ -2972,7 +3031,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _onConnectivityRestored() async {
     if (_user == null) return;
-    if (await NetworkStatus.isOffline() || NetworkStatus.isCloudBlocked) return;
+    if (await NetworkStatus.isOffline()) return;
+    if (NetworkStatus.isCloudBlocked) {
+      // Profile cooldown must not stall the learner activity queue.
+      if (_user!.isLearner && CloudScope.syncMonitoring) {
+        unawaited(_syncPendingLearnerActivityToCloud());
+      }
+      return;
+    }
 
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
@@ -5171,20 +5237,32 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       teacherFirebaseUid: teacherFirebaseUid,
       remoteId: '${normalized}_$learnerFirebaseUid',
     );
-    await _notificationSync.syncClassJoinRequest(
-      event: ClassJoinRequestCloudEvent(
-        classId: classId,
-        classCode: normalized,
-        className: className,
-        teacherFirebaseUid: teacherFirebaseUid,
-        teacherUserId: teacherUserId,
-        learnerUserId: _user!.id,
-        learnerName: _user!.fullName,
-        learnerFirebaseUid: learnerFirebaseUid,
-        status: ClassJoinRequest.statusToString(ClassJoinRequestStatus.pending),
-        requestedAt: now,
-      ),
-    );
+    // Firestore's set() only completes once the server acknowledges it, so a
+    // flaky connection would leave the enroll spinner turning forever. The row
+    // is already in SQLite and Firestore queues the write for reconnect, so a
+    // slow ack still counts as a sent request.
+    try {
+      await _notificationSync
+          .syncClassJoinRequest(
+            event: ClassJoinRequestCloudEvent(
+              classId: classId,
+              classCode: normalized,
+              className: className,
+              teacherFirebaseUid: teacherFirebaseUid,
+              teacherUserId: teacherUserId,
+              learnerUserId: _user!.id,
+              learnerName: _user!.fullName,
+              learnerFirebaseUid: learnerFirebaseUid,
+              status: ClassJoinRequest.statusToString(
+                ClassJoinRequestStatus.pending,
+              ),
+              requestedAt: now,
+            ),
+          )
+          .timeout(const Duration(seconds: 8));
+    } catch (e, st) {
+      debugPrint('Join request cloud sync pending: $e\n$st');
+    }
     return null;
   }
 
@@ -5782,13 +5860,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     required int learnerUserId,
     required ChildUsagePeriod period,
     DateTime? month,
-    DateTime? linkedAt,
     bool syncCloud = false,
   }) async {
-    final linked = linkedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
     final range = _dateRangeForPeriod(period, month: month);
     final locale = _language == AppLanguage.filipino ? 'fil_PH' : 'en_US';
-    final earliest = linked.isAfter(range.$1) ? linked : range.$1;
 
     List<RemoteLearnerActivity> cloudActivities = const [];
     if (syncCloud) {
@@ -5840,19 +5915,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
     final trendSummary = VocabularyGrowthCalculator.summarize(
       firstUses: firstUses,
-      now: DateTime.now(),
-      rangeStart: earliest,
+      period: period,
+      rangeStart: range.$1,
+      rangeEnd: range.$2,
       localeName: locale,
     );
 
     final summary = VocabularyGrowthSummary(
-      totalVocabulary: periodFirstUses.isNotEmpty
-          ? periodFirstUses.length
-          : phrasesUsed,
-      newWordsThisWeek: trendSummary.newWordsThisWeek,
-      newWordsThisMonth: trendSummary.newWordsThisMonth,
-      weeklyTrend: trendSummary.weeklyTrend,
-      monthlyTrend: trendSummary.monthlyTrend,
+      totalVocabulary: periodFirstUses.length,
+      trend: trendSummary.trend,
       categorySlices: trendSummary.categorySlices,
     );
 
@@ -6101,12 +6172,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await SttService.releaseForTts();
 
     if (_speechPaused && spoken == _pausedSpeechText.trim()) {
-      return _resumePausedSpeech(
-        record: record,
-        categoryKey: catKey,
-        className: className,
-        lessonTitle: lessonTitle,
-      );
+      // Already logged when this utterance first started.
+      return _resumePausedSpeech();
     }
 
     final gen = ++_ttsGeneration;
@@ -6141,6 +6208,21 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       }
     }
 
+    // Log the use the moment playback starts rather than after the audio ends.
+    // Learners routinely tap the next phrase mid-sentence, and monitoring was
+    // dropping every one of those interrupted phrases. Unawaited so writing
+    // history never delays speech.
+    if (record) {
+      unawaited(
+        recordHistory(
+          text,
+          categoryKey: catKey,
+          className: className,
+          lessonTitle: lessonTitle,
+        ),
+      );
+    }
+
     final completed = await _speakUntilDone(gen: gen, fullText: spoken);
     if (gen != _ttsGeneration) {
       if (_speechPaused) return true;
@@ -6157,24 +6239,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _currentSpeakGeneration = null;
     _resetSpeechTracking();
     notifyListeners();
-
-    if (record) {
-      await recordHistory(
-        text,
-        categoryKey: catKey,
-        className: className,
-        lessonTitle: lessonTitle,
-      );
-    }
     return true;
   }
 
-  Future<bool> _resumePausedSpeech({
-    required bool record,
-    required String categoryKey,
-    String? className,
-    String? lessonTitle,
-  }) async {
+  Future<bool> _resumePausedSpeech() async {
     final fullText = _pausedSpeechText.trim();
     if (fullText.isEmpty) {
       _resetSpeechTracking();
@@ -6225,15 +6293,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _currentSpeakGeneration = null;
     _resetSpeechTracking();
     notifyListeners();
-
-    if (record) {
-      await recordHistory(
-        fullText,
-        categoryKey: categoryKey,
-        className: className,
-        lessonTitle: lessonTitle,
-      );
-    }
     return true;
   }
 

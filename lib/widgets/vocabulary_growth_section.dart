@@ -4,7 +4,6 @@ import 'package:google_fonts/google_fonts.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
-import '../core/utils/vocabulary_growth_calculator.dart';
 import '../data/models/vocabulary_growth_summary.dart';
 import 'vocabulary_growth_chart.dart';
 
@@ -16,6 +15,7 @@ class VocabularyGrowthSection extends StatefulWidget {
     required this.lang,
     required this.phrasesUsed,
     required this.phraseTaps,
+    required this.periodLabel,
   });
 
   final VocabularyGrowthSummary summary;
@@ -24,12 +24,14 @@ class VocabularyGrowthSection extends StatefulWidget {
   final int phrasesUsed;
   final int phraseTaps;
 
+  /// Localized name of the selected period, used by the empty chart state.
+  final String periodLabel;
+
   @override
   State<VocabularyGrowthSection> createState() => _VocabularyGrowthSectionState();
 }
 
 class _VocabularyGrowthSectionState extends State<VocabularyGrowthSection> {
-  VocabularyTrendGranularity _granularity = VocabularyTrendGranularity.weeks;
   bool _showCumulative = false;
 
   @override
@@ -37,22 +39,11 @@ class _VocabularyGrowthSectionState extends State<VocabularyGrowthSection> {
     final theme = widget.theme;
     final lang = widget.lang;
     final summary = widget.summary;
-    final trend = _granularity == VocabularyTrendGranularity.weeks
-        ? summary.weeklyTrend
-        : summary.monthlyTrend;
+    final trend = summary.trend;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          AppStrings.vocabularyGrowthSubtitle(lang),
-          style: GoogleFonts.poppins(
-            fontSize: 11,
-            color: theme.textMain.withValues(alpha: 0.62),
-            height: 1.35,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.md),
         _StatRow(
           theme: theme,
           lang: lang,
@@ -61,35 +52,19 @@ class _VocabularyGrowthSectionState extends State<VocabularyGrowthSection> {
           newWords: summary.totalVocabulary,
         ),
         const SizedBox(height: AppSpacing.md),
-        Text(
-          AppStrings.newWordsTrend(lang),
-          style: GoogleFonts.poppins(
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            color: theme.textMain,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
         Row(
           children: [
-            _ToggleChip(
-              label: AppStrings.trendByWeek(lang),
-              selected: _granularity == VocabularyTrendGranularity.weeks,
-              theme: theme,
-              onTap: () => setState(
-                () => _granularity = VocabularyTrendGranularity.weeks,
+            Expanded(
+              child: Text(
+                AppStrings.newWordsTrend(lang),
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: theme.textMain,
+                ),
               ),
             ),
             const SizedBox(width: AppSpacing.sm),
-            _ToggleChip(
-              label: AppStrings.trendByMonth(lang),
-              selected: _granularity == VocabularyTrendGranularity.months,
-              theme: theme,
-              onTap: () => setState(
-                () => _granularity = VocabularyTrendGranularity.months,
-              ),
-            ),
-            const Spacer(),
             _ToggleChip(
               label: lang == AppLanguage.filipino ? 'Kabuuan' : 'Total',
               selected: _showCumulative,
@@ -105,6 +80,10 @@ class _VocabularyGrowthSectionState extends State<VocabularyGrowthSection> {
           theme: theme,
           lang: lang,
           showCumulative: _showCumulative,
+          emptyMessage: AppStrings.noNewPhrasesForPeriod(
+            lang,
+            widget.periodLabel,
+          ),
         ),
       ],
     );

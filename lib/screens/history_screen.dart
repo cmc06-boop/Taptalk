@@ -20,7 +20,11 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
+  static const _slideOutDuration = Duration(milliseconds: 320);
+
   List<HistoryModel> _items = [];
+  final Set<int> _slidingOutIds = {};
+  bool _clearing = false;
 
   /// Learner history shows phrase taps only — not internal app-session markers.
   List<HistoryModel> _visibleHistory(List<HistoryModel> source) {
@@ -41,6 +45,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   void _mergeNewHistory(List<HistoryModel> source) {
+    if (_clearing) return;
     final visible = _visibleHistory(source);
     if (visible.isEmpty) {
       if (_items.isNotEmpty) {
@@ -89,7 +94,21 @@ class _HistoryScreenState extends State<HistoryScreen> {
       ),
     );
     if (confirm != true || !mounted) return;
-    setState(() => _items = []);
+    final toClear = List<HistoryModel>.from(_items);
+    if (toClear.isEmpty) return;
+    _clearing = true;
+    setState(() {
+      _slidingOutIds
+        ..clear()
+        ..addAll(toClear.map((e) => e.id));
+    });
+    await Future<void>.delayed(_slideOutDuration);
+    if (!mounted) return;
+    setState(() {
+      _items = [];
+      _slidingOutIds.clear();
+      _clearing = false;
+    });
     await context.read<AppState>().clearAllHistory();
   }
 
@@ -189,7 +208,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
       widgets.add(
         Padding(
           padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-          child: _buildCard(item, lang),
+          child: _HistorySlideOut(
+            sliding: _slidingOutIds.contains(item.id),
+            duration: _slideOutDuration,
+            child: _buildCard(item, lang),
+          ),
         ),
       );
     }
@@ -257,6 +280,30 @@ class _HistoryScreenState extends State<HistoryScreen> {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _HistorySlideOut extends StatelessWidget {
+  const _HistorySlideOut({
+    required this.sliding,
+    required this.duration,
+    required this.child,
+  });
+
+  final bool sliding;
+  final Duration duration;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRect(
+      child: AnimatedSlide(
+        offset: sliding ? const Offset(1.08, 0) : Offset.zero,
+        duration: duration,
+        curve: Curves.easeInCubic,
+        child: child,
       ),
     );
   }

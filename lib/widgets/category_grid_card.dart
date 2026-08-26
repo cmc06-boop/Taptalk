@@ -3,8 +3,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
+import '../core/l10n/app_strings.dart';
 import '../data/models/category_model.dart';
 import '../providers/app_state.dart';
+import 'compact_popup_menu.dart';
 
 /// Maps a category key to its custom card image path under assets/images/Category Cards/.
 /// Returns null if no custom image exists for that key.
@@ -278,43 +280,33 @@ class _CategoryMoreButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return PopupMenuButton<String>(
-      tooltip: 'Category actions',
-      padding: EdgeInsets.zero,
-      color: Colors.white,
-      icon: Container(
-        width: 28,
-        height: 28,
-        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.9), shape: BoxShape.circle),
-        child: const Icon(Icons.more_vert_rounded, size: 18, color: Color(0xFF5C3D2E)),
-      ),
+    final lang = context.watch<AppState>().language;
+    return CompactPopupMenu(
+      vertical: true,
+      buttonWidth: 28,
+      buttonHeight: 28,
+      dotsSize: 18,
+      buttonBackground: Colors.white.withValues(alpha: 0.9),
+      iconColor: const Color(0xFF5C3D2E),
       onSelected: (value) {
         if (value == 'edit') onEdit?.call();
         if (value == 'delete') onDelete?.call();
       },
-      itemBuilder: (_) => [
-        PopupMenuItem<String>(
-          value: 'edit',
-          enabled: onEdit != null,
-          child: const Row(
-            children: [
-              Icon(Icons.edit_outlined, size: 18, color: Color(0xFF5C3D2E)),
-              SizedBox(width: 8),
-              Text('Edit', style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF5C3D2E))),
-            ],
+      actions: [
+        if (onEdit != null)
+          CompactMenuAction(
+            value: 'edit',
+            label: AppStrings.edit(lang),
+            icon: Icons.edit_outlined,
+            color: const Color(0xFF5C3D2E),
           ),
-        ),
-        PopupMenuItem<String>(
-          value: 'delete',
-          enabled: onDelete != null,
-          child: const Row(
-            children: [
-              Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFD64545)),
-              SizedBox(width: 8),
-              Text('Delete', style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFD64545))),
-            ],
+        if (onDelete != null)
+          CompactMenuAction(
+            value: 'delete',
+            label: AppStrings.delete(lang),
+            icon: Icons.delete_outline_rounded,
+            color: const Color(0xFFD64545),
           ),
-        ),
       ],
     );
   }

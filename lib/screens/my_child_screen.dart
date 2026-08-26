@@ -9,6 +9,7 @@ import '../core/theme/theme_tokens.dart';
 import '../data/models/linked_child_model.dart';
 import '../data/models/monitored_learner.dart';
 import '../providers/app_state.dart';
+import '../widgets/compact_popup_menu.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/link_child_dialog.dart';
 import '../widgets/taptalk_result_dialog.dart';
@@ -92,8 +93,27 @@ class _MyChildScreenState extends State<MyChildScreen> {
     final children = app.linkedChildren;
 
     return LearnerScaffold(
-      title: AppStrings.appName(lang),
+      title: AppStrings.myChild(lang),
+      titleWidget: SizedBox(
+        height: 85,
+        child: Center(
+          child: Text(
+            AppStrings.myChild(lang),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.poppins(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: theme.textMain,
+            ),
+          ),
+        ),
+      ),
       currentRoute: AppRoute.myChild,
+      headerContentHeight: 85,
+      headerBottomSpacing: 0,
+      bodyTopOffset: -4,
       body: Stack(
         children: [
           RefreshIndicator(
@@ -104,40 +124,10 @@ class _MyChildScreenState extends State<MyChildScreen> {
             padding: const EdgeInsets.only(
               left: AppSpacing.lg,
               right: AppSpacing.lg,
+              top: AppSpacing.md,
               bottom: 88,
             ),
             children: [
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(AppSpacing.md),
-                decoration: BoxDecoration(
-                  color: theme.bgMid.withValues(alpha: 0.55),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      AppStrings.myChild(lang),
-                      style: GoogleFonts.poppins(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        color: theme.textMain,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(
-                      AppStrings.myChildSubtitle(lang),
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        color: theme.textMain.withValues(alpha: 0.72),
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: AppSpacing.md),
               if (children.isEmpty)
                 SizedBox(
                   height: MediaQuery.sizeOf(context).height * 0.4,
@@ -222,7 +212,7 @@ class _LinkedChildTile extends StatelessWidget {
           AppSpacing.md,
         ),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: Material(
@@ -277,37 +267,19 @@ class _LinkedChildTile extends StatelessWidget {
                 ),
               ),
             ),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextButton(
-                  onPressed: onUnlink,
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.sm,
-                      vertical: AppSpacing.sm,
-                    ),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: Text(
-                    AppStrings.unlinkChild(lang),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: theme.bgAccent,
-                    ),
-                  ),
-                ),
-                GestureDetector(
-                  onTap: onOpen,
-                  behavior: HitTestBehavior.opaque,
-                  child: Icon(
-                    Icons.chevron_right_rounded,
-                    color: theme.textMain.withValues(alpha: 0.45),
-                  ),
+            // The menu's own 24px height keeps the dots level with the name
+            // instead of centering against the whole two-line tile.
+            CompactPopupMenu(
+              iconColor: theme.textMain.withValues(alpha: 0.55),
+              onSelected: (value) {
+                if (value == 'unlink') onUnlink();
+              },
+              actions: [
+                CompactMenuAction(
+                  value: 'unlink',
+                  label: AppStrings.unlinkChild(lang),
+                  icon: Icons.link_off_rounded,
+                  color: const Color(0xFFC62828),
                 ),
               ],
             ),

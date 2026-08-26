@@ -4,18 +4,22 @@ import '../../data/models/phrase_first_use.dart';
 import '../../data/models/phrase_usage_stat.dart';
 import '../../data/models/vocabulary_growth_summary.dart';
 import '../../data/repositories/app_repository.dart';
+import '../constants/child_usage_period.dart';
+import 'session_usage_calculator.dart';
 
-enum VocabularyTrendGranularity { weeks, months }
+typedef _TrendBuckets = ({
+  List<String> labels,
+  List<String> details,
+  List<int> counts,
+});
 
 /// Builds vocabulary growth metrics from learner-added custom phrases.
 abstract final class VocabularyGrowthCalculator {
-  static const _weekBucketCount = 8;
-  static const _monthBucketCount = 6;
-
   static VocabularyGrowthSummary summarize({
     required List<PhraseFirstUse> firstUses,
-    required DateTime now,
+    required ChildUsagePeriod period,
     required DateTime rangeStart,
+    required DateTime rangeEnd,
     required String localeName,
     List<CategoryVocabularySlice>? periodCategorySlices,
   }) {
@@ -25,32 +29,21 @@ abstract final class VocabularyGrowthCalculator {
       return VocabularyGrowthSummary.empty;
     }
 
-    final weekStart = _startOfWeek(now);
-    final monthStart = DateTime(now.year, now.month);
+    final periodEntries = firstUses
+        .where(
+          (entry) =>
+              !entry.firstUsedAt.isBefore(rangeStart) &&
+              entry.firstUsedAt.isBefore(rangeEnd),
+        )
+        .toList();
 
-    var newThisWeek = 0;
-    var newThisMonth = 0;
-    for (final entry in firstUses) {
-      if (!entry.firstUsedAt.isBefore(weekStart)) newThisWeek++;
-      if (!entry.firstUsedAt.isBefore(monthStart)) newThisMonth++;
-    }
-
-    final weeklyTrend = firstUses.isEmpty
-        ? const <VocabularyGrowthPoint>[]
-        : _buildWeeklyTrend(
-            firstUses: firstUses,
-            now: now,
-            rangeStart: rangeStart,
-            localeName: localeName,
-          );
-    final monthlyTrend = firstUses.isEmpty
-        ? const <VocabularyGrowthPoint>[]
-        : _buildMonthlyTrend(
-            firstUses: firstUses,
-            now: now,
-            rangeStart: rangeStart,
-            localeName: localeName,
-          );
+    final trend = _buildTrend(
+      entries: periodEntries,
+      period: period,
+      rangeStart: rangeStart,
+      rangeEnd: rangeEnd,
+      localeName: localeName,
+    );
 
     final categorySlices = periodCategorySlices ??
         _categorySlicesFromFirstUses(firstUses);
@@ -61,10 +54,7 @@ abstract final class VocabularyGrowthCalculator {
 
     return VocabularyGrowthSummary(
       totalVocabulary: totalVocabulary,
-      newWordsThisWeek: newThisWeek,
-      newWordsThisMonth: newThisMonth,
-      weeklyTrend: weeklyTrend,
-      monthlyTrend: monthlyTrend,
+      trend: trend,
       categorySlices: categorySlices,
     );
   }
@@ -137,66 +127,123 @@ abstract final class VocabularyGrowthCalculator {
     );
   }
 
-  static List<VocabularyGrowthPoint> _buildWeeklyTrend({
-    required List<PhraseFirstUse> firstUses,
-    required DateTime now,
+  /// Buckets new phrases across the selected period so the chart axis matches
+  /// the Today / This week / Month filter instead of a fixed trailing window.
+  static List<VocabularyGrowthPoint> _buildTrend({
+    required List<PhraseFirstUse> entries,
+    required ChildUsagePeriod period,
     required DateTime rangeStart,
+    required DateTime rangeEnd,
     required String localeName,
   }) {
-    final endWeek = _startOfWeek(now);
-    final buckets = <DateTime>[];
-    for (var i = _weekBucketCount - 1; i >= 0; i--) {
-      buckets.add(endWeek.subtract(Duration(days: 7 * i)));
-    }
+    final bucketed = switch (period) {
+      ChildUsagePeriod.today => _bucketByHour(entries),
+      ChildUsagePeriod.thisWeek => _bucketByDay(
+          entries,
+          rangeStart,
+          rangeEnd,
+          localeName,
+        ),
+      ChildUsagePeriod.month => _bucketByWeek(
+          entries,
+          rangeStart,
+          rangeEnd,
+          localeName,
+        ),
+    };
 
-    final labelFormat = DateFormat.MMMd(localeName);
-    final counts = List<int>.filled(buckets.length, 0);
-    for (final entry in firstUses) {
-      if (entry.firstUsedAt.isBefore(rangeStart)) continue;
-      final week = _startOfWeek(entry.firstUsedAt);
-      final index = buckets.indexWhere(
-        (b) => b.year == week.year && b.month == week.month && b.day == week.day,
-      );
-      if (index >= 0) counts[index]++;
+    if (bucketed.counts.every((count) => count == 0)) {
+      return const <VocabularyGrowthPoint>[];
     }
-
     return _toTrendPoints(
-      labels: buckets.map((b) => labelFormat.format(b)).toList(),
-      newCounts: counts,
+      labels: bucketed.labels,
+      details: bucketed.details,
+      newCounts: bucketed.counts,
     );
   }
 
-  static List<VocabularyGrowthPoint> _buildMonthlyTrend({
-    required List<PhraseFirstUse> firstUses,
-    required DateTime now,
-    required DateTime rangeStart,
-    required String localeName,
-  }) {
-    final endMonth = DateTime(now.year, now.month);
-    final buckets = <DateTime>[];
-    for (var i = _monthBucketCount - 1; i >= 0; i--) {
-      buckets.add(DateTime(endMonth.year, endMonth.month - i));
+  static _TrendBuckets _bucketByHour(List<PhraseFirstUse> entries) {
+    final counts = List<int>.filled(24, 0);
+    for (final entry in entries) {
+      counts[entry.firstUsedAt.hour.clamp(0, 23)]++;
     }
-
-    final labelFormat = DateFormat.MMM(localeName);
-    final counts = List<int>.filled(buckets.length, 0);
-    for (final entry in firstUses) {
-      if (entry.firstUsedAt.isBefore(rangeStart)) continue;
-      final month = DateTime(entry.firstUsedAt.year, entry.firstUsedAt.month);
-      final index = buckets.indexWhere(
-        (b) => b.year == month.year && b.month == month.month,
-      );
-      if (index >= 0) counts[index]++;
-    }
-
-    return _toTrendPoints(
-      labels: buckets.map((b) => labelFormat.format(b)).toList(),
-      newCounts: counts,
+    final details = List<String>.generate(
+      24,
+      SessionUsageCalculator.hourLabelAmPm,
     );
+    final labels = List<String>.generate(24, (hour) {
+      final showLabel = hour == 0 || hour == 6 || hour == 12 || hour == 18;
+      return showLabel ? details[hour] : '';
+    });
+    return (labels: labels, details: details, counts: counts);
+  }
+
+  static _TrendBuckets _bucketByDay(
+    List<PhraseFirstUse> entries,
+    DateTime rangeStart,
+    DateTime rangeEnd,
+    String localeName,
+  ) {
+    final dayCount = rangeEnd.difference(rangeStart).inDays.clamp(1, 31);
+    final counts = List<int>.filled(dayCount, 0);
+    for (final entry in entries) {
+      final index = _dayOffset(entry.firstUsedAt, rangeStart)
+          .clamp(0, dayCount - 1);
+      counts[index]++;
+    }
+    final labelFormat = DateFormat('EEE', localeName);
+    final detailFormat = DateFormat('EEE, MMM d', localeName);
+    final labels = <String>[];
+    final details = <String>[];
+    for (var index = 0; index < dayCount; index++) {
+      final day = rangeStart.add(Duration(days: index));
+      labels.add(labelFormat.format(day));
+      details.add(detailFormat.format(day));
+    }
+    return (labels: labels, details: details, counts: counts);
+  }
+
+  static _TrendBuckets _bucketByWeek(
+    List<PhraseFirstUse> entries,
+    DateTime rangeStart,
+    DateTime rangeEnd,
+    String localeName,
+  ) {
+    final dayCount = rangeEnd.difference(rangeStart).inDays;
+    final weekCount = (dayCount / 7).ceil().clamp(1, 6);
+    final counts = List<int>.filled(weekCount, 0);
+    for (final entry in entries) {
+      final index = (_dayOffset(entry.firstUsedAt, rangeStart) ~/ 7)
+          .clamp(0, weekCount - 1);
+      counts[index]++;
+    }
+    final startFormat = DateFormat.MMMd(localeName);
+    final endFormat = DateFormat.d(localeName);
+    final labels = <String>[];
+    final details = <String>[];
+    for (var week = 0; week < weekCount; week++) {
+      final firstOffset = week * 7;
+      final lastOffset = firstOffset + 6 >= dayCount
+          ? dayCount - 1
+          : firstOffset + 6;
+      final start = rangeStart.add(Duration(days: firstOffset));
+      final end = rangeStart.add(Duration(days: lastOffset));
+      labels.add('Week ${week + 1}');
+      details.add(
+        '${startFormat.format(start)}\u2013${endFormat.format(end)}',
+      );
+    }
+    return (labels: labels, details: details, counts: counts);
+  }
+
+  static int _dayOffset(DateTime date, DateTime rangeStart) {
+    final day = DateTime(date.year, date.month, date.day);
+    return day.difference(rangeStart).inDays;
   }
 
   static List<VocabularyGrowthPoint> _toTrendPoints({
     required List<String> labels,
+    required List<String> details,
     required List<int> newCounts,
   }) {
     var running = 0;
@@ -204,14 +251,10 @@ abstract final class VocabularyGrowthCalculator {
       running += newCounts[i];
       return VocabularyGrowthPoint(
         label: labels[i],
+        detail: details[i],
         newWords: newCounts[i],
         cumulativeWords: running,
       );
     });
-  }
-
-  static DateTime _startOfWeek(DateTime date) {
-    final day = DateTime(date.year, date.month, date.day);
-    return day.subtract(Duration(days: day.weekday - 1));
   }
 }

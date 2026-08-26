@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
+import '../core/utils/profanity_filter.dart';
 import '../core/utils/speak_feedback.dart';
 import '../providers/app_state.dart';
 import '../services/stt_service.dart';
@@ -30,6 +31,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _textController = HighlightingTextController();
+  final ScrollController _composerScroll = ScrollController();
   final _undoStack = <String>[];
   final SttService _stt = SttService();
   bool _listening = false;
@@ -46,6 +48,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (_undoStack.isEmpty || _undoStack.last != _textController.text) {
         _undoStack.add(_textController.text);
       }
+      _keepComposerEndVisible();
     });
   }
 
@@ -53,7 +56,31 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _stt.cancel();
     _textController.dispose();
+    _composerScroll.dispose();
     super.dispose();
+  }
+
+  /// Pins the composer to its last line while text is being added at the end,
+  /// so the newest words stay visible once the box is full.
+  void _keepComposerEndVisible() {
+    final selection = _textController.selection;
+    final atEnd = selection.isCollapsed &&
+        selection.baseOffset >= _textController.text.length;
+    if (!atEnd) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_composerScroll.hasClients) return;
+      final maxOffset = _composerScroll.position.maxScrollExtent;
+      if (_composerScroll.offset >= maxOffset) return;
+      _composerScroll.jumpTo(maxOffset);
+    });
+  }
+
+  /// Replaces composer text and leaves the caret at the end.
+  void _setComposerText(String value) {
+    _textController.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
   }
 
   void _syncMicListening() {
@@ -127,7 +154,8 @@ class _HomeScreenState extends State<HomeScreen> {
           return;
         }
         _micSessionWords = nextWords;
-        final composed = '$_micSessionPrefix$_micSessionWords';
+        final composed =
+            '$_micSessionPrefix${ProfanityFilter.mask(_micSessionWords)}';
         if (_textController.text == composed) return;
         _textController.value = TextEditingValue(
           text: composed,
@@ -150,6 +178,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _undoStack
       ..clear()
       ..add('');
+    if (_composerScroll.hasClients) _composerScroll.jumpTo(0);
     setState(() => _attachedImagePath = null);
   }
 
@@ -165,12 +194,13 @@ class _HomeScreenState extends State<HomeScreen> {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
     final current = _textController.text.trim();
-    _textController.text = current.isEmpty ? trimmed : '$current $trimmed';
+    _setComposerText(current.isEmpty ? trimmed : '$current $trimmed');
+    // A card tap is a use — vocabulary growth counts taps, not only spoken audio.
+    unawaited(context.read<AppState>().recordHistory(trimmed));
     if (speak) {
       speakWithFeedback(
         context,
         trimmed,
-        record: true,
         phraseId: phraseId,
       );
     }
@@ -302,7 +332,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               ? null
                               : () {
                                   _undoStack.removeLast();
-                                  _textController.text = _undoStack.last;
+                                  _setComposerText(_undoStack.last);
                                 },
                         ),
                         IconButton(
@@ -365,6 +395,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       TextField(
                         controller: _textController,
+                        scrollController: _composerScroll,
                         maxLines: 4,
                         style: GoogleFonts.poppins(
                           fontSize: 14,

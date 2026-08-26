@@ -8,6 +8,7 @@ import '../core/l10n/app_strings.dart';
 import '../data/models/enrolled_class_model.dart';
 import '../providers/app_state.dart';
 import '../widgets/class_color_card.dart';
+import '../widgets/compact_popup_menu.dart';
 import '../widgets/enroll_class_dialog.dart';
 import '../widgets/taptalk_result_dialog.dart';
 import '../widgets/learner_scaffold.dart';
@@ -195,11 +196,8 @@ class _ClassesScreenState extends State<ClassesScreen> {
                         title: enrolled.className,
                         subtitle: enrolled.teacherName,
                         onTap: () => _openClass(context, enrolled),
-                        trailing: PopupMenuButton<String>(
-                          icon: Icon(
-                            Icons.more_vert_rounded,
-                            color: Colors.white.withValues(alpha: 0.92),
-                          ),
+                        trailing: CompactPopupMenu(
+                          iconColor: Colors.white.withValues(alpha: 0.92),
                           onSelected: (value) {
                             if (value == 'unenroll') {
                               _confirmUnenroll(
@@ -209,15 +207,12 @@ class _ClassesScreenState extends State<ClassesScreen> {
                               );
                             }
                           },
-                          itemBuilder: (ctx) => [
-                            PopupMenuItem(
+                          actions: [
+                            CompactMenuAction(
                               value: 'unenroll',
-                              child: Text(
-                                AppStrings.unenroll(lang),
-                                style: GoogleFonts.poppins(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
+                              label: AppStrings.unenroll(lang),
+                              icon: Icons.logout_rounded,
+                              color: const Color(0xFFC62828),
                             ),
                           ],
                         ),

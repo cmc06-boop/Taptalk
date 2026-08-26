@@ -14,6 +14,7 @@ import '../data/models/class_lesson.dart';
 import '../providers/app_state.dart';
 import '../widgets/localized_content_text.dart';
 import '../widgets/class_color_card.dart';
+import '../widgets/compact_popup_menu.dart';
 import '../widgets/create_lesson_dialog.dart';
 import '../widgets/code_qr_sheet.dart';
 import '../widgets/taptalk_result_dialog.dart';
@@ -227,10 +228,6 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
         count: _studentCount,
         accent: theme.bgAccent,
       ),
-      headerTrailing: _HeaderQrButton(
-        accent: theme.bgAccent,
-        onTap: _showClassQr,
-      ),
       currentRoute: AppRoute.teacherMyClasses,
       showBottomNav: false,
       body: Stack(
@@ -252,6 +249,7 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
                 className: _className,
                 classCode: widget.classCode,
                 onCopyCode: _copyCode,
+                onShowQr: _showClassQr,
               ),
               const SizedBox(height: AppSpacing.lg),
               Text(
@@ -325,12 +323,14 @@ class _ClassHeaderBanner extends StatelessWidget {
     required this.className,
     required this.classCode,
     required this.onCopyCode,
+    required this.onShowQr,
   });
 
   final int classId;
   final String className;
   final String classCode;
   final VoidCallback onCopyCode;
+  final VoidCallback onShowQr;
 
   @override
   Widget build(BuildContext context) {
@@ -360,15 +360,24 @@ class _ClassHeaderBanner extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                LocalizedContentText(
-                  className,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.poppins(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                  ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: LocalizedContentText(
+                        className,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    _BannerQrButton(colors: colors, onTap: onShowQr),
+                  ],
                 ),
                 const SizedBox(height: 4),
                 InkWell(
@@ -406,34 +415,30 @@ class _ClassHeaderBanner extends StatelessWidget {
   }
 }
 
-class _HeaderQrButton extends StatelessWidget {
-  const _HeaderQrButton({
-    required this.accent,
-    required this.onTap,
-  });
+/// Translucent QR chip that reads over the class banner's gradient.
+class _BannerQrButton extends StatelessWidget {
+  const _BannerQrButton({required this.colors, required this.onTap});
 
-  final Color accent;
+  final ClassColorScheme colors;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Color.alphaBlend(
-        Colors.white.withValues(alpha: 0.55),
-        accent,
-      ),
+      color: colors.badgeBg,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.28)),
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         onTap: onTap,
         child: const SizedBox(
-          width: 36,
-          height: 36,
+          width: 32,
+          height: 32,
           child: Icon(
             Icons.qr_code_2_rounded,
-            size: 20,
+            size: 19,
             color: Colors.white,
           ),
         ),
@@ -519,57 +524,28 @@ class _LessonCard extends StatelessWidget {
                   ],
                 ),
               ),
-              PopupMenuButton<String>(
-                icon: Icon(
-                  Icons.more_vert_rounded,
-                  color: theme.textMain.withValues(alpha: 0.5),
-                ),
+              CompactPopupMenu(
+                iconColor: theme.textMain.withValues(alpha: 0.5),
                 onSelected: (v) {
                   if (v == 'edit') onEdit();
                   if (v == 'delete') onDelete();
                 },
-                itemBuilder: (ctx) => [
-                  PopupMenuItem(
+                actions: [
+                  CompactMenuAction(
                     value: 'edit',
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.edit_outlined,
-                          size: 20,
-                          color: theme.textMain.withValues(alpha: 0.75),
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        Text(
-                          AppStrings.editLesson(lang),
-                          style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
+                    label: AppStrings.editLesson(lang),
+                    icon: Icons.edit_outlined,
+                    color: theme.textMain,
                   ),
-                  PopupMenuItem(
+                  CompactMenuAction(
                     value: 'delete',
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.delete_outline_rounded,
-                          color: Color(0xFFC62828),
-                          size: 20,
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        Text(
-                          AppStrings.deleteLesson(lang),
-                          style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.w600,
-                            color: const Color(0xFFC62828),
-                          ),
-                        ),
-                      ],
-                    ),
+                    label: AppStrings.deleteLesson(lang),
+                    icon: Icons.delete_outline_rounded,
+                    color: const Color(0xFFC62828),
                   ),
                 ],
               ),
+              const SizedBox(width: AppSpacing.xs),
               Icon(
                 Icons.chevron_right_rounded,
                 color: theme.bgAccent,

@@ -6,7 +6,9 @@ import '../core/constants/app_spacing.dart';
 import '../core/navigation/route_transitions.dart';
 import '../core/l10n/app_strings.dart';
 import '../providers/app_state.dart';
+import '../widgets/app_header.dart';
 import '../widgets/class_color_card.dart';
+import '../widgets/compact_popup_menu.dart';
 import '../widgets/create_class_dialog.dart';
 import '../widgets/edit_class_dialog.dart';
 import '../widgets/taptalk_result_dialog.dart';
@@ -158,8 +160,12 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
     final classes = app.teacherClasses;
 
     return LearnerScaffold(
-      title: AppStrings.appName(lang),
+      title: AppStrings.classes(lang),
+      titleWidget: AppHeaderTitle(AppStrings.classes(lang)),
       currentRoute: AppRoute.teacherMyClasses,
+      headerContentHeight: AppHeaderTitle.height,
+      headerBottomSpacing: 0,
+      bodyTopOffset: -4,
       showBottomNav: false,
       body: Stack(
         children: [
@@ -169,73 +175,31 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(
               AppSpacing.lg,
-              AppSpacing.sm,
+              0,
               AppSpacing.lg,
               96,
             ),
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          AppStrings.myClasses(lang),
-                          style: GoogleFonts.poppins(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w800,
-                            color: theme.textMain,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      _ViewRequestsButton(
-                        count: app.pendingJoinRequestCount,
-                        onPressed: () =>
-                            app.setRoute(AppRoute.teacherJoinRequests),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    AppStrings.teacherMyClassesSubtitle(lang),
-                    style: GoogleFonts.poppins(
-                      fontSize: 13,
-                      color: theme.textMain.withValues(alpha: 0.65),
-                      height: 1.35,
-                    ),
-                  ),
-                ],
+              Align(
+                alignment: Alignment.centerRight,
+                child: _ViewRequestsButton(
+                  count: app.pendingJoinRequestCount,
+                  onPressed: () => app.setRoute(AppRoute.teacherJoinRequests),
+                ),
               ),
-              const SizedBox(height: AppSpacing.lg),
+              const SizedBox(height: AppSpacing.md),
               if (classes.isEmpty)
-                Container(
-                  width: double.infinity,
+                Padding(
                   padding: const EdgeInsets.all(AppSpacing.xxl),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFFE9EEF2)),
-                  ),
-                  child: Column(
-                    children: [
-                      Icon(
-                        Icons.class_outlined,
-                        size: 48,
-                        color: theme.bgAccent.withValues(alpha: 0.55),
+                  child: Center(
+                    child: Text(
+                      AppStrings.noTeacherClasses(lang),
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        color: theme.textMain.withValues(alpha: 0.7),
                       ),
-                      const SizedBox(height: AppSpacing.md),
-                      Text(
-                        AppStrings.noTeacherClasses(lang),
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          color: theme.textMain.withValues(alpha: 0.7),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 )
               else
@@ -255,50 +219,24 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
                       ),
                       icon: Icons.menu_book_rounded,
                       onTap: () => _openClass(teacherClass),
-                      trailing: PopupMenuButton<String>(
-                        icon: Icon(
-                          Icons.more_vert_rounded,
-                          color: Colors.white.withValues(alpha: 0.92),
-                        ),
+                      trailing: CompactPopupMenu(
+                        iconColor: Colors.white.withValues(alpha: 0.92),
                         onSelected: (value) {
                           if (value == 'edit') _editClass(teacherClass);
                           if (value == 'delete') _confirmDelete(teacherClass);
                         },
-                        itemBuilder: (ctx) => [
-                          PopupMenuItem(
+                        actions: [
+                          CompactMenuAction(
                             value: 'edit',
-                            child: Row(
-                              children: [
-                                const Icon(Icons.edit_outlined, size: 20),
-                                const SizedBox(width: AppSpacing.sm),
-                                Text(
-                                  AppStrings.editClass(lang),
-                                  style: GoogleFonts.poppins(
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
-                            ),
+                            label: AppStrings.editClass(lang),
+                            icon: Icons.edit_outlined,
+                            color: theme.textMain,
                           ),
-                          PopupMenuItem(
+                          CompactMenuAction(
                             value: 'delete',
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.delete_outline_rounded,
-                                  color: Color(0xFFC62828),
-                                  size: 20,
-                                ),
-                                const SizedBox(width: AppSpacing.sm),
-                                Text(
-                                  AppStrings.deleteClass(lang),
-                                  style: GoogleFonts.poppins(
-                                    fontWeight: FontWeight.w600,
-                                    color: const Color(0xFFC62828),
-                                  ),
-                                ),
-                              ],
-                            ),
+                            label: AppStrings.deleteClass(lang),
+                            icon: Icons.delete_outline_rounded,
+                            color: const Color(0xFFC62828),
                           ),
                         ],
                       ),
@@ -342,29 +280,46 @@ class _ViewRequestsButton extends StatelessWidget {
     final lang = app.language;
     final theme = app.theme;
 
-    return FilledButton(
-      onPressed: onPressed,
-      style: FilledButton.styleFrom(
-        backgroundColor: theme.bgAccent,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        FilledButton(
+          onPressed: onPressed,
+          style: FilledButton.styleFrom(
+            backgroundColor: theme.bgAccent,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+          child: Text(
+            AppStrings.viewRequests(lang),
+            style: GoogleFonts.poppins(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+              height: 1.2,
+            ),
+          ),
         ),
-      ),
-      child: Text(
-        count > 0
-            ? '${AppStrings.viewRequests(lang)} ($count)'
-            : AppStrings.viewRequests(lang),
-        style: GoogleFonts.poppins(
-          fontSize: 13,
-          fontWeight: FontWeight.w700,
-          height: 1.2,
-        ),
-      ),
+        if (count > 0)
+          Positioned(
+            right: -2,
+            top: -2,
+            child: Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE53935),
+                shape: BoxShape.circle,
+                border: Border.all(color: theme.bgLight, width: 1.5),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

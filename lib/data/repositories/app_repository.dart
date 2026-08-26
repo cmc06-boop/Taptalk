@@ -1257,12 +1257,25 @@ class AppRepository {
       usageByKey[key] = slice;
     }
 
+    final parentKeysWithChildren = <String>{
+      for (final category in categories)
+        if ((category.parentKey ?? '').trim().isNotEmpty)
+          normalizeCategoryKey(category.parentKey!),
+    };
+
+    bool isParentWithSubcategories(String key) {
+      return parentKeysWithChildren.contains(key) ||
+          DefaultBuiltinContent.hasSubcategories(key);
+    }
+
     final results = <CategoryVocabularySlice>[];
     final seen = <String>{};
     for (final category in categories) {
       if (!isPersonalCategoryKey(category.key)) continue;
       final key = normalizeCategoryKey(category.key);
-      if (key.isEmpty || !seen.add(key)) continue;
+      if (key.isEmpty || isParentWithSubcategories(key) || !seen.add(key)) {
+        continue;
+      }
       final usage = usageByKey[key];
       results.add(
         CategoryVocabularySlice(
@@ -1275,7 +1288,9 @@ class AppRepository {
     for (final slice in usageSlices) {
       if (!isPersonalCategoryKey(slice.categoryKey)) continue;
       final key = normalizeCategoryKey(slice.categoryKey);
-      if (key.isEmpty || !seen.add(key)) continue;
+      if (key.isEmpty || isParentWithSubcategories(key) || !seen.add(key)) {
+        continue;
+      }
       results.add(slice);
     }
     return results;

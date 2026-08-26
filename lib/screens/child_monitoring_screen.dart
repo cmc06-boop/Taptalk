@@ -18,6 +18,7 @@ import '../data/models/phrase_usage_stat.dart';
 import '../data/models/vocabulary_growth_summary.dart';
 import '../data/repositories/app_repository.dart';
 import '../providers/app_state.dart';
+import '../widgets/app_header.dart';
 import '../widgets/categories_used_section.dart';
 import '../widgets/frequently_used_section.dart';
 import '../widgets/learner_scaffold.dart';
@@ -204,7 +205,6 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
           learnerUserId: learnerId,
           period: _period,
           month: month,
-          linkedAt: trackingSince,
           syncCloud: true,
         );
       } catch (e, st) {
@@ -620,7 +620,11 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
 
     return LearnerScaffold(
       title: widget.learner.fullName,
+      titleWidget: AppHeaderTitle(widget.learner.fullName),
       currentRoute: widget.currentRoute,
+      headerContentHeight: AppHeaderTitle.height,
+      headerBottomSpacing: 0,
+      bodyTopOffset: -4,
       showBottomNav: false,
       body: RefreshIndicator(
         onRefresh: _refreshFromCloud,
@@ -630,12 +634,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
         children: [
           if (contextSubtitle != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.sm,
-                AppSpacing.lg,
-                0,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
               child: Text(
                 contextSubtitle,
                 style: GoogleFonts.poppins(
@@ -646,9 +645,9 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
               ),
             ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(
+            padding: EdgeInsets.fromLTRB(
               AppSpacing.lg,
-              AppSpacing.sm,
+              contextSubtitle != null ? AppSpacing.sm : 0,
               AppSpacing.lg,
               AppSpacing.md,
             ),
@@ -690,6 +689,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                       lang: lang,
                       phrasesUsed: _periodPhrasesUsed,
                       phraseTaps: _periodPhraseTaps,
+                      periodLabel: _periodLabel(lang, selectedMonth),
                     ),
             ),
           ),

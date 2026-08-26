@@ -6,6 +6,7 @@ import '../core/constants/app_spacing.dart';
 import '../core/navigation/route_transitions.dart';
 import '../core/l10n/app_strings.dart';
 import '../providers/app_state.dart';
+import '../widgets/app_header.dart';
 import '../widgets/class_color_card.dart';
 import '../widgets/learner_scaffold.dart';
 import 'teacher_class_monitoring_screen.dart';
@@ -85,8 +86,12 @@ class _TeacherMonitoringScreenState extends State<TeacherMonitoringScreen> {
     final classes = app.teacherClasses;
 
     return LearnerScaffold(
-      title: AppStrings.appName(lang),
+      title: AppStrings.monitoring(lang),
+      titleWidget: AppHeaderTitle(AppStrings.monitoring(lang)),
       currentRoute: AppRoute.teacherMonitoring,
+      headerContentHeight: AppHeaderTitle.height,
+      headerBottomSpacing: 0,
+      bodyTopOffset: -4,
       showBottomNav: false,
       body: RefreshIndicator(
         onRefresh: _refreshFromCloud,
@@ -94,42 +99,11 @@ class _TeacherMonitoringScreenState extends State<TeacherMonitoringScreen> {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.lg,
-            AppSpacing.sm,
+            0,
             AppSpacing.lg,
             AppSpacing.xxl,
           ),
           children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(AppSpacing.md),
-              decoration: BoxDecoration(
-                color: theme.bgMid.withValues(alpha: 0.55),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    AppStrings.monitoring(lang),
-                    style: GoogleFonts.poppins(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      color: theme.textMain,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    AppStrings.teacherMonitoringSubtitle(lang),
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      color: theme.textMain.withValues(alpha: 0.72),
-                      height: 1.35,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
             if (classes.isEmpty)
               Padding(
                 padding: const EdgeInsets.all(AppSpacing.xxl),

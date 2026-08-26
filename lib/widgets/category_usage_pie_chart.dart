@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -279,14 +280,60 @@ class _InteractiveCategoryDonut extends StatefulWidget {
 class _InteractiveCategoryDonutState extends State<_InteractiveCategoryDonut> {
   static const _chartSize = 118.0;
   static const _strokeWidth = 18.0;
+  static const _previewRestoreDelay = Duration(milliseconds: 2500);
 
   int? _selectedIndex;
+  Timer? _previewRestoreTimer;
 
   int get _totalUsage => _totalCategoryUsage(widget.slices);
 
+  @override
+  void dispose() {
+    _previewRestoreTimer?.cancel();
+    super.dispose();
+  }
+
+  List<int> _rankedNonZeroIndices() {
+    final indices = <int>[
+      for (var i = 0; i < widget.slices.length; i++)
+        if (widget.slices[i].usageCount > 0) i,
+    ];
+    indices.sort((a, b) {
+      final byUsage = widget.slices[b].usageCount.compareTo(
+        widget.slices[a].usageCount,
+      );
+      if (byUsage != 0) return byUsage;
+      return widget.slices[b].wordCount.compareTo(widget.slices[a].wordCount);
+    });
+    return indices;
+  }
+
+  List<int> _collapsedPreviewIndices(int maxCount) {
+    final ranked = _rankedNonZeroIndices();
+    final preview = ranked.take(maxCount).toList();
+    final selected = _selectedIndex;
+    if (selected == null ||
+        selected < 0 ||
+        selected >= widget.slices.length ||
+        preview.contains(selected)) {
+      return preview;
+    }
+    if (preview.isEmpty || maxCount <= 1) return [selected];
+    return [
+      selected,
+      ...preview.where((i) => i != selected).take(maxCount - 1),
+    ];
+  }
+
   void _selectIndex(int? index) {
+    _previewRestoreTimer?.cancel();
     setState(() {
       _selectedIndex = _selectedIndex == index ? null : index;
+    });
+    if (_selectedIndex == null) return;
+    _previewRestoreTimer = Timer(_previewRestoreDelay, () {
+      if (!mounted) return;
+      setState(() => _selectedIndex = null);
     });
   }
 
@@ -318,17 +365,26 @@ class _InteractiveCategoryDonutState extends State<_InteractiveCategoryDonut> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
+        final ranked = _rankedNonZeroIndices();
+        final previewSource = [
+          for (final i in ranked) slices[i],
+        ];
         final layout = _CategoryLegendLayout.forWidth(
           width: constraints.maxWidth,
-          slices: slices,
+          slices: previewSource,
           labelForCategory: widget.labelForCategory,
           totalUsage: totalUsage,
           lang: lang,
           textColor: theme.textMain,
         );
-        final previewIndices =
-            List.generate(layout.previewItemCount, (index) => index);
-        final hasMore = slices.length > layout.previewItemCount;
+        final previewIndices = _collapsedPreviewIndices(
+          layout.previewItemCount,
+        );
+        final defaultPreviewCount = math.min(
+          layout.previewItemCount,
+          ranked.length,
+        );
+        final hasMore = slices.length > defaultPreviewCount;
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -619,6 +675,10 @@ class _CategoryDonutChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final selected = selectedIndex;
+    final hasSelection =
+        selected != null && selected >= 0 && selected < slices.length;
+
     return GestureDetector(
       onTapDown: (details) {
         final index = _sliceIndexAt(details.localPosition);
@@ -633,8 +693,12 @@ class _CategoryDonutChart extends StatelessWidget {
             values: sliceValues,
             colors: colors,
             strokeWidth: strokeWidth,
-            centerLabel: '${slices.length}',
-            centerSubLabel: AppStrings.categoryCountLabel(lang),
+            centerLabel: hasSelection
+                ? '${slices[selected].wordCount}'
+                : '${slices.length}',
+            centerSubLabel: hasSelection
+                ? AppStrings.wordCountLabel(lang)
+                : AppStrings.categoryCountLabel(lang),
             labelColor: theme.textMain,
             selectedIndex: selectedIndex,
             dimUnselected: selectedIndex != null,

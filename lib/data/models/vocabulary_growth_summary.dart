@@ -1,11 +1,16 @@
 class VocabularyGrowthPoint {
   const VocabularyGrowthPoint({
     required this.label,
+    required this.detail,
     required this.newWords,
     required this.cumulativeWords,
   });
 
+  /// Short axis label, e.g. 'Week 1', 'Mon', '6 AM'.
   final String label;
+
+  /// Full span this bucket covers, shown when the point is tapped.
+  final String detail;
   final int newWords;
   final int cumulativeWords;
 }
@@ -25,26 +30,19 @@ class CategoryVocabularySlice {
 class VocabularyGrowthSummary {
   const VocabularyGrowthSummary({
     required this.totalVocabulary,
-    required this.newWordsThisWeek,
-    required this.newWordsThisMonth,
-    required this.weeklyTrend,
-    required this.monthlyTrend,
+    required this.trend,
     required this.categorySlices,
   });
 
   final int totalVocabulary;
-  final int newWordsThisWeek;
-  final int newWordsThisMonth;
-  final List<VocabularyGrowthPoint> weeklyTrend;
-  final List<VocabularyGrowthPoint> monthlyTrend;
+
+  /// New-phrase buckets for the selected monitoring period.
+  final List<VocabularyGrowthPoint> trend;
   final List<CategoryVocabularySlice> categorySlices;
 
   static const empty = VocabularyGrowthSummary(
     totalVocabulary: 0,
-    newWordsThisWeek: 0,
-    newWordsThisMonth: 0,
-    weeklyTrend: [],
-    monthlyTrend: [],
+    trend: [],
     categorySlices: [],
   );
 }

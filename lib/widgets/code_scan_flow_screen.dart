@@ -138,11 +138,19 @@ class _CodeScanFlowScreenState extends State<CodeScanFlowScreen> {
 
   Future<void> _completeWithCode(String code) async {
     if (_busy) return;
+    final lang = context.read<AppState>().language;
     setState(() {
       _busy = true;
       _error = null;
     });
-    final error = await widget.onSubmit(code);
+    String? error;
+    try {
+      error = await widget.onSubmit(code);
+    } catch (e, st) {
+      // Never leave the spinner turning on an unexpected failure.
+      debugPrint('Code submit failed: $e\n$st');
+      error = AppStrings.somethingWentWrong(lang);
+    }
     if (!mounted) return;
     if (error != null) {
       setState(() {
@@ -269,7 +277,14 @@ class _CodeScanFlowScreenState extends State<CodeScanFlowScreen> {
                   ),
                   child: Row(
                     children: [
-                      const SizedBox(width: 48),
+                      // Stays enabled while busy — this is the way out if a
+                      // slow submit leaves the spinner turning.
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(false),
+                        icon: const Icon(Icons.arrow_back_rounded),
+                        color: Colors.white,
+                        tooltip: AppStrings.cancel(lang),
+                      ),
                       Expanded(
                         child: Text(
                           widget.title,

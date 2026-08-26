@@ -276,7 +276,7 @@ class _ListCard extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Container(
-          height: 112,
+          height: 88,
           width: double.infinity,
           decoration: BoxDecoration(
             gradient: colors.gradient,
@@ -299,7 +299,7 @@ class _ListCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: AppSpacing.md,
-                  vertical: AppSpacing.lg,
+                  vertical: AppSpacing.md,
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
@@ -339,7 +339,9 @@ class _ListCard extends StatelessWidget {
                       ),
                     ),
                     ?trailing,
-                    if (onTap != null)
+                    // The chevron only earns its place when there is no menu
+                    // competing for the same corner.
+                    if (onTap != null && trailing == null)
                       Icon(
                         Icons.chevron_right_rounded,
                         color: Colors.white.withValues(alpha: 0.88),

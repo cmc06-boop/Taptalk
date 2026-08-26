@@ -104,8 +104,8 @@ class SourceDrawer extends StatelessWidget {
                           if (app.user?.isParent ?? false) ...[
                             _DrawerItem(
                               theme: theme,
-                              icon: Icons.grid_view_rounded,
-                              label: AppStrings.chooseCategoryTitle(lang),
+                              icon: Icons.home_rounded,
+                              label: AppStrings.home(lang),
                               active: app.route == AppRoute.chooseCategory,
                               onTap: () =>
                                   app.setRoute(AppRoute.chooseCategory),
@@ -132,8 +132,8 @@ class SourceDrawer extends StatelessWidget {
                           ] else if (app.user?.isLearner ?? false) ...[
                             _DrawerItem(
                               theme: theme,
-                              icon: Icons.grid_view_rounded,
-                              label: AppStrings.chooseCategoryTitle(lang),
+                              icon: Icons.home_rounded,
+                              label: AppStrings.home(lang),
                               active: app.route == AppRoute.chooseCategory,
                               onTap: () => app.setRoute(AppRoute.chooseCategory),
                             ),
@@ -160,8 +160,8 @@ class SourceDrawer extends StatelessWidget {
                             ),
                             _DrawerItem(
                               theme: theme,
-                              icon: Icons.grid_view_rounded,
-                              label: AppStrings.chooseCategoryTitle(lang),
+                              icon: Icons.home_rounded,
+                              label: AppStrings.home(lang),
                               active: app.route == AppRoute.chooseCategory,
                               onTap: () =>
                                   app.setRoute(AppRoute.chooseCategory),

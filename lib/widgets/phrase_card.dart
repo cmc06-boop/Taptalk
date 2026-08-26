@@ -6,6 +6,7 @@ import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../data/models/phrase_model.dart';
 import '../providers/app_state.dart';
+import 'compact_popup_menu.dart';
 import 'highlighting_text_controller.dart';
 import 'phrase_image.dart';
 
@@ -331,112 +332,42 @@ class _PhraseMoreButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white.withValues(alpha: 0.92),
-      shape: const CircleBorder(),
-      elevation: 0,
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: () async {
-          final RenderBox button = context.findRenderObject() as RenderBox;
-          final RenderBox overlay =
-              Overlay.of(context).context.findRenderObject() as RenderBox;
-          final RelativeRect position = RelativeRect.fromRect(
-            Rect.fromPoints(
-              button.localToGlobal(Offset.zero, ancestor: overlay),
-              button.localToGlobal(
-                button.size.bottomRight(Offset.zero),
-                ancestor: overlay,
-              ),
-            ),
-            Offset.zero & overlay.size,
-          );
-          final result = await showMenu<String>(
-            context: context,
-            position: position,
-            items: [
-              if (onView != null)
-                const PopupMenuItem<String>(
-                  value: 'view',
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.visibility_outlined,
-                        size: 18,
-                        color: Color(0xFF5C3D2E),
-                      ),
-                      SizedBox(width: 8),
-                      Text(
-                        'View',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF5C3D2E),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              if (onEdit != null)
-                const PopupMenuItem<String>(
-                  value: 'edit',
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.edit_outlined,
-                        size: 18,
-                        color: Color(0xFF5C3D2E),
-                      ),
-                      SizedBox(width: 8),
-                      Text(
-                        'Edit',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF5C3D2E),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              if (onDelete != null)
-                const PopupMenuItem<String>(
-                  value: 'delete',
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.delete_outline_rounded,
-                        size: 18,
-                        color: Color(0xFFD64545),
-                      ),
-                      SizedBox(width: 8),
-                      Text(
-                        'Delete',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFFD64545),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          );
-          if (result == 'view') onView?.call();
-          if (result == 'edit') onEdit?.call();
-          if (result == 'delete') onDelete?.call();
-        },
-        child: SizedBox(
-          width: size,
-          height: size,
-          child: Icon(
-            Icons.more_vert_rounded,
-            size: iconSize,
+    final lang = context.watch<AppState>().language;
+    return CompactPopupMenu(
+      vertical: true,
+      buttonWidth: size,
+      buttonHeight: size,
+      dotsSize: iconSize,
+      buttonBackground: Colors.white.withValues(alpha: 0.92),
+      iconColor: const Color(0xFF5C3D2E),
+      onSelected: (value) {
+        if (value == 'view') onView?.call();
+        if (value == 'edit') onEdit?.call();
+        if (value == 'delete') onDelete?.call();
+      },
+      actions: [
+        if (onView != null)
+          CompactMenuAction(
+            value: 'view',
+            label: AppStrings.view(lang),
+            icon: Icons.visibility_outlined,
             color: const Color(0xFF5C3D2E),
           ),
-        ),
-      ),
+        if (onEdit != null)
+          CompactMenuAction(
+            value: 'edit',
+            label: AppStrings.edit(lang),
+            icon: Icons.edit_outlined,
+            color: const Color(0xFF5C3D2E),
+          ),
+        if (onDelete != null)
+          CompactMenuAction(
+            value: 'delete',
+            label: AppStrings.delete(lang),
+            icon: Icons.delete_outline_rounded,
+            color: const Color(0xFFD64545),
+          ),
+      ],
     );
   }
 }

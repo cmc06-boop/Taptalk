@@ -143,7 +143,7 @@ class CodeQrSheet extends StatelessWidget {
                       child: QrImageView(
                         data: code,
                         version: QrVersions.auto,
-                        size: 220,
+                        size: 156,
                         padding: const EdgeInsets.all(6),
                         backgroundColor: Colors.white,
                         eyeStyle: QrEyeStyle(

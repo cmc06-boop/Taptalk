@@ -253,7 +253,7 @@ abstract final class SessionUsageCalculator {
       });
     }
 
-    final weekCount = ((dayCount + 6) / 7).ceil();
+    final weekCount = (dayCount / 7).ceil();
     final values = List<double>.filled(weekCount, 0);
     final currentWeek =
         clock.difference(rangeStart).inDays ~/ 7;
@@ -272,7 +272,7 @@ abstract final class SessionUsageCalculator {
     return List.generate(
       weekCount,
       (week) => SessionUsageBucket(
-        label: 'W${week + 1}',
+        label: 'Week ${week + 1}',
         minutes: values[week],
         isActive: hasActiveSession && week == currentWeek,
       ),

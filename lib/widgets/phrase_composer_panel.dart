@@ -49,6 +49,7 @@ class PhraseComposerPanel extends StatefulWidget {
 
 class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
   final _controller = HighlightingTextController();
+  final _composerScroll = ScrollController();
   final _undoStack = <String>[];
   String? _imagePath;
 
@@ -61,6 +62,7 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
       if (_undoStack.isEmpty || _undoStack.last != _controller.text) {
         _undoStack.add(_controller.text);
       }
+      _keepComposerEndVisible();
     });
   }
 
@@ -68,14 +70,39 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
   void dispose() {
     widget.composerController?._detach();
     _controller.dispose();
+    _composerScroll.dispose();
     super.dispose();
+  }
+
+  /// Pins the composer to its last line while text is being added at the end,
+  /// so the newest words stay visible once the box is full.
+  void _keepComposerEndVisible() {
+    final selection = _controller.selection;
+    final atEnd =
+        selection.isCollapsed &&
+        selection.baseOffset >= _controller.text.length;
+    if (!atEnd) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_composerScroll.hasClients) return;
+      final maxOffset = _composerScroll.position.maxScrollExtent;
+      if (_composerScroll.offset >= maxOffset) return;
+      _composerScroll.jumpTo(maxOffset);
+    });
+  }
+
+  /// Replaces composer text and leaves the caret at the end.
+  void _setComposerText(String value) {
+    _controller.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
   }
 
   void appendPhrase(String text, {bool speak = false}) {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
     final current = _controller.text.trim();
-    _controller.text = current.isEmpty ? trimmed : '$current $trimmed';
+    _setComposerText(current.isEmpty ? trimmed : '$current $trimmed');
     if (speak) {
       speakWithFeedback(
         context,
@@ -99,6 +126,7 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
     _undoStack
       ..clear()
       ..add('');
+    if (_composerScroll.hasClients) _composerScroll.jumpTo(0);
     setState(() => _imagePath = null);
   }
 
@@ -145,7 +173,7 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
                       ? null
                       : () {
                           _undoStack.removeLast();
-                          _controller.text = _undoStack.last;
+                          _setComposerText(_undoStack.last);
                         },
                 ),
                 IconButton(
@@ -204,6 +232,7 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
             children: [
               TextField(
                 controller: _controller,
+                scrollController: _composerScroll,
                 maxLines: 4,
                 style: GoogleFonts.poppins(
                   fontSize: 14,

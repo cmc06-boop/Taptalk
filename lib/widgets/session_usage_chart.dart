@@ -153,14 +153,6 @@ class _SessionUsageChartState extends State<SessionUsageChart>
                     ],
                   ),
                 ),
-                Text(
-                  AppStrings.liveUpdating(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: textColor.withValues(alpha: 0.5),
-                  ),
-                ),
               ],
             ),
           ),

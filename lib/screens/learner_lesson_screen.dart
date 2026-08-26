@@ -15,6 +15,7 @@ import '../widgets/localized_content_text.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/panel_card.dart';
 import '../widgets/phrase_card.dart';
+import '../widgets/view_phrase_dialog.dart';
 
 class LearnerLessonScreen extends StatefulWidget {
   const LearnerLessonScreen({
@@ -212,6 +213,11 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
                       phraseId: phrase.id,
                     ),
                     onFavorite: () => app.toggleFavorite(phrase),
+                    onView: () => ViewPhraseDialog.show(
+                      context,
+                      phrase: phrase,
+                      displayText: displayText,
+                    ),
                     onDelete: () {},
                   );
                 },

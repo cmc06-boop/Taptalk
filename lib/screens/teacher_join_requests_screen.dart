@@ -196,116 +196,103 @@ class _JoinRequestCard extends StatelessWidget {
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: theme.bgAccent.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(Icons.person_outline_rounded, color: theme.bgAccent),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      AppStrings.learnerNameLabel(lang),
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: theme.textMain.withValues(alpha: 0.55),
-                      ),
-                    ),
-                    Text(
-                      request.learnerName,
-                      style: GoogleFonts.poppins(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: theme.textMain,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Text(
-            AppStrings.subjectLabel(lang),
-            style: GoogleFonts.poppins(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: theme.textMain.withValues(alpha: 0.55),
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: theme.bgAccent.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              Icons.person_outline_rounded,
+              size: 18,
+              color: theme.bgAccent,
             ),
           ),
-          const SizedBox(height: 2),
-          LocalizedContentText(
-            request.className,
-            style: GoogleFonts.poppins(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: theme.textMain.withValues(alpha: 0.85),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  request.learnerName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: theme.textMain,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: theme.bgAccent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(7),
+                  ),
+                  child: LocalizedContentText(
+                    request.className,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: theme.bgAccent,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: AppSpacing.md),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: busy ? null : onReject,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFFC62828),
-                    side: BorderSide(
-                      color: const Color(0xFFC62828).withValues(alpha: 0.35),
-                    ),
-                    minimumSize: const Size.fromHeight(44),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: busy
-                      ? SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: theme.bgAccent,
-                          ),
-                        )
-                      : Text(
-                          AppStrings.rejectRequest(lang),
-                          style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                ),
+          const SizedBox(width: AppSpacing.xs),
+          FilledButton(
+            onPressed: busy ? null : onReject,
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFC62828).withValues(alpha: 0.1),
+              foregroundColor: const Color(0xFFC62828),
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
               ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: FilledButton(
-                  onPressed: busy ? null : onAccept,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: theme.bgAccent,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size.fromHeight(44),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: Text(
-                    AppStrings.acceptRequest(lang),
-                    style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
-                  ),
-                ),
+            ),
+            child: Text(
+              AppStrings.rejectRequest(lang),
+              style: GoogleFonts.poppins(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
               ),
-            ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          FilledButton(
+            onPressed: busy ? null : onAccept,
+            style: FilledButton.styleFrom(
+              backgroundColor: theme.bgAccent,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: Text(
+              AppStrings.acceptRequest(lang),
+              style: GoogleFonts.poppins(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
         ],
       ),

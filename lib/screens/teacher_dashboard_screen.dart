@@ -16,6 +16,7 @@ import '../providers/app_state.dart';
 import '../widgets/class_color_card.dart';
 import '../widgets/inline_dropdown_field.dart';
 import '../widgets/learner_scaffold.dart';
+import '../widgets/taptalk_logo.dart';
 import '../widgets/teacher_alert_card.dart';
 import 'lesson_editor_screen.dart';
 
@@ -196,7 +197,10 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
 
     return LearnerScaffold(
       title: AppStrings.appName(lang),
+      titleWidget: const TapTalkHeaderWordmark(),
       currentRoute: AppRoute.teacherDashboard,
+      headerBottomSpacing: 0,
+      bodyTopOffset: -4,
       showBottomNav: false,
       body: RefreshIndicator(
         onRefresh: () => _load(userRefresh: true),

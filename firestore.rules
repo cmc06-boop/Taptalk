@@ -53,6 +53,27 @@ service cloud.firestore {
         );
     }
 
+    match /class_join_requests_cloud/{requestId} {
+      allow read: if request.auth != null;
+
+      // The learner creates the request; the teacher rewrites it with the
+      // accepted/rejected status, so either side may write their own doc.
+      allow create, update: if request.auth != null
+        && request.resource.data.learnerFirebaseUid is string
+        && request.resource.data.teacherFirebaseUid is string
+        && request.resource.data.classCode is string
+        && (
+          request.resource.data.learnerFirebaseUid == request.auth.uid
+          || request.resource.data.teacherFirebaseUid == request.auth.uid
+        );
+
+      allow delete: if request.auth != null
+        && (
+          resource.data.learnerFirebaseUid == request.auth.uid
+          || resource.data.teacherFirebaseUid == request.auth.uid
+        );
+    }
+
     match /teacher_classes_cloud/{classCode} {
       allow read: if request.auth != null;
 
