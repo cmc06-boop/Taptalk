@@ -308,6 +308,9 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
   bool _initializing = false;
   int _failCount = 0;
   Timer? _retryTimer;
+  /// True once decoded frames are actually on screen (not a frozen first frame
+  /// while the clock has already run ahead).
+  bool _pictureReady = false;
 
   String get _posterKey => widget.sourceKey;
 
@@ -479,6 +482,11 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
         await controller.seekTo(Duration.zero);
       }
       if (widget.playing) {
+        await _prerollDecoder(controller);
+        if (!mounted || gen != _gen) {
+          await _disposeControllerInstance(controller);
+          return;
+        }
         controller.addListener(_onTick);
         _controller = controller;
         _failCount = 0;
@@ -491,28 +499,7 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
         return;
       }
 
-      await controller.play();
-      await WidgetsBinding.instance.endOfFrame;
-      if (controller.value.size.width <= 0) {
-        for (var i = 0; i < 4; i++) {
-          await Future<void>.delayed(const Duration(milliseconds: 32));
-          if (!mounted || gen != _gen) {
-            await _disposeControllerInstance(controller);
-            return;
-          }
-          if (controller.value.size.width > 0) break;
-        }
-      } else {
-        await Future<void>.delayed(const Duration(milliseconds: 32));
-      }
-      if (!mounted || gen != _gen) {
-        await _disposeControllerInstance(controller);
-        return;
-      }
-      await controller.pause();
-      if (controller.value.position > Duration.zero) {
-        await controller.seekTo(Duration.zero);
-      }
+      await _prerollDecoder(controller);
 
       controller.addListener(_onTick);
       _controller = controller;
@@ -616,6 +603,7 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
     _retryTimer?.cancel();
     _gen++;
     _runToEnd = false;
+    _pictureReady = false;
     final c = _controller;
     _controller = null;
     await _disposeControllerInstance(c);
@@ -630,18 +618,74 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
     _VideoInitGate.release();
   }
 
+  Future<void> _prerollDecoder(VideoPlayerController controller) async {
+    try {
+      await controller.setLooping(false);
+      await controller.play();
+      await WidgetsBinding.instance.endOfFrame;
+      for (var i = 0; i < 12; i++) {
+        if (controller.value.size.width > 0 &&
+            controller.value.position > Duration.zero) {
+          break;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 16));
+      }
+      await controller.pause();
+      await controller.seekTo(Duration.zero);
+      await _waitUntilNearStart(controller);
+    } catch (_) {}
+  }
+
+  Future<void> _waitUntilNearStart(VideoPlayerController c) async {
+    for (var i = 0; i < 16; i++) {
+      if (!c.value.isBuffering &&
+          c.value.position <= const Duration(milliseconds: 80)) {
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+  }
+
+  Future<void> _waitForRealPlayback(VideoPlayerController c) async {
+    final dur = c.value.duration;
+    for (var i = 0; i < 24; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+      final pos = c.value.position;
+      if (dur > Duration.zero && pos > Duration(milliseconds: dur.inMilliseconds ~/ 3)) {
+        try {
+          await c.pause();
+          await c.seekTo(Duration.zero);
+          await _waitUntilNearStart(c);
+          await c.play();
+        } catch (_) {}
+        continue;
+      }
+      if (c.value.isPlaying &&
+          !c.value.isBuffering &&
+          pos >= const Duration(milliseconds: 16) &&
+          pos < const Duration(milliseconds: 400)) {
+        return;
+      }
+    }
+  }
+
   Future<void> _startFullClip() async {
     final c = _controller;
     if (c == null || !c.value.isInitialized) return;
     _runToEnd = true;
+    _pictureReady = false;
     try {
       await c.setLooping(false);
-      if (c.value.position > const Duration(milliseconds: 40)) {
-        await c.seekTo(Duration.zero);
-      }
+      await c.pause();
+      await c.seekTo(Duration.zero);
+      await _waitUntilNearStart(c);
       await c.play();
+      await _waitForRealPlayback(c);
+      if (mounted) setState(() => _pictureReady = true);
       PhraseVideoSpeakSync.signalReady();
-    } catch (_) {}
+    } catch (_) {
+      PhraseVideoSpeakSync.signalReady();
+    }
   }
 
   void _onTick() {
@@ -672,6 +716,7 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
 
     if (!_runToEnd) return;
     if (c.value.isPlaying) return;
+    if (!_pictureReady) return;
     final d = c.value.duration;
     if (d <= Duration.zero) return;
     if (c.value.position >= d - const Duration(milliseconds: 200)) {
@@ -685,8 +730,9 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
     if (c == null || !c.value.isInitialized) return;
     try {
       await c.pause();
-      await c.seekTo(Duration.zero);
     } catch (_) {}
+    _pictureReady = false;
+    if (mounted) setState(() {});
     if (!widget.playing) {
       if (widget.keepReady) return;
       await _releasePlayerKeepReady();
@@ -697,6 +743,7 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
     _retryTimer?.cancel();
     _gen++;
     _runToEnd = false;
+    _pictureReady = false;
     _ready = false;
     final c = _controller;
     _controller = null;
@@ -759,7 +806,9 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
             fit: StackFit.expand,
             children: [
               ?frame,
-              ?video,
+              // View dialog keeps a paused player — use that first frame so
+              // the crop matches playback (card posters are a different aspect).
+              if (_pictureReady || frame == null || widget.keepReady) ?video,
             ],
           ),
         ),
