@@ -177,7 +177,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: GoogleFonts.poppins(
-              fontSize: 22,
+              fontSize: 21,
               fontWeight: FontWeight.w800,
               color: theme.textMain,
             ),

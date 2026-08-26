@@ -9,6 +9,7 @@ import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../data/models/parent_notification.dart';
 import '../providers/app_state.dart';
+import '../widgets/app_header.dart';
 import '../widgets/learner_scaffold.dart';
 
 class NotificationsScreen extends StatefulWidget {
@@ -116,7 +117,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
     return LearnerScaffold(
       title: AppStrings.notifications(lang),
+      titleWidget: AppHeaderTitle(AppStrings.notifications(lang)),
       currentRoute: AppRoute.notifications,
+      headerContentHeight: AppHeaderTitle.height,
+      headerBottomSpacing: 0,
+      bodyTopOffset: -4,
       showBottomNav: false,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -142,26 +147,33 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               onRefresh: _refresh,
               color: theme.bgAccent,
               child: items.isEmpty
-                  ? ListView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      children: [
-                        SizedBox(
-                          height: MediaQuery.sizeOf(context).height * 0.45,
-                          child: Center(
-                            child: Padding(
-                              padding: const EdgeInsets.all(AppSpacing.xxl),
-                              child: Text(
-                                AppStrings.noNotifications(lang),
-                                textAlign: TextAlign.center,
-                                style: GoogleFonts.poppins(
-                                  fontSize: 14,
-                                  color: theme.textMain.withValues(alpha: 0.7),
+                  ? LayoutBuilder(
+                      builder: (context, constraints) {
+                        return ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          children: [
+                            SizedBox(
+                              height: constraints.maxHeight,
+                              child: Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: AppSpacing.xl,
+                                  ),
+                                  child: Text(
+                                    AppStrings.noNotifications(lang),
+                                    textAlign: TextAlign.center,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 14,
+                                      color: theme.textMain
+                                          .withValues(alpha: 0.7),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                        ),
-                      ],
+                          ],
+                        );
+                      },
                     )
                   : ListView.builder(
                       physics: const AlwaysScrollableScrollPhysics(),

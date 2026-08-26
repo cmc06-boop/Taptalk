@@ -95,7 +95,34 @@ class _TeacherMonitoringScreenState extends State<TeacherMonitoringScreen> {
       showBottomNav: false,
       body: RefreshIndicator(
         onRefresh: _refreshFromCloud,
-        child: ListView(
+        child: classes.isEmpty
+            ? LayoutBuilder(
+                builder: (context, constraints) {
+                  return ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      SizedBox(
+                        height: constraints.maxHeight,
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.xl,
+                            ),
+                            child: Text(
+                              AppStrings.noTeacherClasses(lang),
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.poppins(
+                                color: theme.textMain.withValues(alpha: 0.7),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              )
+            : ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.lg,
@@ -104,21 +131,7 @@ class _TeacherMonitoringScreenState extends State<TeacherMonitoringScreen> {
             AppSpacing.xxl,
           ),
           children: [
-            if (classes.isEmpty)
-              Padding(
-                padding: const EdgeInsets.all(AppSpacing.xxl),
-                child: Center(
-                  child: Text(
-                    AppStrings.noTeacherClasses(lang),
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.poppins(
-                      color: theme.textMain.withValues(alpha: 0.7),
-                    ),
-                  ),
-                ),
-              )
-            else
-              for (final teacherClass in classes)
+            for (final teacherClass in classes)
                 Padding(
                   padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                   child: ClassColorCard(

@@ -400,17 +400,6 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                     accent: accent,
                     onTap: () => app.setRoute(AppRoute.teacherMonitoring),
                   ),
-                  const SizedBox(height: AppSpacing.sm),
-                  _QuickActionCard(
-                    theme: theme,
-                    icon: Icons.chat_bubble_outline_rounded,
-                    title: AppStrings.forMe(lang),
-                    subtitle: lang == AppLanguage.filipino
-                        ? 'Personal na phrase board'
-                        : 'Your personal phrase board',
-                    accent: accent,
-                    onTap: () => app.setRoute(AppRoute.home),
-                  ),
                 ],
               ),
             ),

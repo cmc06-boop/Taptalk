@@ -36,6 +36,7 @@ class CompactPopupMenu extends StatefulWidget {
     required this.onSelected,
     required this.iconColor,
     this.vertical = false,
+    this.alignToEnd = false,
     this.buttonWidth = 32,
     this.buttonHeight = 24,
     this.dotsSize = 20,
@@ -53,6 +54,10 @@ class CompactPopupMenu extends StatefulWidget {
   /// Vertical dots for menus pinned to a card corner, horizontal for menus
   /// sitting inline at the end of a row.
   final bool vertical;
+
+  /// Sit the sheet on the same end as the dots so it does not spill past a
+  /// card's right edge.
+  final bool alignToEnd;
   final double buttonWidth;
   final double buttonHeight;
   final double dotsSize;
@@ -147,8 +152,12 @@ class _CompactPopupMenuState extends State<CompactPopupMenu> {
     return MenuAnchor(
       controller: _controller,
       // Sit over the button the way the old popup did, instead of dropping a
-      // menu's height below it.
-      alignmentOffset: Offset(0, -(widget.buttonHeight + 6)),
+      // menu's height below it. Right-align when asked so a short action like
+      // Unenroll stays inside the class card instead of spilling past it.
+      alignmentOffset: Offset(
+        widget.alignToEnd ? -(menuWidth - widget.buttonWidth) : 0,
+        -(widget.buttonHeight + 6),
+      ),
       style: MenuStyle(
         backgroundColor: const WidgetStatePropertyAll(Colors.white),
         surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),

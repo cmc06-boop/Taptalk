@@ -57,6 +57,9 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
   Timer? _liveReloadDebounce;
   AppState? _app;
   bool _monthPickerExpanded = false;
+  final LayerLink _monthPickerLink = LayerLink();
+  final GlobalKey _monthPickerFieldKey = GlobalKey();
+  OverlayEntry? _monthPickerOverlay;
   DateTime? _trackingSince;
 
   bool get _isParentMonitoring => widget.currentRoute == AppRoute.myChild;
@@ -127,6 +130,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
 
   @override
   void dispose() {
+    _removeMonthPickerOverlay();
     _monitoringPollTimer?.cancel();
     _liveReloadDebounce?.cancel();
     unawaited(_app?.stopLiveChildMonitoringSync(widget.learner.learnerId));
@@ -300,6 +304,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
 
   void _selectPeriod(ChildUsagePeriod period) {
     if (_period == period && period != ChildUsagePeriod.month) return;
+    _removeMonthPickerOverlay();
     setState(() {
       _period = period;
       _monthPickerExpanded = false;
@@ -308,6 +313,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
   }
 
   void _selectMonth(DateTime month) {
+    _removeMonthPickerOverlay();
     setState(() {
       _selectedMonth = month;
       _monthPickerExpanded = false;
@@ -326,6 +332,156 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
     return app.localizedCategoryKey(categoryKey);
   }
 
+  void _removeMonthPickerOverlay() {
+    _monthPickerOverlay?.remove();
+    _monthPickerOverlay = null;
+  }
+
+  void _toggleMonthPicker({
+    required TapTalkThemeToken theme,
+    required AppLanguage lang,
+    required List<DateTime> monthOptions,
+    required DateTime selectedMonth,
+  }) {
+    if (_monthPickerExpanded) {
+      _removeMonthPickerOverlay();
+      setState(() => _monthPickerExpanded = false);
+      return;
+    }
+    setState(() => _monthPickerExpanded = true);
+    _showMonthPickerOverlay(
+      theme: theme,
+      lang: lang,
+      monthOptions: monthOptions,
+      selectedMonth: selectedMonth,
+    );
+  }
+
+  void _showMonthPickerOverlay({
+    required TapTalkThemeToken theme,
+    required AppLanguage lang,
+    required List<DateTime> monthOptions,
+    required DateTime selectedMonth,
+  }) {
+    final overlay = Overlay.of(context);
+    final box =
+        _monthPickerFieldKey.currentContext?.findRenderObject() as RenderBox?;
+    final fieldWidth = box?.size.width;
+
+    _monthPickerOverlay = OverlayEntry(
+      builder: (overlayContext) {
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () {
+                  _removeMonthPickerOverlay();
+                  if (mounted) {
+                    setState(() => _monthPickerExpanded = false);
+                  }
+                },
+              ),
+            ),
+            CompositedTransformFollower(
+              link: _monthPickerLink,
+              showWhenUnlinked: false,
+              targetAnchor: Alignment.bottomLeft,
+              followerAnchor: Alignment.topLeft,
+              offset: const Offset(0, 4),
+              child: Material(
+                color: Colors.transparent,
+                child: SizedBox(
+                  width: fieldWidth,
+                  child: _monthPickerMenu(
+                    theme: theme,
+                    lang: lang,
+                    monthOptions: monthOptions,
+                    selectedMonth: selectedMonth,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+    overlay.insert(_monthPickerOverlay!);
+  }
+
+  Widget _monthPickerMenu({
+    required TapTalkThemeToken theme,
+    required AppLanguage lang,
+    required List<DateTime> monthOptions,
+    required DateTime selectedMonth,
+  }) {
+    return Material(
+      color: Colors.white,
+      elevation: 3,
+      shadowColor: theme.textMain.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(_cardRadius),
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border.all(color: const Color(0xFFE9EEF2)),
+          borderRadius: BorderRadius.circular(_cardRadius),
+        ),
+        constraints: const BoxConstraints(maxHeight: 260),
+        child: ListView.separated(
+          shrinkWrap: true,
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+          itemCount: monthOptions.length,
+          separatorBuilder: (_, _) => Divider(
+            height: 1,
+            indent: AppSpacing.md,
+            endIndent: AppSpacing.md,
+            color: theme.textMain.withValues(alpha: 0.08),
+          ),
+          itemBuilder: (context, index) {
+            final month = monthOptions[index];
+            final isSelected = month.year == selectedMonth.year &&
+                month.month == selectedMonth.month;
+            return Material(
+              color: isSelected
+                  ? theme.bgAccent.withValues(alpha: 0.10)
+                  : Colors.transparent,
+              child: InkWell(
+                onTap: () => _selectMonth(month),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                    vertical: AppSpacing.sm + 2,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _formatMonth(month, lang),
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            fontWeight:
+                                isSelected ? FontWeight.w700 : FontWeight.w500,
+                            color: isSelected ? theme.bgAccent : theme.textMain,
+                          ),
+                        ),
+                      ),
+                      if (isSelected)
+                        Icon(
+                          Icons.check_rounded,
+                          size: 20,
+                          color: theme.bgAccent,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   Widget _buildExpandableMonthPicker({
     required TapTalkThemeToken theme,
     required AppLanguage lang,
@@ -335,152 +491,74 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
     const animDuration = Duration(milliseconds: 280);
     const animCurve = Curves.easeInOutCubic;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Material(
-          color: Colors.white,
+    return CompositedTransformTarget(
+      link: _monthPickerLink,
+      child: Material(
+        key: _monthPickerFieldKey,
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(_cardRadius),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => _toggleMonthPicker(
+            theme: theme,
+            lang: lang,
+            monthOptions: monthOptions,
+            selectedMonth: selectedMonth,
+          ),
           borderRadius: BorderRadius.circular(_cardRadius),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: () => setState(() => _monthPickerExpanded = !_monthPickerExpanded),
-            borderRadius: BorderRadius.circular(_cardRadius),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(_cardRadius),
-                border: Border.all(
-                  color: _monthPickerExpanded
-                      ? theme.bgAccent.withValues(alpha: 0.55)
-                      : const Color(0xFFE9EEF2),
-                  width: _monthPickerExpanded ? 1.4 : 1,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          AppStrings.selectMonthPeriod(lang),
-                          style: GoogleFonts.poppins(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: theme.textMain.withValues(alpha: 0.65),
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _formatMonth(selectedMonth, lang),
-                          style: GoogleFonts.poppins(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: theme.textMain,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  AnimatedRotation(
-                    duration: animDuration,
-                    curve: animCurve,
-                    turns: _monthPickerExpanded ? 0.5 : 0,
-                    child: Icon(
-                      Icons.keyboard_arrow_down_rounded,
-                      color: theme.bgAccent,
-                      size: 28,
-                    ),
-                  ),
-                ],
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(_cardRadius),
+              border: Border.all(
+                color: _monthPickerExpanded
+                    ? theme.bgAccent.withValues(alpha: 0.55)
+                    : const Color(0xFFE9EEF2),
+                width: _monthPickerExpanded ? 1.4 : 1,
               ),
             ),
-          ),
-        ),
-        AnimatedSize(
-          duration: animDuration,
-          curve: animCurve,
-          alignment: Alignment.topCenter,
-          clipBehavior: Clip.hardEdge,
-          child: _monthPickerExpanded
-              ? Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.only(top: AppSpacing.xs),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(_cardRadius),
-                    border: Border.all(color: const Color(0xFFE9EEF2)),
-                    boxShadow: [
-                      BoxShadow(
-                        color: theme.textMain.withValues(alpha: 0.06),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        AppStrings.selectMonthPeriod(lang),
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: theme.textMain.withValues(alpha: 0.65),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _formatMonth(selectedMonth, lang),
+                        style: GoogleFonts.poppins(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: theme.textMain,
+                        ),
                       ),
                     ],
                   ),
-                  clipBehavior: Clip.antiAlias,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 260),
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-                      itemCount: monthOptions.length,
-                      separatorBuilder: (_, _) => Divider(
-                        height: 1,
-                        indent: AppSpacing.md,
-                        endIndent: AppSpacing.md,
-                        color: theme.textMain.withValues(alpha: 0.08),
-                      ),
-                      itemBuilder: (context, index) {
-                        final month = monthOptions[index];
-                        final isSelected = month.year == selectedMonth.year &&
-                            month.month == selectedMonth.month;
-                        return Material(
-                          color: isSelected
-                              ? theme.bgAccent.withValues(alpha: 0.10)
-                              : Colors.transparent,
-                          child: InkWell(
-                            onTap: () => _selectMonth(month),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: AppSpacing.md,
-                                vertical: AppSpacing.sm + 2,
-                              ),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      _formatMonth(month, lang),
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 14,
-                                        fontWeight: isSelected
-                                            ? FontWeight.w700
-                                            : FontWeight.w500,
-                                        color: isSelected
-                                            ? theme.bgAccent
-                                            : theme.textMain,
-                                      ),
-                                    ),
-                                  ),
-                                  if (isSelected)
-                                    Icon(
-                                      Icons.check_rounded,
-                                      size: 20,
-                                      color: theme.bgAccent,
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+                ),
+                AnimatedRotation(
+                  duration: animDuration,
+                  curve: animCurve,
+                  turns: _monthPickerExpanded ? 0.5 : 0,
+                  child: Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    color: theme.bgAccent,
+                    size: 28,
                   ),
-                )
-              : const SizedBox(width: double.infinity),
+                ),
+              ],
+            ),
+          ),
         ),
-      ],
+      ),
     );
   }
 
@@ -616,8 +694,6 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
     final monthOptions = _monthOptions(_trackingSince);
     final selectedMonth = _resolvedSelectedMonth(monthOptions);
 
-    final contextSubtitle = widget.learner.contextSubtitle;
-
     return LearnerScaffold(
       title: widget.learner.fullName,
       titleWidget: AppHeaderTitle(widget.learner.fullName),
@@ -632,22 +708,10 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
         children: [
-          if (contextSubtitle != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: Text(
-                contextSubtitle,
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: theme.textMain.withValues(alpha: 0.65),
-                ),
-              ),
-            ),
           Padding(
-            padding: EdgeInsets.fromLTRB(
+            padding: const EdgeInsets.fromLTRB(
               AppSpacing.lg,
-              contextSubtitle != null ? AppSpacing.sm : 0,
+              0,
               AppSpacing.lg,
               AppSpacing.md,
             ),
@@ -752,9 +816,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                 border: Border.all(color: const Color(0xFFE9EEF2)),
               ),
               child: LessonProgressSection(
-                key: ValueKey(
-                  'lesson_${widget.learner.learnerId}_${_period.name}',
-                ),
+                key: ValueKey('lesson_${widget.learner.learnerId}'),
                 learnerUserId: widget.learner.learnerId,
                 period: _period,
                 month: _period == ChildUsagePeriod.month

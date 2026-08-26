@@ -13,6 +13,7 @@ import '../data/models/parent_notification.dart';
 import '../data/models/teacher_class_student.dart';
 import '../providers/app_state.dart';
 import '../core/utils/parent_alert_icons.dart';
+import '../widgets/app_header.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/student_count_badge.dart';
 import '../widgets/taptalk_result_dialog.dart';
@@ -420,11 +421,38 @@ class _TeacherClassMonitoringScreenState
 
     return LearnerScaffold(
       title: displayClassName,
-      titleBadge: StudentCountBadge(
-        count: _students.length,
-        accent: theme.bgAccent,
+      titleWidget: SizedBox(
+        height: AppHeaderTitle.height,
+        child: Center(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(
+                  displayClassName,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.poppins(
+                    fontSize: 21,
+                    fontWeight: FontWeight.w800,
+                    color: theme.textMain,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              StudentCountBadge(
+                count: _students.length,
+                accent: theme.bgAccent,
+              ),
+            ],
+          ),
+        ),
       ),
       currentRoute: AppRoute.teacherMonitoring,
+      headerContentHeight: AppHeaderTitle.height,
+      headerBottomSpacing: 0,
+      bodyTopOffset: -4,
       showBottomNav: false,
       body: RefreshIndicator(
         onRefresh: _onRefresh,
@@ -568,20 +596,23 @@ class _StudentMonitoringTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: AppSpacing.sm),
-            FilledButton.tonal(
+            FilledButton(
               onPressed: onAlert,
               style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFFFEBEE),
+                backgroundColor: const Color(0xFFC62828).withValues(alpha: 0.1),
                 foregroundColor: const Color(0xFFC62828),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.md,
-                  vertical: AppSpacing.sm,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
                 ),
               ),
               child: Text(
                 AppStrings.alertStudent(lang),
                 style: GoogleFonts.poppins(
-                  fontSize: 12,
+                  fontSize: 11.5,
                   fontWeight: FontWeight.w700,
                 ),
               ),

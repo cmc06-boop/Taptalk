@@ -197,6 +197,7 @@ class _ClassesScreenState extends State<ClassesScreen> {
                         subtitle: enrolled.teacherName,
                         onTap: () => _openClass(context, enrolled),
                         trailing: CompactPopupMenu(
+                          alignToEnd: true,
                           iconColor: Colors.white.withValues(alpha: 0.92),
                           onSelected: (value) {
                             if (value == 'unenroll') {

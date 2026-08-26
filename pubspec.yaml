@@ -62,6 +62,24 @@ flutter:
     - assets/images/Family/
     - assets/images/Feelings/
     - assets/images/Foods/
+    - assets/images/New Foods/Fruits/
+    - assets/images/New Foods/Vegetable/
+    - assets/images/New Foods/Meals/
+    - assets/images/New Foods/Snacks/
+    - assets/images/New Foods/Dessert/
+    - "assets/images/New Foods/Bread & Pastries/"
+    - assets/images/New Foods/Eggs/
+    - assets/images/New Foods/Meat/
+    - assets/images/New Foods/Seafood/
+    - assets/images/New Drinks/Water/
+    - assets/images/New Drinks/Hot Drinks/
+    - assets/images/New Drinks/Cold Drinks/
+    - assets/images/New Drinks/Soft Drinks/
+    - "assets/images/New Health & Safety/"
+    - assets/images/New School/People/
+    - "assets/images/New School/School Supplies/"
+    - assets/images/New School/Schoolwork/
+    - assets/images/New School/Subjects/
     - assets/images/Greetings/
     - "assets/images/Health & Safety/"
     - assets/images/Hobbies/

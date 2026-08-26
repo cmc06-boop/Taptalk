@@ -38,9 +38,19 @@ String? _categoryCardImagePath(String key) {
     'food_vegetables': 'assets/images/Category Cards/Vegetable.png',
     'food_dessert': 'assets/images/Category Cards/Dessert.png',
     'food_meals': 'assets/images/Category Cards/Meals.png',
+    'food_snacks': 'assets/images/Category Cards/Snack.png',
+    'food_bread': 'assets/images/Category Cards/Bread & Pastries.png',
+    'food_eggs': 'assets/images/Category Cards/Eggs.png',
+    'food_meat': 'assets/images/Category Cards/Meat.png',
+    'food_seafood': 'assets/images/Category Cards/Seafood.png',
     'drinks_hot': 'assets/images/Category Cards/Hot Drinks.png',
     'drinks_cold': 'assets/images/Category Cards/Cold Drinks.png',
-    'drinks_dairy': 'assets/images/Category Cards/Milk & Yogurt.png',
+    'drinks_water': 'assets/images/Category Cards/Water.png',
+    'drinks_soft': 'assets/images/Category Cards/Soft Drinks.png',
+    'school_people': 'assets/images/Category Cards/People.png',
+    'school_supplies': 'assets/images/Category Cards/School Supplies.png',
+    'school_work': 'assets/images/Category Cards/Schoolwork.png',
+    'school_subjects': 'assets/images/Category Cards/Subject.png',
   };
   return map[key];
 }
@@ -145,21 +155,23 @@ class CategoryGridCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 1),
                 SizedBox(
-                  height: 28,
+                  height: 34,
                   child: Row(
                     children: [
-                    Expanded(child: Center(child: Text(
+                    Expanded(child: Center(child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
                       label,
                       textAlign: TextAlign.center,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.poppins(
-                        fontSize: 17,
+                        fontSize: 13,
                         fontWeight: FontWeight.w800,
                         color: theme.textMain,
                         height: 1.12,
                       ),
-                    ))),
+                    )))),
                     if (selectionMode)
                       Icon(
                         multiSelected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,

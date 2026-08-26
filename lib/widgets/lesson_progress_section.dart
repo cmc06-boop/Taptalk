@@ -60,13 +60,6 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
   @override
   void didUpdateWidget(covariant LessonProgressSection oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.period != widget.period ||
-        oldWidget.month != widget.month) {
-      if (_selectedClass != null && _selectedLesson != null) {
-        _loadProgress(_selectedClass!, _selectedLesson!, silent: true);
-      }
-      return;
-    }
     if (oldWidget.reloadNonce != widget.reloadNonce) {
       if (_selectedClass != null && _selectedLesson != null) {
         unawaited(
@@ -217,6 +210,7 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
         ),
         const SizedBox(height: AppSpacing.md),
         InlineDropdownField<EnrolledClassModel>(
+          overlayMenu: true,
           label: AppStrings.selectClass(lang),
           value: _selectedClass == null
               ? null
@@ -243,6 +237,7 @@ class _LessonProgressSectionState extends State<LessonProgressSection> {
           )
         else ...[
           InlineDropdownField<ClassLesson>(
+            overlayMenu: true,
             label: AppStrings.selectLesson(lang),
             value: _selectedLesson == null
                 ? null

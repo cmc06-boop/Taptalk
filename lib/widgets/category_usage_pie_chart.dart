@@ -309,20 +309,38 @@ class _InteractiveCategoryDonutState extends State<_InteractiveCategoryDonut> {
   }
 
   List<int> _collapsedPreviewIndices(int maxCount) {
-    final ranked = _rankedNonZeroIndices();
-    final preview = ranked.take(maxCount).toList();
     final selected = _selectedIndex;
-    if (selected == null ||
-        selected < 0 ||
-        selected >= widget.slices.length ||
-        preview.contains(selected)) {
-      return preview;
-    }
-    if (preview.isEmpty || maxCount <= 1) return [selected];
-    return [
-      selected,
-      ...preview.where((i) => i != selected).take(maxCount - 1),
+    final indices = <int>[
+      for (var i = 0; i < widget.slices.length; i++)
+        if (widget.slices[i].usageCount > 0 || i == selected) i,
     ];
+    indices.sort((a, b) {
+      final byUsage = widget.slices[b].usageCount.compareTo(
+        widget.slices[a].usageCount,
+      );
+      if (byUsage != 0) return byUsage;
+      return widget.slices[b].wordCount.compareTo(widget.slices[a].wordCount);
+    });
+    if (maxCount <= 0) {
+      return selected != null && indices.contains(selected)
+          ? [selected]
+          : const [];
+    }
+    if (indices.length <= maxCount) return indices;
+    final preview = indices.take(maxCount).toList();
+    if (selected == null || preview.contains(selected)) return preview;
+    if (preview.isEmpty) return [selected];
+    preview
+      ..removeLast()
+      ..add(selected)
+      ..sort((a, b) {
+        final byUsage = widget.slices[b].usageCount.compareTo(
+          widget.slices[a].usageCount,
+        );
+        if (byUsage != 0) return byUsage;
+        return widget.slices[b].wordCount.compareTo(widget.slices[a].wordCount);
+      });
+    return preview;
   }
 
   void _selectIndex(int? index) {
@@ -342,6 +360,7 @@ class _InteractiveCategoryDonutState extends State<_InteractiveCategoryDonut> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      useSafeArea: false,
       builder: (ctx) => _AllCategoriesSheet(
         slices: widget.slices,
         colors: widget.colors,
@@ -498,83 +517,83 @@ class _AllCategoriesSheetState extends State<_AllCategoriesSheet> {
     final lang = widget.lang;
     final slices = widget.slices;
     final allIndices = List.generate(slices.length, (index) => index);
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.88;
 
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.md,
-          0,
-          AppSpacing.md,
-          AppSpacing.md,
+    return SizedBox(
+      height: sheetHeight,
+      child: Material(
+        color: Colors.white,
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(16),
         ),
-        child: SizedBox(
-          height: sheetHeight,
-          child: Material(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              children: [
-                const SizedBox(height: AppSpacing.sm),
-                Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: theme.textMain.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.md,
-                    AppSpacing.md,
-                    AppSpacing.md,
-                    AppSpacing.sm,
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          AppStrings.allCategoriesTitle(lang),
-                          style: GoogleFonts.poppins(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: theme.textMain,
-                          ),
-                        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: [
+            const SizedBox(height: AppSpacing.sm),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: theme.textMain.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                AppSpacing.md,
+                AppSpacing.md,
+                AppSpacing.sm,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      AppStrings.allCategoriesTitle(lang),
+                      style: GoogleFonts.poppins(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: theme.textMain,
                       ),
-                      IconButton(
-                        onPressed: _close,
-                        icon: Icon(
-                          Icons.close_rounded,
-                          color: theme.textMain.withValues(alpha: 0.55),
-                        ),
-                        visualDensity: VisualDensity.compact,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(
-                          minWidth: 32,
-                          minHeight: 32,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-                const Divider(height: 1, color: Color(0xFFE9EEF2)),
-                Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final layout = _CategoryLegendLayout.forWidth(
-                        width: constraints.maxWidth - (AppSpacing.md * 2),
-                        slices: slices,
-                        labelForCategory: widget.labelForCategory,
-                        totalUsage: widget.totalUsage,
-                        lang: lang,
-                        textColor: theme.textMain,
-                      );
+                  IconButton(
+                    onPressed: _close,
+                    icon: Icon(
+                      Icons.close_rounded,
+                      color: theme.textMain.withValues(alpha: 0.55),
+                    ),
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 32,
+                      minHeight: 32,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, color: Color(0xFFE9EEF2)),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final layout = _CategoryLegendLayout.forWidth(
+                    width: constraints.maxWidth - (AppSpacing.md * 2),
+                    slices: slices,
+                    labelForCategory: widget.labelForCategory,
+                    totalUsage: widget.totalUsage,
+                    lang: lang,
+                    textColor: theme.textMain,
+                  );
 
-                      return SingleChildScrollView(
-                        padding: const EdgeInsets.all(AppSpacing.md),
+                  return SingleChildScrollView(
+                    padding: EdgeInsets.fromLTRB(
+                      AppSpacing.md,
+                      AppSpacing.md,
+                      AppSpacing.md,
+                      AppSpacing.md + bottomInset,
+                    ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
@@ -613,9 +632,7 @@ class _AllCategoriesSheetState extends State<_AllCategoriesSheet> {
               ],
             ),
           ),
-        ),
-      ),
-    );
+        );
   }
 }
 
@@ -814,6 +831,7 @@ class _LegendChip extends StatelessWidget {
     final detailStyle = _CategoryLegendLayout.detailStyle(textColor);
 
     final content = Row(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
@@ -825,18 +843,16 @@ class _LegendChip extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 6),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _ScaledLegendLine(text: label, style: labelStyle),
-              _ScaledLegendLine(
-                text: detailLine,
-                style: detailStyle,
-              ),
-            ],
-          ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _ScaledLegendLine(text: label, style: labelStyle),
+            _ScaledLegendLine(
+              text: detailLine,
+              style: detailStyle,
+            ),
+          ],
         ),
       ],
     );
@@ -845,24 +861,28 @@ class _LegendChip extends StatelessWidget {
       button: true,
       selected: selected,
       label: '$label. $detailLine.',
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          width: double.infinity,
-          padding: _cellPadding,
-          decoration: selected
-              ? BoxDecoration(
-                  color: color.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: color.withValues(alpha: 0.55),
-                    width: 1.5,
-                  ),
-                )
-              : null,
-          child: content,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Material(
+          color: Colors.transparent,
+          elevation: selected ? 3 : 0,
+          shadowColor: color.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(10),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(10),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              padding: _cellPadding,
+              decoration: selected
+                  ? BoxDecoration(
+                      color: color.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(10),
+                    )
+                  : null,
+              child: content,
+            ),
+          ),
         ),
       ),
     );

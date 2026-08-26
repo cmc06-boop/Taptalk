@@ -171,7 +171,56 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
         children: [
           RefreshIndicator(
             onRefresh: () => _refresh(forceCloud: true),
-            child: ListView(
+            child: classes.isEmpty
+                ? LayoutBuilder(
+                    builder: (context, constraints) {
+                      return ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.fromLTRB(
+                          AppSpacing.lg,
+                          0,
+                          AppSpacing.lg,
+                          96,
+                        ),
+                        children: [
+                          SizedBox(
+                            height: (constraints.maxHeight - 96)
+                                .clamp(0.0, double.infinity),
+                            child: Stack(
+                              children: [
+                                Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: AppSpacing.xl,
+                                    ),
+                                    child: Text(
+                                      AppStrings.noTeacherClasses(lang),
+                                      textAlign: TextAlign.center,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 14,
+                                        color: theme.textMain
+                                            .withValues(alpha: 0.7),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                Align(
+                                  alignment: Alignment.topRight,
+                                  child: _ViewRequestsButton(
+                                    count: app.pendingJoinRequestCount,
+                                    onPressed: () => app.setRoute(
+                                      AppRoute.teacherJoinRequests,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  )
+                : ListView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(
               AppSpacing.lg,
@@ -188,22 +237,7 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
                 ),
               ),
               const SizedBox(height: AppSpacing.md),
-              if (classes.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.all(AppSpacing.xxl),
-                  child: Center(
-                    child: Text(
-                      AppStrings.noTeacherClasses(lang),
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.poppins(
-                        fontSize: 14,
-                        color: theme.textMain.withValues(alpha: 0.7),
-                      ),
-                    ),
-                  ),
-                )
-              else
-                for (final teacherClass in classes)
+              for (final teacherClass in classes)
                   Padding(
                     key: ValueKey(
                       'tclass_${teacherClass.id}_${lang.name}_${app.languageRevision}',

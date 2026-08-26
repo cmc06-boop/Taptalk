@@ -1945,6 +1945,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _popUntil(AppRoute target) async {
     final nav = navigatorKey.currentState;
     while (_pageStack.length > 1 && _pageStack.last != target) {
+      _popDetailRoutes(nav);
       if (nav != null && nav.canPop()) {
         nav.pop();
       }
@@ -1952,6 +1953,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
     _route = _pageStack.last;
     _popDetailRoutes(nav);
+    if (nav == null) return;
+    if (_pageStack.length == 1) {
+      var guard = 0;
+      while (nav.canPop() && guard < 20) {
+        nav.pop();
+        guard++;
+      }
+    }
   }
 
   /// Detail pages opened with a bare [Navigator.push] (the child monitoring
@@ -2011,6 +2020,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
 
+      _popDetailRoutes(nav);
       _pageStack.add(route);
       _route = route;
       if (nav != null) {
@@ -5996,14 +6006,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     DateTime? month,
     int? lessonId,
   }) async {
-    final range = _dateRangeForPeriod(period, month: month);
     return _repo.getLessonProgressForLesson(
       learnerUserId: learnerUserId,
       className: className,
       lessonTitle: lessonTitle,
       lessonId: lessonId,
-      rangeStart: range.$1,
-      rangeEnd: range.$2,
+      rangeStart: DateTime.fromMillisecondsSinceEpoch(0),
+      rangeEnd: DateTime.now().add(const Duration(days: 1)),
     );
   }
 
