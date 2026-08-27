@@ -1,6 +1,6 @@
 import 'dart:async';
-
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -184,7 +184,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _pickImage() async {
     final picker = ImagePicker();
-    final file = await picker.pickImage(source: ImageSource.gallery, maxWidth: 900);
+    final file = await picker.pickMedia(
+      maxWidth: 900,
+      imageQuality: 85,
+    );
     if (file != null) {
       setState(() => _attachedImagePath = file.path);
     }
@@ -302,59 +305,45 @@ class _HomeScreenState extends State<HomeScreen> {
               AppSpacing.lg,
               0,
               AppSpacing.lg,
-              AppSpacing.sm,
+              AppSpacing.lg,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        AppStrings.enterText(lang),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                          color: theme.textMain,
-                        ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.undo_rounded, size: 22),
+                        onPressed: _undoStack.length <= 1
+                            ? null
+                            : () {
+                                _undoStack.removeLast();
+                                _setComposerText(_undoStack.last);
+                              },
                       ),
-                    ),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          icon: const Icon(Icons.undo_rounded, size: 22),
-                          onPressed: _undoStack.length <= 1
-                              ? null
-                              : () {
-                                  _undoStack.removeLast();
-                                  _setComposerText(_undoStack.last);
-                                },
-                        ),
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          icon: const Icon(Icons.copy_rounded, size: 22),
-                          onPressed: () {
-                            Clipboard.setData(
-                              ClipboardData(text: _textController.text),
-                            );
-                          },
-                        ),
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          icon: const Icon(Icons.close_rounded, size: 22),
-                          onPressed: () async {
-                            await app.stopSpeech();
-                            _clearComposer();
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.copy_rounded, size: 22),
+                        onPressed: () {
+                          Clipboard.setData(
+                            ClipboardData(text: _textController.text),
+                          );
+                        },
+                      ),
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.close_rounded, size: 22),
+                        onPressed: () async {
+                          await app.stopSpeech();
+                          _clearComposer();
+                        },
+                      ),
+                    ],
+                  ),
                 ),
                 if (_attachedImagePath != null)
                   Padding(
@@ -384,13 +373,67 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                   ),
-                Container(
-                  padding: const EdgeInsets.all(AppSpacing.md),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE8EFE2),
-                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                  ),
-                  child: Column(
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+                          child: ColoredBox(
+                            color: Color.alphaBlend(
+                              Colors.white.withValues(alpha: 0.32),
+                              theme.bgLight.withValues(alpha: 0.18),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(
+                                AppSpacing.radiusMd,
+                              ),
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [
+                                  Colors.white.withValues(alpha: 0.34),
+                                  Colors.white.withValues(alpha: 0.05),
+                                  Colors.transparent,
+                                  Colors.white.withValues(alpha: 0.18),
+                                ],
+                                stops: const [0, 0.3, 0.66, 1],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: ImageFiltered(
+                            imageFilter: ImageFilter.blur(
+                              sigmaX: 1.6,
+                              sigmaY: 1.6,
+                            ),
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(
+                                  AppSpacing.radiusMd,
+                                ),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.9),
+                                  width: 2.2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(AppSpacing.md),
+                        child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       TextField(
@@ -406,7 +449,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         decoration: InputDecoration(
                           hintText: AppStrings.enterText(lang),
                           filled: true,
-                          fillColor: const Color(0xFFF4F4F4),
+                          fillColor: Colors.white,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
                             borderSide: BorderSide.none,
@@ -422,21 +465,27 @@ class _HomeScreenState extends State<HomeScreen> {
                           alignment: WrapAlignment.end,
                           runAlignment: WrapAlignment.end,
                           children: [
-                          OutlinedButton.icon(
+                          FilledButton.icon(
                             onPressed: _pickImage,
-                            style: OutlinedButton.styleFrom(
+                            style: FilledButton.styleFrom(
+                              elevation: 0,
+                              shadowColor: Colors.transparent,
+                              backgroundColor: Colors.white,
                               foregroundColor: theme.bgAccent,
-                              backgroundColor: Colors.white.withValues(alpha: 0.92),
-                              side: BorderSide(
-                                color: theme.bgAccent.withValues(alpha: 0.45),
-                              ),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               padding: const EdgeInsets.symmetric(
-                                horizontal: AppSpacing.sm,
-                                vertical: AppSpacing.xs,
+                                horizontal: AppSpacing.md,
+                                vertical: AppSpacing.sm,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(
+                                  AppSpacing.radiusSm,
+                                ),
                               ),
                             ),
                             icon: Icon(
-                              Icons.image_outlined,
+                              Icons.perm_media_rounded,
                               size: 16,
                               color: theme.bgAccent,
                             ),
@@ -462,14 +511,23 @@ class _HomeScreenState extends State<HomeScreen> {
                               await app.addPhrase(text, imagePath: image);
                             },
                             style: FilledButton.styleFrom(
+                              elevation: 0,
+                              shadowColor: Colors.transparent,
                               backgroundColor: theme.bgAccent,
                               foregroundColor: Colors.white,
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               padding: const EdgeInsets.symmetric(
                                 horizontal: AppSpacing.md,
                                 vertical: AppSpacing.sm,
                               ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(
+                                  AppSpacing.radiusSm,
+                                ),
+                              ),
                             ),
-                            icon: const Icon(Icons.add_rounded, size: 18),
+                            icon: const Icon(Icons.add_rounded, size: 16),
                             label: Text(
                               AppStrings.add(lang),
                               style: GoogleFonts.poppins(
@@ -480,6 +538,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ],
                         ),
+                      ),
+                    ],
+                  ),
                       ),
                     ],
                   ),
@@ -495,15 +556,59 @@ class _HomeScreenState extends State<HomeScreen> {
                         _textController.text,
                         record: true,
                       ),
-                      style: FilledButton.styleFrom(backgroundColor: theme.bgAccent),
-                      icon: const Icon(Icons.play_arrow_rounded),
-                      label: Text(AppStrings.play(lang)),
+                      style: FilledButton.styleFrom(
+                        elevation: 0,
+                        shadowColor: Colors.transparent,
+                        backgroundColor: theme.bgAccent,
+                        foregroundColor: Colors.white,
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.md,
+                          vertical: AppSpacing.sm,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(
+                            AppSpacing.radiusSm,
+                          ),
+                        ),
+                      ),
+                      icon: const Icon(Icons.play_arrow_rounded, size: 16),
+                      label: Text(
+                        AppStrings.play(lang),
+                        style: GoogleFonts.poppins(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
                     FilledButton.icon(
                       onPressed: () => app.pauseSpeech(),
-                      style: FilledButton.styleFrom(backgroundColor: theme.bgAccent),
-                      icon: const Icon(Icons.pause_rounded),
-                      label: Text(AppStrings.pause(lang)),
+                      style: FilledButton.styleFrom(
+                        elevation: 0,
+                        shadowColor: Colors.transparent,
+                        backgroundColor: theme.bgAccent,
+                        foregroundColor: Colors.white,
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.md,
+                          vertical: AppSpacing.sm,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(
+                            AppSpacing.radiusSm,
+                          ),
+                        ),
+                      ),
+                      icon: const Icon(Icons.pause_rounded, size: 16),
+                      label: Text(
+                        AppStrings.pause(lang),
+                        style: GoogleFonts.poppins(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
                   ],
                 ),

@@ -24,7 +24,7 @@ abstract final class AppStrings {
       lang == AppLanguage.filipino ? 'I-edit ang parirala' : 'Edit phrase';
 
   static String attachImage(AppLanguage lang) =>
-      lang == AppLanguage.filipino ? 'Mag-attach ng larawan' : 'Attach image';
+      lang == AppLanguage.filipino ? 'Mga attachment' : 'Attachments';
 
   static String remove(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Alisin' : 'Remove';

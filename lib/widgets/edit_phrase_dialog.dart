@@ -172,7 +172,7 @@ class _EditPhraseDialogState extends State<EditPhraseDialog> {
                       foregroundColor: theme.bgAccent,
                       side: BorderSide(color: theme.bgAccent.withValues(alpha: 0.45)),
                     ),
-                    icon: const Icon(Icons.image_outlined, size: 16),
+                    icon: const Icon(Icons.perm_media_rounded, size: 16),
                     label: Text(AppStrings.attachImage(lang)),
                   ),
                   TextButton.icon(
@@ -190,7 +190,7 @@ class _EditPhraseDialogState extends State<EditPhraseDialog> {
                   foregroundColor: theme.bgAccent,
                   side: BorderSide(color: theme.bgAccent.withValues(alpha: 0.45)),
                 ),
-                icon: const Icon(Icons.image_outlined, size: 16),
+                icon: const Icon(Icons.perm_media_rounded, size: 16),
                 label: Text(AppStrings.attachImage(lang)),
               ),
               const SizedBox(height: AppSpacing.md),
