@@ -158,10 +158,19 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       return;
     }
     final classCode = AppRepository.normalizeClassCode(event.classCode);
-    final learnerUid = event.learnerFirebaseUid.trim();
+    final authUid = FirebaseService.instance.currentUid?.trim() ?? '';
+    final eventLearnerUid = event.learnerFirebaseUid.trim();
+    final eventTeacherUid = event.teacherFirebaseUid.trim();
+    // Student send: stamp live Auth uid. Teacher accept/reject: keep the
+    // original learner uid so the same cloud document is updated.
+    final learnerUid = (authUid.isNotEmpty && authUid != eventTeacherUid)
+        ? authUid
+        : eventLearnerUid;
     final docId = '${classCode}_$learnerUid';
     final payload = event.toFirestoreMap()
       ..['classCode'] = classCode
+      ..['learnerFirebaseUid'] = learnerUid
+      ..['teacherFirebaseUid'] = event.teacherFirebaseUid.trim()
       ..['requestedAt'] = Timestamp.fromDate(event.requestedAt.toUtc());
     if (event.respondedAt != null) {
       payload['respondedAt'] =
@@ -175,14 +184,64 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
 
   @override
   Future<List<RemoteClassJoinRequest>> getClassJoinRequestsForTeacher(
-    String teacherFirebaseUid,
-  ) async {
-    if (!isAvailable || teacherFirebaseUid.trim().isEmpty) return const [];
-    final snapshot = await FirebaseFirestore.instance
-        .collection(joinRequestCollectionName)
-        .where('teacherFirebaseUid', isEqualTo: teacherFirebaseUid.trim())
-        .get();
-    return snapshot.docs.map(_joinRequestFromDocument).toList();
+    String teacherFirebaseUid, {
+    Iterable<String> classCodes = const [],
+  }) async {
+    if (!isAvailable) return const [];
+    final uid = teacherFirebaseUid.trim();
+    final codes = classCodes
+        .map(AppRepository.normalizeClassCode)
+        .where(AppRepository.isValidClassCodeFormat)
+        .toSet();
+    if (uid.isEmpty && codes.isEmpty) return const [];
+
+    bool matches(RemoteClassJoinRequest request) {
+      if (uid.isNotEmpty && request.teacherFirebaseUid.trim() == uid) {
+        return true;
+      }
+      return codes.contains(
+        AppRepository.normalizeClassCode(request.classCode),
+      );
+    }
+
+    List<RemoteClassJoinRequest> parseDocs(
+      Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    ) {
+      final requests = <RemoteClassJoinRequest>[];
+      for (final doc in docs) {
+        try {
+          final request = _joinRequestFromDocument(doc);
+          if (matches(request)) requests.add(request);
+        } catch (e, st) {
+          debugPrint('Skip join request ${doc.id}: $e\n$st');
+        }
+      }
+      return requests;
+    }
+
+    if (uid.isNotEmpty && codes.isEmpty) {
+      try {
+        final snapshot = await FirebaseFirestore.instance
+            .collection(joinRequestCollectionName)
+            .where('teacherFirebaseUid', isEqualTo: uid)
+            .get();
+        if (snapshot.docs.isNotEmpty) {
+          return parseDocs(snapshot.docs);
+        }
+      } catch (e, st) {
+        debugPrint('getClassJoinRequestsForTeacher query failed: $e\n$st');
+      }
+    }
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection(joinRequestCollectionName)
+          .get();
+      return parseDocs(snapshot.docs);
+    } catch (e, st) {
+      debugPrint('getClassJoinRequestsForTeacher fallback failed: $e\n$st');
+      return const [];
+    }
   }
 
   @override
@@ -505,11 +564,65 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   Future<void> removeTeacherClass({required String classCode}) async {
     if (!isAvailable || classCode.trim().isEmpty) return;
     final docId = AppRepository.normalizeClassCode(classCode);
-    await FirebaseFirestore.instance
+    final docRef = FirebaseFirestore.instance
         .collection(teacherClassCollectionName)
-        .doc(docId)
-        .delete();
+        .doc(docId);
+    final authUid = FirebaseService.instance.currentUid?.trim() ?? '';
+    try {
+      final doc = await docRef.get();
+      if (doc.exists && authUid.isNotEmpty) {
+        final owner = (doc.data()?['teacherFirebaseUid'] as String?)?.trim() ?? '';
+        if (owner != authUid) {
+          await docRef.set(
+            {
+              'teacherFirebaseUid': authUid,
+              'classCode': docId,
+              'className': (doc.data()?['className'] as String?) ?? 'Class',
+            },
+            SetOptions(merge: true),
+          );
+        }
+      }
+      await docRef.delete();
+    } catch (e, st) {
+      debugPrint('removeTeacherClass failed: $e\n$st');
+    }
     await removeClassEnrollmentsForClass(classCode: classCode);
+    final codesToMatch = {
+      docId,
+      classCode.trim(),
+      classCode.trim().toUpperCase(),
+    };
+    Future<void> deleteJoinDocs(
+      Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    ) async {
+      for (final doc in docs) {
+        try {
+          if (authUid.isNotEmpty) {
+            await doc.reference.set(
+              {'teacherFirebaseUid': authUid},
+              SetOptions(merge: true),
+            );
+          }
+          await doc.reference.delete();
+        } catch (e, st) {
+          debugPrint('remove join request ${doc.id} failed: $e\n$st');
+        }
+      }
+    }
+
+    try {
+      for (final code in codesToMatch) {
+        if (code.isEmpty) continue;
+        final snapshot = await FirebaseFirestore.instance
+            .collection(joinRequestCollectionName)
+            .where('classCode', isEqualTo: code)
+            .get();
+        await deleteJoinDocs(snapshot.docs);
+      }
+    } catch (e, st) {
+      debugPrint('remove join requests for class failed: $e\n$st');
+    }
   }
 
   @override
@@ -521,14 +634,51 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       classCode.trim(),
       classCode.trim().toUpperCase(),
     };
-    for (final code in codesToMatch) {
-      if (code.isEmpty) continue;
-      final snapshot = await FirebaseFirestore.instance
-          .collection(enrollmentCollectionName)
-          .where('classCode', isEqualTo: code)
-          .get();
-      for (final doc in snapshot.docs) {
-        await doc.reference.delete();
+    final authUid = FirebaseService.instance.currentUid?.trim() ?? '';
+    Future<void> deleteDocs(
+      Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    ) async {
+      for (final doc in docs) {
+        try {
+          if (authUid.isNotEmpty) {
+            await doc.reference.set(
+              {'teacherFirebaseUid': authUid},
+              SetOptions(merge: true),
+            );
+          }
+          await doc.reference.delete();
+        } catch (e, st) {
+          debugPrint('remove enrollment ${doc.id} failed: $e\n$st');
+        }
+      }
+    }
+
+    try {
+      for (final code in codesToMatch) {
+        if (code.isEmpty) continue;
+        final snapshot = await FirebaseFirestore.instance
+            .collection(enrollmentCollectionName)
+            .where('classCode', isEqualTo: code)
+            .get();
+        await deleteDocs(snapshot.docs);
+      }
+    } catch (e, st) {
+      debugPrint('removeClassEnrollmentsForClass query failed: $e\n$st');
+      try {
+        final snapshot = await FirebaseFirestore.instance
+            .collection(enrollmentCollectionName)
+            .get();
+        await deleteDocs(
+          snapshot.docs.where((doc) {
+            final code = AppRepository.normalizeClassCode(
+              (doc.data()['classCode'] as String?) ?? '',
+            );
+            return codesToMatch.contains(code) ||
+                codesToMatch.contains((doc.data()['classCode'] as String?) ?? '');
+          }),
+        );
+      } catch (e2, st2) {
+        debugPrint('removeClassEnrollmentsForClass fallback failed: $e2\n$st2');
       }
     }
   }
@@ -554,8 +704,25 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
           .collection(teacherClassCollectionName)
           .doc(docId)
           .get();
-      if (!doc.exists) return null;
-      return _teacherClassFromDocument(doc);
+      if (doc.exists) return _teacherClassFromDocument(doc);
+
+      // Same approach as profile-code lookup: match the field, not only doc id.
+      for (final value in <String>{
+        docId,
+        classCode.trim(),
+        classCode.trim().toUpperCase(),
+      }) {
+        if (value.isEmpty) continue;
+        final snapshot = await FirebaseFirestore.instance
+            .collection(teacherClassCollectionName)
+            .where('classCode', isEqualTo: value)
+            .limit(1)
+            .get();
+        if (snapshot.docs.isNotEmpty) {
+          return _teacherClassFromDocument(snapshot.docs.first);
+        }
+      }
+      return null;
     } catch (e, st) {
       debugPrint('getTeacherClassByCode failed: $e\n$st');
       return null;
@@ -1269,17 +1436,24 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     return DateTime.now();
   }
 
+  int _readInt(Object? value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value.trim()) ?? 0;
+    return 0;
+  }
+
   RemoteClassJoinRequest _joinRequestFromDocument(
     QueryDocumentSnapshot<Map<String, dynamic>> doc,
   ) {
     final data = doc.data();
     return RemoteClassJoinRequest(
-      classId: data['classId'] as int? ?? 0,
+      classId: _readInt(data['classId']),
       classCode: (data['classCode'] as String?) ?? '',
       className: (data['className'] as String?) ?? '',
       teacherFirebaseUid: (data['teacherFirebaseUid'] as String?) ?? '',
-      teacherUserId: data['teacherUserId'] as int? ?? 0,
-      learnerUserId: data['learnerUserId'] as int? ?? 0,
+      teacherUserId: _readInt(data['teacherUserId']),
+      learnerUserId: _readInt(data['learnerUserId']),
       learnerName: (data['learnerName'] as String?) ?? '',
       learnerFirebaseUid: (data['learnerFirebaseUid'] as String?) ?? '',
       status: (data['status'] as String?) ?? 'pending',

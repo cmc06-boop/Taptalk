@@ -1,12 +1,32 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
+
+import '../../services/firebase_service.dart';
+
+const String phraseMediaCollectionName = 'phrase_media_cloud';
+const String phraseMediaScheme = 'taptalk-fs-media://';
+
+bool isFirestorePhraseMediaPath(String? imagePath) {
+  final trimmed = imagePath?.trim() ?? '';
+  return trimmed.toLowerCase().startsWith(phraseMediaScheme);
+}
+
+String? firestorePhraseMediaDocId(String imagePath) {
+  if (!isFirestorePhraseMediaPath(imagePath)) return null;
+  final rest = imagePath.trim().substring(phraseMediaScheme.length);
+  if (rest.isEmpty) return null;
+  final withoutExt = p.basenameWithoutExtension(rest);
+  return withoutExt.isEmpty ? rest : withoutExt;
+}
 
 bool isPhraseVideoPath(String? path) {
   if (path == null || path.trim().isEmpty) return false;
@@ -50,13 +70,84 @@ Future<String?> persistPhraseImageIfNeeded(String? sourcePath) async {
     await dir.create(recursive: true);
   }
 
+  final looksVideo =
+      isPhraseVideoPath(sourcePath) || await _fileLooksLikeMp4(source);
   final ext = p.extension(sourcePath);
   final safeExt = ext.isEmpty || ext.length > 8
-      ? (isPhraseVideoPath(sourcePath) ? '.mp4' : '.jpg')
-      : ext;
+      ? (looksVideo ? '.mp4' : '.jpg')
+      : (looksVideo && !_isVideoExt(ext) ? '.mp4' : ext);
   final dest = File(p.join(dir.path, '${const Uuid().v4()}$safeExt'));
   await source.copy(dest.path);
   return dest.path;
+}
+
+bool _isVideoExt(String ext) {
+  final lower = ext.toLowerCase();
+  return lower == '.mp4' ||
+      lower == '.webm' ||
+      lower == '.mov' ||
+      lower == '.m4v';
+}
+
+Future<bool> _fileLooksLikeMp4(File file) async {
+  RandomAccessFile? raf;
+  try {
+    raf = await file.open();
+    final header = await raf.read(12);
+    if (header.length < 8) return false;
+    // ISO BMFF: bytes 4..7 spell "ftyp"
+    return header[4] == 0x66 &&
+        header[5] == 0x74 &&
+        header[6] == 0x79 &&
+        header[7] == 0x70;
+  } catch (_) {
+    return false;
+  } finally {
+    await raf?.close();
+  }
+}
+
+/// Copies an already-local file into the cache slot for [remoteRef] so the UI
+/// can keep showing the video instantly after the DB switches to a cloud path.
+Future<String?> seedPhraseMediaCacheFromLocal({
+  required String remoteRef,
+  required String localPath,
+}) async {
+  if (kIsWeb) return null;
+  final ref = remoteRef.trim();
+  final local = localPath.trim();
+  if (ref.isEmpty || local.isEmpty) return null;
+  if (!isRemotePhraseImagePath(ref) && !isFirestorePhraseMediaPath(ref)) {
+    return null;
+  }
+  final source = File(local);
+  if (!await source.exists() || await source.length() <= 0) return null;
+
+  await warmPhraseImageCacheDirectory();
+  var dest = _cacheFileForSource(ref);
+  final preferredExt = p.extension(local).isNotEmpty
+      ? p.extension(local)
+      : _extensionForSource(ref);
+  if (preferredExt.isNotEmpty &&
+      p.extension(dest.path).toLowerCase() != preferredExt.toLowerCase()) {
+    dest = File(
+      p.join(
+        dest.parent.path,
+        '${p.basenameWithoutExtension(dest.path)}$preferredExt',
+      ),
+    );
+  }
+  try {
+    if (await dest.exists() && await dest.length() > 0) {
+      return dest.path;
+    }
+    await dest.parent.create(recursive: true);
+    await source.copy(dest.path);
+    return dest.path;
+  } catch (e, st) {
+    debugPrint('Seed phrase media cache failed: $e\n$st');
+    return null;
+  }
 }
 
 bool isRemotePhraseImagePath(String? imagePath) {
@@ -64,7 +155,8 @@ bool isRemotePhraseImagePath(String? imagePath) {
   final lower = imagePath.trim().toLowerCase();
   return lower.startsWith('http://') ||
       lower.startsWith('https://') ||
-      lower.startsWith('data:');
+      lower.startsWith('data:') ||
+      isFirestorePhraseMediaPath(imagePath);
 }
 
 /// Returns a path that can be shown immediately without downloading.
@@ -132,6 +224,10 @@ Future<String?> cachePhraseImageLocally(String? imagePath) async {
     return _writeDataUrlToCache(trimmed, cacheFile);
   }
 
+  if (isFirestorePhraseMediaPath(trimmed)) {
+    return _downloadFirestoreMediaToCache(trimmed, cacheFile);
+  }
+
   return _downloadUrlToCache(trimmed, cacheFile);
 }
 
@@ -181,6 +277,59 @@ Future<String?> _writeDataUrlToCache(String dataUrl, File cacheFile) async {
     return cacheFile.path;
   } catch (e, st) {
     debugPrint('Phrase image data-url cache failed: $e\n$st');
+    return null;
+  }
+}
+
+Future<String?> _downloadFirestoreMediaToCache(String ref, File cacheFile) async {
+  final docId = firestorePhraseMediaDocId(ref);
+  if (docId == null || docId.isEmpty) return null;
+
+  await FirebaseService.instance.initialize();
+  if (!FirebaseService.instance.isAvailable) return null;
+
+  try {
+    final firestore = FirebaseFirestore.instance;
+    final meta =
+        await firestore.collection(phraseMediaCollectionName).doc(docId).get();
+    if (!meta.exists) return null;
+    final data = meta.data() ?? {};
+    final chunkCount = data['chunkCount'] as int? ?? 0;
+    if (chunkCount <= 0) return null;
+    final ext = (data['ext'] as String?)?.trim();
+    var target = cacheFile;
+    if (ext != null &&
+        ext.isNotEmpty &&
+        p.extension(target.path).toLowerCase() != ext.toLowerCase()) {
+      target = File(
+        p.join(
+          target.parent.path,
+          '${p.basenameWithoutExtension(target.path)}$ext',
+        ),
+      );
+    }
+    if (await target.exists() && await target.length() > 0) {
+      return target.path;
+    }
+
+    final builder = BytesBuilder(copy: false);
+    for (var i = 0; i < chunkCount; i++) {
+      final chunkDoc = await firestore
+          .collection(phraseMediaCollectionName)
+          .doc('${docId}_$i')
+          .get();
+      if (!chunkDoc.exists) return null;
+      final encoded = chunkDoc.data()?['data'] as String?;
+      if (encoded == null || encoded.isEmpty) return null;
+      builder.add(base64Decode(encoded));
+    }
+    final bytes = builder.takeBytes();
+    if (bytes.isEmpty) return null;
+    await target.parent.create(recursive: true);
+    await target.writeAsBytes(bytes, flush: true);
+    return target.path;
+  } catch (e, st) {
+    debugPrint('Phrase media Firestore download failed: $e\n$st');
     return null;
   }
 }

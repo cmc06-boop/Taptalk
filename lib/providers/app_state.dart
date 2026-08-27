@@ -1021,7 +1021,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         try {
           await _repo.mergeRemoteEnrollmentsForTeacher(
             teacherUserId: _user!.id,
-            enrollments: enrollments,
+            enrollments: enrollments
+                .where(
+                  (e) => !_deletedClassCodes.contains(
+                    AppRepository.normalizeClassCode(e.classCode),
+                  ),
+                )
+                .toList(),
           );
           await _refreshTeacherClassCounts();
           _bumpLiveDataRevision();
@@ -1062,8 +1068,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (_user == null || !_user!.isTeacher || !CloudScope.syncMonitoring) {
       return;
     }
-    final teacherFirebaseUid = await _resolveAccountFirebaseUid();
-    if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) return;
+    final teacherFirebaseUid =
+        (FirebaseService.instance.currentUid?.trim().isNotEmpty ?? false)
+            ? FirebaseService.instance.currentUid!.trim()
+            : (await _resolveAccountFirebaseUid())?.trim() ?? '';
+    if (teacherFirebaseUid.isEmpty) return;
+    await _loadDeletedClassCodes();
     await _syncJoinRequestsFromCloudForTeacher();
     await _notificationSync.startTeacherJoinRequestSync(
       teacherFirebaseUid: teacherFirebaseUid,
@@ -1073,6 +1083,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           await _repo.mergeRemoteJoinRequestsForTeacher(
             teacherUserId: _user!.id,
             requests: requests,
+            skipClassCodes: _deletedClassCodes,
           );
           await _loadPendingJoinRequests();
           _joinRequestsRevision++;
@@ -1115,15 +1126,27 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         !_notificationSync.isCloudAvailable) {
       return;
     }
-    final teacherFirebaseUid = await _resolveAccountFirebaseUid();
-    if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) return;
+    await _ensureCloudAuthSession();
+    final teacherFirebaseUid =
+        (FirebaseService.instance.currentUid?.trim().isNotEmpty ?? false)
+            ? FirebaseService.instance.currentUid!.trim()
+            : (await _resolveAccountFirebaseUid())?.trim() ?? '';
+    if (teacherFirebaseUid.isEmpty) return;
+    await _loadDeletedClassCodes();
     try {
+      final classes = await _repo.getTeacherClasses(_user!.id);
+      final codes = classes
+          .map((c) => AppRepository.normalizeClassCode(c.code))
+          .where(AppRepository.isValidClassCodeFormat)
+          .toSet();
       final remote = await _notificationSync.getJoinRequestsForTeacherFromCloud(
         teacherFirebaseUid,
+        classCodes: codes,
       );
       await _repo.mergeRemoteJoinRequestsForTeacher(
         teacherUserId: _user!.id,
         requests: remote,
+        skipClassCodes: _deletedClassCodes,
       );
       await _loadPendingJoinRequests();
     } catch (e, st) {
@@ -1187,15 +1210,19 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
     final learnerFirebaseUid = request.learnerFirebaseUid?.trim() ?? '';
     final teacherFirebaseUid =
-        request.teacherFirebaseUid?.trim() ??
-        (await _resolveAccountFirebaseUid()) ??
-        '';
+        (FirebaseService.instance.currentUid?.trim().isNotEmpty ?? false)
+            ? FirebaseService.instance.currentUid!.trim()
+            : (request.teacherFirebaseUid?.trim() ?? '');
     final respondedAt = DateTime.now();
     await _repo.updateJoinRequestStatus(
       requestId: requestId,
       status: ClassJoinRequestStatus.accepted,
       respondedAt: respondedAt,
     );
+    _pendingJoinRequests =
+        _pendingJoinRequests.where((item) => item.id != requestId).toList();
+    _joinRequestsRevision++;
+    notifyListeners();
     if (learnerFirebaseUid.isNotEmpty && teacherFirebaseUid.isNotEmpty) {
       final teacherName = await _repo.teacherDisplayNameForUserId(_user!.id);
       _pushToCloudInBackground(
@@ -1258,11 +1285,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       status: ClassJoinRequestStatus.rejected,
       respondedAt: respondedAt,
     );
+    _pendingJoinRequests =
+        _pendingJoinRequests.where((item) => item.id != requestId).toList();
+    _joinRequestsRevision++;
+    notifyListeners();
     final learnerFirebaseUid = request.learnerFirebaseUid?.trim() ?? '';
     final teacherFirebaseUid =
-        request.teacherFirebaseUid?.trim() ??
-        (await _resolveAccountFirebaseUid()) ??
-        '';
+        (FirebaseService.instance.currentUid?.trim().isNotEmpty ?? false)
+            ? FirebaseService.instance.currentUid!.trim()
+            : (request.teacherFirebaseUid?.trim() ?? '');
     if (learnerFirebaseUid.isNotEmpty && teacherFirebaseUid.isNotEmpty) {
       _pushToCloudInBackground(
         'Join request reject',
@@ -2239,47 +2270,42 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         return AppStrings.loginNeedsInternet(_language);
       }
       final ok = await _repo.verifyLogin(normalizedEmail, password);
-      if (!ok) return AppStrings.wrongPassword(_language);
+      if (!ok) return AppStrings.invalidEmailPassword(_language);
     } else {
       final uid = await FirebaseService.instance.signIn(
         email: normalizedEmail,
         password: password,
       );
       if (uid == null) {
-        if (user == null) return AppStrings.emailNotRegistered(_language);
-        final ok = await _repo.verifyLogin(normalizedEmail, password);
-        if (!ok) return AppStrings.wrongPassword(_language);
-        unawaited(
-          _linkFirebaseAccountIfAvailable(
-            user: user,
-            email: normalizedEmail,
-            password: password,
-          ),
-        );
-      } else {
-        await _notificationSync.initialize();
-        var cloudProfile = await _notificationSync.getUserProfileFromCloud(uid);
-        final cloudSnapshot = cloudProfile;
-        if (cloudProfile != null &&
-            AppRepository.isGenericAccountName(cloudProfile.fullName)) {
-          cloudProfile = null;
-        }
-        cloudProfile ??= await _notificationSync.resolveUserProfileForLogin(
-          firebaseUid: uid,
-          email: normalizedEmail,
-        );
-        cloudProfile = _mergeCloudAccountPreferences(
-          profile: cloudProfile,
-          cloudSource: cloudSnapshot,
-        );
-        user = await _repo.finalizeCloudLoginUser(
-          userByEmail: user,
+        return await _loginFailureMessage(
+          code: FirebaseService.instance.lastAuthErrorCode,
+          localUser: user,
           email: normalizedEmail,
           password: password,
-          firebaseUid: uid,
-          profile: cloudProfile,
         );
       }
+      await _notificationSync.initialize();
+      var cloudProfile = await _notificationSync.getUserProfileFromCloud(uid);
+      final cloudSnapshot = cloudProfile;
+      if (cloudProfile != null &&
+          AppRepository.isGenericAccountName(cloudProfile.fullName)) {
+        cloudProfile = null;
+      }
+      cloudProfile ??= await _notificationSync.resolveUserProfileForLogin(
+        firebaseUid: uid,
+        email: normalizedEmail,
+      );
+      cloudProfile = _mergeCloudAccountPreferences(
+        profile: cloudProfile,
+        cloudSource: cloudSnapshot,
+      );
+      user = await _repo.finalizeCloudLoginUser(
+        userByEmail: user,
+        email: normalizedEmail,
+        password: password,
+        firebaseUid: uid,
+        profile: cloudProfile,
+      );
     }
 
     _user = user;
@@ -2343,12 +2369,47 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     return null;
   }
 
-  /// True when this device already has an account with the email.
-  /// Firebase Auth is checked again when the user taps Create account.
+  Future<String> _loginFailureMessage({
+    required String? code,
+    required UserModel? localUser,
+    required String email,
+    required String password,
+  }) async {
+    switch (code) {
+      case 'invalid-email':
+        return AppStrings.invalidEmail(_language);
+      case 'user-disabled':
+        return AppStrings.loginFailed(_language);
+      case 'too-many-requests':
+        return AppStrings.passwordResetTooManyRequests(_language);
+      case 'user-not-found':
+        return AppStrings.emailNotRegistered(_language);
+      case 'wrong-password':
+        return AppStrings.invalidEmailPassword(_language);
+      case 'invalid-credential':
+      case 'invalid-login-credentials':
+        if (localUser == null) {
+          return AppStrings.emailNotRegistered(_language);
+        }
+        final localOk = await _repo.verifyLogin(email, password);
+        if (localOk) return AppStrings.emailNotRegistered(_language);
+        return AppStrings.invalidEmailPassword(_language);
+      default:
+        return AppStrings.loginFailedTryAgain(_language);
+    }
+  }
+
+  /// True when the email is taken in Firebase Auth (or locally if offline).
+  /// A leftover SQLite row after Auth deletion does not block sign up.
   Future<bool> isEmailAlreadyInUse(String email) async {
     final normalizedEmail = AuthValidation.normalizeEmail(email);
     if (!AuthValidation.isValidEmail(normalizedEmail)) return false;
 
+    await FirebaseService.instance.initialize();
+    if (!await NetworkStatus.isOffline() &&
+        FirebaseService.instance.isAvailable) {
+      return false;
+    }
     final existing = await _repo.findUserByEmail(normalizedEmail);
     return existing != null;
   }
@@ -2400,9 +2461,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       return AppStrings.signUpRequiresInternet(_language);
     }
 
-    final existing = await _repo.findUserByEmail(normalizedEmail);
-    if (existing != null) return AppStrings.emailInUse(_language);
-
     String? firebaseUid;
     if (FirebaseService.instance.isAvailable) {
       firebaseUid = await FirebaseService.instance.createAccount(
@@ -2437,9 +2495,23 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       debugPrint('registerUser database error: $e');
       final msg = e.toString().toLowerCase();
       if (msg.contains('unique') || msg.contains('constraint')) {
-        return AppStrings.emailInUse(_language);
+        final existing = await _repo.findUserByEmail(normalizedEmail);
+        if (existing == null) {
+          return AppStrings.emailInUse(_language);
+        }
+        await _repo.deleteLocalAccountCompletely(existing.id);
+        _user = await _repo.registerUser(
+          fullName: fullName,
+          firstName: firstName,
+          lastName: lastName,
+          email: normalizedEmail,
+          password: password,
+          role: role,
+          firebaseUid: firebaseUid,
+        );
+      } else {
+        rethrow;
       }
-      rethrow;
     }
 
     final prefs = await SharedPreferences.getInstance();
@@ -2542,6 +2614,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         return AppStrings.passwordResetTooManyRequests(_language);
       case 'invalid-email':
         return AppStrings.invalidEmail(_language);
+      case 'user-not-found':
+        return AppStrings.emailNotRegistered(_language);
       case 'unavailable':
       case 'timeout':
         return AppStrings.localPasswordResetUnavailable(_language);
@@ -3200,9 +3274,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       if (changed) {
         _classContentRevision[classId] =
             (_classContentRevision[classId] ?? 0) + 1;
-        if (_user?.isLearner == true) {
-          await _loadEnrolledClasses();
-        }
         notifyListeners();
       }
     } catch (e, st) {
@@ -3874,21 +3945,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     });
   }
 
-  Future<UserModel> _linkFirebaseAccountIfAvailable({
-    required UserModel user,
-    required String email,
-    required String password,
-  }) async {
-    if (!FirebaseService.instance.isAvailable) return user;
-    final uid = await FirebaseService.instance.signInOrCreateAccount(
-      email: email,
-      password: password,
-    );
-    if (uid == null || user.firebaseUid == uid) return user;
-    await _repo.linkFirebaseUid(user.id, uid);
-    return user.copyWith(firebaseUid: uid);
-  }
-
   Future<void> markNotificationRead(int notificationId) async {
     final remoteId = await _repo.notificationRemoteId(notificationId);
     await _repo.markNotificationRead(notificationId);
@@ -4015,8 +4071,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) return;
 
     try {
+      await _loadDeletedClassCodes();
+      await _retryRemoveDeletedClassesFromCloud();
+      await _purgeDeletedTeacherClasses();
       final localClasses = await _repo.getTeacherClasses(_user!.id);
       for (final teacherClass in localClasses) {
+        final code = AppRepository.normalizeClassCode(teacherClass.code);
+        if (_deletedClassCodes.contains(code)) continue;
         await _notificationSync.syncTeacherClass(
           classCode: teacherClass.code,
           className: teacherClass.name,
@@ -4050,11 +4111,21 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           .timeout(const Duration(seconds: 12));
       await _repo.mergeRemoteEnrollmentsForTeacher(
         teacherUserId: _user!.id,
-        enrollments: enrollments,
+        enrollments: enrollments
+            .where(
+              (e) => !_deletedClassCodes.contains(
+                AppRepository.normalizeClassCode(e.classCode),
+              ),
+            )
+            .toList(),
       );
+
+      await _purgeDeletedTeacherClasses();
 
       // Push local edits first so a pull never overwrites unsynced lesson phrases.
       for (final teacherClass in localClasses) {
+        final code = AppRepository.normalizeClassCode(teacherClass.code);
+        if (_deletedClassCodes.contains(code)) continue;
         await _pushClassContentToCloud(teacherClass.id);
         await _syncClassLessonsFromCloud(
           classId: teacherClass.id,
@@ -4286,7 +4357,64 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       _teacherClasses = [];
       return;
     }
+    await _loadDeletedClassCodes();
+    await _purgeDeletedTeacherClasses();
     _teacherClasses = await _repo.getTeacherClasses(_user!.id);
+  }
+
+  String get _deletedClassCodesPrefKey =>
+      'taptalk_deleted_class_codes_${_user?.id ?? 0}';
+
+  Future<void> _loadDeletedClassCodes() async {
+    if (_user == null || !_user!.isTeacher) return;
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getStringList(_deletedClassCodesPrefKey) ?? const [];
+    for (final raw in stored) {
+      final code = AppRepository.normalizeClassCode(raw);
+      if (AppRepository.isValidClassCodeFormat(code)) {
+        _deletedClassCodes.add(code);
+      }
+    }
+  }
+
+  Future<void> _persistDeletedClassCodes() async {
+    if (_user == null || !_user!.isTeacher) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      _deletedClassCodesPrefKey,
+      _deletedClassCodes.toList(),
+    );
+  }
+
+  Future<void> _purgeDeletedTeacherClasses() async {
+    if (_user == null || !_user!.isTeacher || _deletedClassCodes.isEmpty) {
+      return;
+    }
+    for (final code in _deletedClassCodes.toList()) {
+      final row = await _repo.findClassByCode(code);
+      if (row == null) continue;
+      if ((row['teacher_user_id'] as int?) != _user!.id) continue;
+      await _repo.deleteTeacherClass(
+        teacherUserId: _user!.id,
+        classId: row['id'] as int,
+      );
+    }
+  }
+
+  Future<void> _retryRemoveDeletedClassesFromCloud() async {
+    if (_user == null || !_user!.isTeacher || _deletedClassCodes.isEmpty) {
+      return;
+    }
+    if (!_notificationSync.isCloudAvailable) return;
+    for (final code in _deletedClassCodes.toList()) {
+      try {
+        await _notificationSync
+            .removeTeacherClass(classCode: code)
+            .timeout(const Duration(seconds: 8));
+      } catch (e, st) {
+        debugPrint('Retry remove deleted class $code failed: $e\n$st');
+      }
+    }
   }
 
   Future<String?> createTeacherClass(String className) async {
@@ -4321,7 +4449,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (!ok) return AppStrings.classNotFound(_language);
     if (classCode != null && classCode.isNotEmpty) {
       _deletedClassCodes.add(AppRepository.normalizeClassCode(classCode));
-      await _notificationSync.removeTeacherClass(classCode: classCode);
+      await _persistDeletedClassCodes();
+      try {
+        await _notificationSync
+            .removeTeacherClass(classCode: classCode)
+            .timeout(const Duration(seconds: 8));
+      } catch (e, st) {
+        debugPrint('Remove teacher class from cloud pending: $e\n$st');
+      }
     }
     await stopLiveClassContentSync(classId);
     await refreshTeacherClasses();
@@ -4629,6 +4764,57 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     return updated;
   }
 
+  RemoteClassContent _retainExistingPhraseMedia(
+    RemoteClassContent next,
+    RemoteClassContent? previous, {
+    bool retainMissingMedia = true,
+  }) {
+    if (!retainMissingMedia) return next;
+    if (previous == null || previous.lessons.isEmpty) return next;
+    final previousUrls = <String, String>{};
+    for (final lesson in previous.lessons) {
+      for (final phrase in lesson.phrases) {
+        final url = phrase.imagePath?.trim() ?? '';
+        if (url.isEmpty) continue;
+        final phraseKey = phrase.phraseKey.trim();
+        if (phraseKey.isEmpty) continue;
+        previousUrls['${lesson.lessonKey.trim()}|$phraseKey'] = url;
+        previousUrls[phraseKey] = url;
+      }
+    }
+    if (previousUrls.isEmpty) return next;
+    return RemoteClassContent(
+      classCode: next.classCode,
+      className: next.className,
+      teacherFirebaseUid: next.teacherFirebaseUid,
+      updatedAt: next.updatedAt,
+      lessons: [
+        for (final lesson in next.lessons)
+          RemoteClassLessonContent(
+            lessonKey: lesson.lessonKey,
+            title: lesson.title,
+            sortOrder: lesson.sortOrder,
+            createdAt: lesson.createdAt,
+            phrases: [
+              for (final phrase in lesson.phrases)
+                RemoteLessonPhraseContent(
+                  phraseKey: phrase.phraseKey,
+                  text: phrase.text,
+                  sortOrder: phrase.sortOrder,
+                  imagePath: () {
+                    final current = phrase.imagePath?.trim() ?? '';
+                    if (current.isNotEmpty) return phrase.imagePath;
+                    final phraseKey = phrase.phraseKey.trim();
+                    return previousUrls['${lesson.lessonKey.trim()}|$phraseKey'] ??
+                        previousUrls[phraseKey];
+                  }(),
+                ),
+            ],
+          ),
+      ],
+    );
+  }
+
   Future<bool> _pushClassContentToCloud(int classId) async {
     if (!CloudScope.syncMonitoring) return false;
     if (_user == null || !_user!.isTeacher) return false;
@@ -4640,34 +4826,60 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final classCode = (classRow['class_code'] as String?) ?? '';
     final className = (classRow['class_name'] as String?) ?? '';
     final teacherFirebaseUid =
-        _user!.firebaseUid ??
-        await FirebaseService.instance.waitForAuthUid() ??
-        FirebaseService.instance.currentUid;
+        (FirebaseService.instance.currentUid?.trim().isNotEmpty ?? false)
+            ? FirebaseService.instance.currentUid!.trim()
+            : (_user!.firebaseUid ??
+                  await FirebaseService.instance.waitForAuthUid() ??
+                  '');
     if (classCode.isEmpty ||
         className.isEmpty ||
-        teacherFirebaseUid == null ||
         teacherFirebaseUid.isEmpty) {
       return false;
     }
     try {
-      final content = await _repo.buildRemoteClassContent(
-        teacherUserId: _user!.id,
-        classId: classId,
-        classCode: classCode,
-        className: className,
-        teacherFirebaseUid: teacherFirebaseUid,
-      );
-      if (content == null) return false;
-      // Never overwrite cloud lessons with an empty local copy.
-      if (content.lessons.isEmpty) {
-        final existing = await _notificationSync
+      RemoteClassContent? previous;
+      try {
+        previous = await _notificationSync
             .getClassContentFromCloud(classCode)
-            .timeout(const Duration(seconds: 3));
-        if (existing != null && existing.lessons.isNotEmpty) return false;
+            .timeout(const Duration(seconds: 5));
+      } catch (e, st) {
+        debugPrint('Read existing class content failed: $e\n$st');
       }
-      final synced = await _notificationSync.syncClassContent(content);
-      if (!synced) return false;
-      _lastOwnClassPushUpdatedAt[classId] = content.updatedAt;
+
+      Future<bool> push({required bool uploadLocalMedia}) async {
+        var content = await _repo.buildRemoteClassContent(
+          teacherUserId: _user!.id,
+          classId: classId,
+          classCode: classCode,
+          className: className,
+          teacherFirebaseUid: teacherFirebaseUid,
+          uploadLocalMedia: uploadLocalMedia,
+        );
+        if (content == null) return false;
+        content = _retainExistingPhraseMedia(
+          content,
+          previous,
+          retainMissingMedia: !uploadLocalMedia,
+        );
+        if (content.lessons.isEmpty &&
+            (previous?.lessons.isNotEmpty ?? false)) {
+          return false;
+        }
+        final synced = await _notificationSync.syncClassContent(content);
+        if (!synced) return false;
+        previous = content;
+        _lastOwnClassPushUpdatedAt[classId] = content.updatedAt;
+        return true;
+      }
+
+      // Upload media first so students never receive text-only phrase snapshots.
+      final mediaOk = await push(uploadLocalMedia: true);
+      if (mediaOk) {
+        _classLocalEditAt.remove(classId);
+        return true;
+      }
+      final quickOk = await push(uploadLocalMedia: false);
+      if (!quickOk) return false;
       _classLocalEditAt.remove(classId);
       return true;
     } catch (e, st) {
@@ -5014,19 +5226,36 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     for (final enrollment in remoteEnrollments) {
       final code = AppRepository.normalizeClassCode(enrollment.classCode);
       if (!AppRepository.isValidClassCodeFormat(code)) continue;
-      remoteClassCodes.add(code);
 
       var classRow = await _repo.findClassByCode(code);
       RemoteTeacherClass? remoteClass;
-      if (classRow == null) {
+      var lookupFailed = false;
+      try {
         remoteClass = await _notificationSync
             .getTeacherClassByCodeFromCloud(code)
             .timeout(const Duration(seconds: 8));
-        if (remoteClass != null) {
-          classRow = await _repo.importRemoteTeacherClassForEnrollment(
-            remoteClass,
+      } catch (e, st) {
+        lookupFailed = true;
+        debugPrint('Learner enrollment class lookup failed: $e\n$st');
+      }
+      if (lookupFailed) {
+        remoteClassCodes.add(code);
+        continue;
+      }
+      if (remoteClass == null) {
+        if (classRow != null) {
+          await _repo.unenrollLearnerFromClass(
+            learnerUserId,
+            classRow['id'] as int,
           );
         }
+        continue;
+      }
+      remoteClassCodes.add(code);
+      if (classRow == null) {
+        classRow = await _repo.importRemoteTeacherClassForEnrollment(
+          remoteClass,
+        );
       }
       if (classRow == null) continue;
 
@@ -5072,12 +5301,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       await _syncClassLessonsFromCloud(classId: classId, classCode: code);
     }
 
-    if (remoteClassCodes.isNotEmpty) {
-      await _repo.pruneStaleEnrollmentsForLearner(
-        learnerUserId: learnerUserId,
-        remoteClassCodes: remoteClassCodes,
-      );
-    }
+    await _repo.pruneStaleEnrollmentsForLearner(
+      learnerUserId: learnerUserId,
+      remoteClassCodes: remoteClassCodes,
+    );
     await _pruneEnrollmentsForDeletedCloudClasses(learnerUserId);
   }
 
@@ -5115,8 +5342,27 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final learnerFirebaseUid = await _learnerFirebaseUidForSync();
     if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) return;
 
+    // Teacher is the source of truth. Re-pushing local leftovers recreates
+    // enrollments after the teacher deleted the class.
+    final existingCodes = <String>{};
+    try {
+      final existing = await _notificationSync
+          .getClassEnrollmentsForLearnerFromCloud(learnerFirebaseUid)
+          .timeout(const Duration(seconds: 12));
+      for (final enrollment in existing) {
+        final code = AppRepository.normalizeClassCode(enrollment.classCode);
+        if (AppRepository.isValidClassCodeFormat(code)) {
+          existingCodes.add(code);
+        }
+      }
+    } catch (e, st) {
+      debugPrint('Skip enrollment resync; cloud list failed: $e\n$st');
+      return;
+    }
+
     for (final enrolled in _enrolledClasses) {
       final code = AppRepository.normalizeClassCode(enrolled.classCode);
+      if (!existingCodes.contains(code)) continue;
       RemoteTeacherClass? remoteClass;
       try {
         remoteClass = await _notificationSync
@@ -5160,70 +5406,61 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (!AppRepository.isValidClassCodeFormat(normalized)) {
       return AppStrings.invalidClassCode(_language);
     }
+
+    await FirebaseService.instance.initialize();
+    await _notificationSync.initialize();
+    await _ensureCloudAuthSession();
+
     var classRow = await _repo.findClassByCode(normalized);
     String? teacherFirebaseUidFromRemote;
     RemoteTeacherClass? remoteClass;
-    if (classRow == null) {
-      if (!_notificationSync.isCloudAvailable) {
-        return AppStrings.classNotFound(_language);
-      }
+    if (_notificationSync.isCloudAvailable &&
+        FirebaseService.instance.currentUid != null) {
       try {
         remoteClass = await _notificationSync
             .getTeacherClassByCodeFromCloud(normalized)
             .timeout(const Duration(seconds: 12));
         if (remoteClass != null) {
           teacherFirebaseUidFromRemote = remoteClass.teacherFirebaseUid;
-          classRow = await _repo.importRemoteTeacherClassForEnrollment(
+          classRow ??= await _repo.importRemoteTeacherClassForEnrollment(
             remoteClass,
           );
         }
       } catch (e, st) {
         debugPrint('Cloud class code lookup failed: $e\n$st');
       }
-      if (classRow == null) {
-        return AppStrings.classNotFound(_language);
-      }
     }
-    if (_notificationSync.isCloudAvailable) {
-      try {
-        remoteClass ??= await _notificationSync
-            .getTeacherClassByCodeFromCloud(normalized)
-            .timeout(const Duration(seconds: 12));
-        if (remoteClass != null) {
-          teacherFirebaseUidFromRemote ??= remoteClass.teacherFirebaseUid;
-          final teacherId = classRow['teacher_user_id'] as int?;
-          if (teacherId != null) {
-            await _applyCloudTeacherDisplayName(
-              teacherUserId: teacherId,
-              remoteClass: remoteClass,
-            );
-          }
-        }
-      } catch (e, st) {
-        debugPrint('Cloud class teacher name refresh failed: $e\n$st');
+    if (classRow == null) {
+      if (!_notificationSync.isCloudAvailable ||
+          FirebaseService.instance.currentUid == null) {
+        return AppStrings.signInOnlineToJoinClass(_language);
+      }
+      return AppStrings.classNotFound(_language);
+    }
+    if (remoteClass != null) {
+      final teacherId = classRow['teacher_user_id'] as int?;
+      if (teacherId != null) {
+        await _applyCloudTeacherDisplayName(
+          teacherUserId: teacherId,
+          remoteClass: remoteClass,
+        );
       }
     }
     final classId = classRow['id'] as int;
     if (await _repo.isLearnerEnrolled(_user!.id, classId)) {
       return AppStrings.classAlreadyEnrolled(_language);
     }
-    final existingRequest = await _repo.findJoinRequest(
-      learnerUserId: _user!.id,
-      classId: classId,
-    );
-    if (existingRequest != null && existingRequest.isPending) {
-      return AppStrings.joinRequestAlreadyPending(_language);
-    }
     final learnerFirebaseUid =
-        _user!.firebaseUid ?? FirebaseService.instance.currentUid;
+        (FirebaseService.instance.currentUid ?? _user!.firebaseUid)
+            ?.trim() ??
+        '';
     final teacherUserId = classRow['teacher_user_id'] as int?;
     final teacherFirebaseUid =
         teacherFirebaseUidFromRemote ??
         (teacherUserId == null
             ? null
             : await _repo.getFirebaseUidForUser(teacherUserId));
-    if (learnerFirebaseUid == null ||
-        learnerFirebaseUid.isEmpty ||
+    if (learnerFirebaseUid.isEmpty ||
         teacherFirebaseUid == null ||
         teacherFirebaseUid.isEmpty ||
         teacherUserId == null) {

@@ -112,5 +112,16 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Lesson phrase images/videos when Firebase Storage is unavailable (Spark).
+    match /phrase_media_cloud/{docId} {
+      allow read: if request.auth != null;
+
+      allow create, update: if request.auth != null
+        && request.resource.data.teacherFirebaseUid == request.auth.uid;
+
+      allow delete: if request.auth != null
+        && resource.data.teacherFirebaseUid == request.auth.uid;
+    }
+
   }
 }

@@ -644,8 +644,9 @@ abstract class CloudNotificationBackend {
   Future<void> upsertClassJoinRequest(ClassJoinRequestCloudEvent event);
 
   Future<List<RemoteClassJoinRequest>> getClassJoinRequestsForTeacher(
-    String teacherFirebaseUid,
-  );
+    String teacherFirebaseUid, {
+    Iterable<String> classCodes = const [],
+  });
 
   Future<List<RemoteClassJoinRequest>> getClassJoinRequestsForLearner(
     String learnerFirebaseUid,
@@ -857,8 +858,9 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
 
   @override
   Future<List<RemoteClassJoinRequest>> getClassJoinRequestsForTeacher(
-    String teacherFirebaseUid,
-  ) async =>
+    String teacherFirebaseUid, {
+    Iterable<String> classCodes = const [],
+  }) async =>
       const [];
 
   @override

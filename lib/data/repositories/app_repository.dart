@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../../core/constants/monitoring_constants.dart';
@@ -671,6 +672,82 @@ class AppRepository {
       where: 'id = ?',
       whereArgs: [userId],
     );
+  }
+
+  /// Removes a leftover local account so sign-up after Firebase Auth
+  /// deletion starts from a clean board.
+  Future<void> deleteLocalAccountCompletely(int userId) async {
+    final db = await _dbHelper.database;
+    await db.transaction((txn) async {
+      final classes = await txn.query(
+        'teacher_classes',
+        columns: ['id'],
+        where: 'teacher_user_id = ?',
+        whereArgs: [userId],
+      );
+      for (final row in classes) {
+        final classId = row['id'] as int;
+        final lessons = await txn.query(
+          'class_lessons',
+          columns: ['id'],
+          where: 'class_id = ?',
+          whereArgs: [classId],
+        );
+        for (final lesson in lessons) {
+          await txn.delete(
+            'lesson_phrases',
+            where: 'lesson_id = ?',
+            whereArgs: [lesson['id']],
+          );
+        }
+        await txn.delete(
+          'class_lessons',
+          where: 'class_id = ?',
+          whereArgs: [classId],
+        );
+        await txn.delete(
+          'class_enrollments',
+          where: 'class_id = ?',
+          whereArgs: [classId],
+        );
+        await txn.delete(
+          'class_join_requests',
+          where: 'class_id = ?',
+          whereArgs: [classId],
+        );
+      }
+      await txn.delete(
+        'teacher_classes',
+        where: 'teacher_user_id = ?',
+        whereArgs: [userId],
+      );
+      await txn.delete(
+        'class_enrollments',
+        where: 'learner_user_id = ?',
+        whereArgs: [userId],
+      );
+      await txn.delete(
+        'class_join_requests',
+        where: 'learner_user_id = ?',
+        whereArgs: [userId],
+      );
+      await txn.delete(
+        'parent_children',
+        where: 'parent_user_id = ? OR learner_user_id = ?',
+        whereArgs: [userId, userId],
+      );
+      await txn.delete(
+        'parent_notifications',
+        where:
+            'parent_user_id = ? OR learner_user_id = ? OR teacher_user_id = ?',
+        whereArgs: [userId, userId, userId],
+      );
+      await txn.delete('phrases', where: 'user_id = ?', whereArgs: [userId]);
+      await txn.delete('categories', where: 'user_id = ?', whereArgs: [userId]);
+      await txn.delete('favorites', where: 'user_id = ?', whereArgs: [userId]);
+      await txn.delete('history', where: 'user_id = ?', whereArgs: [userId]);
+      await txn.delete('users', where: 'id = ?', whereArgs: [userId]);
+    });
   }
 
   Future<UserModel> registerUser({
@@ -3639,10 +3716,21 @@ class AppRepository {
     String? remoteId,
   }) async {
     final db = await _dbHelper.database;
-    final existing = await findJoinRequest(
+    ClassJoinRequest? existing = await findJoinRequest(
       learnerUserId: learnerUserId,
       classId: classId,
     );
+    if (existing == null &&
+        remoteId != null &&
+        remoteId.trim().isNotEmpty) {
+      final rows = await db.query(
+        'class_join_requests',
+        where: 'remote_id = ?',
+        whereArgs: [remoteId.trim()],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) existing = _joinRequestFromRow(rows.first);
+    }
     final payload = {
       'learner_user_id': learnerUserId,
       'class_id': classId,
@@ -3723,54 +3811,90 @@ class AppRepository {
   Future<void> mergeRemoteJoinRequestsForTeacher({
     required int teacherUserId,
     required List<RemoteClassJoinRequest> requests,
+    Set<String> skipClassCodes = const {},
   }) async {
     for (final remote in requests) {
-      final code = normalizeClassCode(remote.classCode);
-      if (!isValidClassCodeFormat(code)) continue;
-      final classRow = await findClassByCode(code);
-      if (classRow == null) continue;
-      if ((classRow['teacher_user_id'] as int?) != teacherUserId) continue;
-      final classId = classRow['id'] as int;
-      final learnerUid = remote.learnerFirebaseUid.trim();
-      if (learnerUid.isEmpty) continue;
+      try {
+        final code = normalizeClassCode(remote.classCode);
+        if (!isValidClassCodeFormat(code)) continue;
+        if (skipClassCodes.contains(code)) continue;
+        var classRow = await findClassByCode(code);
+        if (classRow == null) {
+          final db = await _dbHelper.database;
+          await db.insert('teacher_classes', {
+            'teacher_user_id': teacherUserId,
+            'class_name': remote.className.trim().isEmpty
+                ? 'Class'
+                : remote.className.trim(),
+            'class_code': code,
+            'created_at': remote.requestedAt.millisecondsSinceEpoch,
+          });
+          classRow = await findClassByCode(code);
+        }
+        if (classRow == null) continue;
+        if ((classRow['teacher_user_id'] as int?) != teacherUserId) {
+          final db = await _dbHelper.database;
+          await db.update(
+            'teacher_classes',
+            {'teacher_user_id': teacherUserId},
+            where: 'id = ?',
+            whereArgs: [classRow['id']],
+          );
+        }
+        final classId = classRow['id'] as int;
+        final learnerUid = remote.learnerFirebaseUid.trim();
+        if (learnerUid.isEmpty) continue;
 
-      var learner = await findUserByFirebaseUid(learnerUid);
-      if (learner == null) {
-        final stubId = await ensureUserStubFromFirebase(
-          firebaseUid: learnerUid,
-          role: 'learner',
-          displayName: remote.learnerName.trim().isEmpty
-              ? 'Learner'
-              : remote.learnerName.trim(),
+        var learner = await findUserByFirebaseUid(learnerUid);
+        if (learner == null) {
+          final stubId = await ensureUserStubFromFirebase(
+            firebaseUid: learnerUid,
+            role: 'learner',
+            displayName: remote.learnerName.trim().isEmpty
+                ? 'Learner'
+                : remote.learnerName.trim(),
+          );
+          learner = await findUserById(stubId);
+        }
+        if (learner == null) continue;
+
+        final remoteId = remote.remoteId ?? '${code}_$learnerUid';
+        final existing = await findJoinRequest(
+          learnerUserId: learner.id,
+          classId: classId,
         );
-        learner = await findUserById(stubId);
-      }
-      if (learner == null) continue;
+        final remoteStatus = ClassJoinRequest.statusFromString(remote.status);
+        if (existing != null &&
+            !existing.isPending &&
+            remoteStatus == ClassJoinRequestStatus.pending) {
+          continue;
+        }
+        await upsertJoinRequest(
+          learnerUserId: learner.id,
+          classId: classId,
+          classCode: code,
+          className: remote.className,
+          teacherUserId: teacherUserId,
+          learnerName: remote.learnerName.trim().isEmpty
+              ? learner.fullName
+              : remote.learnerName.trim(),
+          status: remoteStatus,
+          requestedAt: remote.requestedAt,
+          learnerFirebaseUid: learnerUid,
+          teacherFirebaseUid: remote.teacherFirebaseUid,
+          respondedAt: remote.respondedAt,
+          remoteId: remoteId,
+        );
 
-      final remoteId = remote.remoteId ?? '${code}_$learnerUid';
-      await upsertJoinRequest(
-        learnerUserId: learner.id,
-        classId: classId,
-        classCode: code,
-        className: remote.className,
-        teacherUserId: teacherUserId,
-        learnerName: remote.learnerName.trim().isEmpty
-            ? learner.fullName
-            : remote.learnerName.trim(),
-        status: ClassJoinRequest.statusFromString(remote.status),
-        requestedAt: remote.requestedAt,
-        learnerFirebaseUid: learnerUid,
-        teacherFirebaseUid: remote.teacherFirebaseUid,
-        respondedAt: remote.respondedAt,
-        remoteId: remoteId,
-      );
-
-      if (remote.status ==
-              ClassJoinRequest.statusToString(
-                ClassJoinRequestStatus.accepted,
-              ) &&
-          !await isLearnerEnrolled(learner.id, classId)) {
-        await enrollLearnerInClass(learner.id, classId);
+        if (remote.status ==
+                ClassJoinRequest.statusToString(
+                  ClassJoinRequestStatus.accepted,
+                ) &&
+            !await isLearnerEnrolled(learner.id, classId)) {
+          await enrollLearnerInClass(learner.id, classId);
+        }
+      } catch (e, st) {
+        debugPrint('Skip join request merge: $e\n$st');
       }
     }
   }
@@ -5118,7 +5242,9 @@ class AppRepository {
     final lower = trimmed.toLowerCase();
     if (lower.startsWith('http://') ||
         lower.startsWith('https://') ||
-        lower.startsWith('assets/')) {
+        lower.startsWith('assets/') ||
+        lower.startsWith('data:') ||
+        isFirestorePhraseMediaPath(trimmed)) {
       return trimmed;
     }
     return null;
@@ -5152,6 +5278,7 @@ class AppRepository {
     required String classCode,
     required String className,
     required String teacherFirebaseUid,
+    bool uploadLocalMedia = true,
   }) async {
     if (!await _teacherOwnsClass(teacherUserId, classId)) return null;
     final lessons = await getClassLessons(
@@ -5187,6 +5314,13 @@ class AppRepository {
       );
       final remotePhrases = <RemoteLessonPhraseContent>[];
       final exportedTextKeys = <String>{};
+      final pendingPhrases = <({
+        String phraseKey,
+        String text,
+        int sortOrder,
+        String? rawImage,
+        String? cloudImage,
+      })>[];
       for (final phraseRow in dedupedPhraseRows) {
         final text = storedUserText(phraseRow['phrase_text'] as String);
         if (text.isEmpty) continue;
@@ -5204,16 +5338,48 @@ class AppRepository {
           );
         }
         final rawImage = phraseRow['image_path'] as String?;
-        final cloudImage = await resolveImagePathForCloudSync(
-          rawImage,
-          teacherFirebaseUid,
-        );
+        pendingPhrases.add((
+          phraseKey: phraseKey,
+          text: text,
+          sortOrder: phraseRow['sort_order'] as int? ?? 0,
+          rawImage: rawImage,
+          cloudImage: imagePathForCloudSync(rawImage),
+        ));
+      }
+      if (uploadLocalMedia) {
+        for (var i = 0; i < pendingPhrases.length; i++) {
+          final item = pendingPhrases[i];
+          if (item.cloudImage != null && item.cloudImage!.isNotEmpty) continue;
+          final raw = item.rawImage?.trim() ?? '';
+          if (raw.isEmpty) continue;
+          // One-at-a-time so large videos finish reliably on Spark/Firestore.
+          final url =
+              (await resolveImagePathForCloudSync(raw, teacherFirebaseUid))
+                  ?.trim() ??
+              '';
+          if (url.isEmpty) continue;
+          pendingPhrases[i] = (
+            phraseKey: item.phraseKey,
+            text: item.text,
+            sortOrder: item.sortOrder,
+            rawImage: item.rawImage,
+            cloudImage: url,
+          );
+          await db.update(
+            'lesson_phrases',
+            {'image_path': url},
+            where: 'lesson_id = ? AND cloud_phrase_key = ?',
+            whereArgs: [lesson.id, item.phraseKey],
+          );
+        }
+      }
+      for (final item in pendingPhrases) {
         remotePhrases.add(
           RemoteLessonPhraseContent(
-            phraseKey: phraseKey,
-            text: text,
-            sortOrder: phraseRow['sort_order'] as int? ?? 0,
-            imagePath: cloudImage ?? imagePathForCloudSync(rawImage),
+            phraseKey: item.phraseKey,
+            text: item.text,
+            sortOrder: item.sortOrder,
+            imagePath: item.cloudImage,
           ),
         );
       }
@@ -5386,18 +5552,33 @@ class AppRepository {
             }
           }
         }
-        final storedImage = mergedPhraseImagePath(
-          existing: matchedRow?['image_path'] as String?,
-          remote:
-              imagePathForCloudSync(remotePhrase.imagePath) ??
-              remotePhrase.imagePath,
-        );
+        final existingImage = matchedRow?['image_path'] as String?;
+        final remoteRaw = remotePhrase.imagePath?.trim();
+        String? storedImage;
+        if (remoteRaw != null && remoteRaw.isNotEmpty) {
+          // Keep the stable cloud ref in SQLite so cards don't remount when
+          // the local cache path appears (that caused flicker + "stuck" videos).
+          if (isRemotePhraseImagePath(remoteRaw)) {
+            storedImage = remoteRaw;
+          } else {
+            storedImage = await resolveStoredPhraseImagePath(remoteRaw);
+          }
+        }
+        // Only keep a previous local image when the cloud phrase has no media.
+        // Never keep an old photo/video over a new remote media URL.
+        if ((remoteRaw == null || remoteRaw.isEmpty) &&
+            (storedImage == null || storedImage.isEmpty) &&
+            existingImage != null &&
+            existingImage.trim().isNotEmpty &&
+            (existingPhraseImagePath(existingImage) != null ||
+                isRemotePhraseImagePath(existingImage))) {
+          storedImage = existingImage;
+        }
         if (matchedRow != null) {
           final existingText = storedUserText(
             matchedRow['phrase_text'] as String,
           );
           final existingSort = matchedRow['sort_order'] as int? ?? 0;
-          final existingImage = matchedRow['image_path'] as String?;
           if (existingText == stored &&
               existingSort == remotePhrase.sortOrder &&
               (existingImage?.trim() ?? '') == (storedImage?.trim() ?? '')) {
@@ -5620,11 +5801,22 @@ class AppRepository {
             whereArgs: [existingId],
           );
         }
+        if (imagePath != null && imagePath.trim().isNotEmpty) {
+          await db.update(
+            'lesson_phrases',
+            {
+              'image_path': imagePath,
+              if (cloudKey != null) 'cloud_phrase_key': cloudKey,
+            },
+            where: 'id = ?',
+            whereArgs: [existingId],
+          );
+        }
         return LessonPhrase(
           id: existingId,
           lessonId: lessonId,
           text: trimmed,
-          imagePath: row['image_path'] as String?,
+          imagePath: imagePath ?? row['image_path'] as String?,
         );
       }
     }

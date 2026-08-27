@@ -110,8 +110,9 @@ abstract final class AppStrings {
   static String weakPassword(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Mahinang password' : 'Weak password';
 
-  static String wrongPassword(AppLanguage lang) =>
-      lang == AppLanguage.filipino ? 'Maling password.' : 'Incorrect password.';
+  static String wrongPassword(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Mali ang password.'
+      : 'Incorrect password.';
 
   static String invalidFullName(AppLanguage lang) =>
       lang == AppLanguage.filipino
@@ -269,16 +270,16 @@ abstract final class AppStrings {
 
   static String invalidEmailPassword(AppLanguage lang) =>
       lang == AppLanguage.filipino
-      ? 'Maling email o password.'
-      : 'Invalid email or password.';
+      ? 'Mali ang email o password.'
+      : 'Incorrect email or password.';
 
   static String loginFailed(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Hindi matagumpay ang pag-login.'
-      : 'Login failed.';
+      ? 'Hindi matagumpay ang pag-login. Subukan muli.'
+      : 'Login failed. Please try again.';
 
   static String emailInUse(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Ginagamit na ang email na ito.'
-      : 'Email is already in use.';
+      ? 'Registered na ang email na ito.'
+      : 'This email is already registered.';
 
   static String parentTeacherComingSoon(AppLanguage lang) =>
       lang == AppLanguage.filipino
@@ -532,13 +533,13 @@ abstract final class AppStrings {
 
   static String loginFailedTryAgain(AppLanguage lang) =>
       lang == AppLanguage.filipino
-      ? 'Hindi makapag-log in. Subukan muli o mag-sign up gamit ang bagong email.'
-      : 'Could not sign in. Try again or sign up with a new email on this phone.';
+      ? 'Hindi makapag-log in. Subukan muli.'
+      : 'Could not sign in. Please try again.';
 
   static String signUpFailedTryAgain(AppLanguage lang) =>
       lang == AppLanguage.filipino
-      ? 'Hindi makapag-sign up. Subukan muli o gumamit ng ibang email.'
-      : 'Could not sign up. Try again or use a different email.';
+      ? 'Hindi makapag-sign up. Subukan muli.'
+      : 'Could not sign up. Please try again.';
 
   static String accountNotOnThisDevice(AppLanguage lang) =>
       lang == AppLanguage.filipino
@@ -886,8 +887,8 @@ abstract final class AppStrings {
 
   static String emailNotRegistered(AppLanguage lang) =>
       lang == AppLanguage.filipino
-      ? 'Walang account na nakarehistro sa email na ito.'
-      : 'No account is registered with this email.';
+      ? 'Hindi registered ang user o email na ito.'
+      : 'Not registered user or email.';
 
   static String setNewPasswordHint(AppLanguage lang) =>
       lang == AppLanguage.filipino

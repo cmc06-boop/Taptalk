@@ -295,12 +295,17 @@ class NotificationSyncService {
   }
 
   Future<List<RemoteClassJoinRequest>> getJoinRequestsForTeacherFromCloud(
-    String teacherFirebaseUid,
-  ) async {
-    if (!_cloud.isAvailable || teacherFirebaseUid.trim().isEmpty) {
+    String teacherFirebaseUid, {
+    Set<String> classCodes = const {},
+  }) async {
+    if (!_cloud.isAvailable) return const [];
+    if (teacherFirebaseUid.trim().isEmpty && classCodes.isEmpty) {
       return const [];
     }
-    return _cloud.getClassJoinRequestsForTeacher(teacherFirebaseUid);
+    return _cloud.getClassJoinRequestsForTeacher(
+      teacherFirebaseUid,
+      classCodes: classCodes,
+    );
   }
 
   Future<List<RemoteClassJoinRequest>> getJoinRequestsForLearnerFromCloud(

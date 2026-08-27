@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
+import '../core/utils/phrase_image_storage.dart';
 import '../providers/app_state.dart';
 
 class EditPhraseResult {
@@ -74,9 +75,9 @@ class _EditPhraseDialogState extends State<EditPhraseDialog> {
   }
 
   Future<void> _pickImage() async {
-    final file = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
+    final file = await ImagePicker().pickMedia(
       maxWidth: 900,
+      imageQuality: 85,
     );
     if (file == null) return;
     setState(() {
@@ -134,7 +135,19 @@ class _EditPhraseDialogState extends State<EditPhraseDialog> {
             if (_imagePath != null) ...[
               ClipRRect(
                 borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                child: _imagePath!.toLowerCase().startsWith('assets/')
+                child: isPhraseVideoPath(_imagePath)
+                    ? Container(
+                        width: 96,
+                        height: 96,
+                        color: theme.bgMid,
+                        alignment: Alignment.center,
+                        child: Icon(
+                          Icons.videocam_rounded,
+                          size: 36,
+                          color: theme.bgAccent,
+                        ),
+                      )
+                    : _imagePath!.toLowerCase().startsWith('assets/')
                     ? Image.asset(
                         _imagePath!,
                         width: 96,

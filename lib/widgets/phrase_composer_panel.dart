@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
+import '../core/utils/phrase_image_storage.dart';
 import '../core/utils/speak_feedback.dart';
 import '../providers/app_state.dart';
 import 'highlighting_text_controller.dart';
@@ -114,9 +115,9 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
   }
 
   Future<void> _pickImage() async {
-    final file = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
+    final file = await ImagePicker().pickMedia(
       maxWidth: 900,
+      imageQuality: 85,
     );
     if (file != null) setState(() => _imagePath = file.path);
   }
@@ -200,12 +201,23 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                  child: Image.file(
-                    File(_imagePath!),
-                    width: 52,
-                    height: 52,
-                    fit: BoxFit.cover,
-                  ),
+                  child: isPhraseVideoPath(_imagePath)
+                      ? Container(
+                          width: 52,
+                          height: 52,
+                          color: theme.bgMid,
+                          alignment: Alignment.center,
+                          child: Icon(
+                            Icons.videocam_rounded,
+                            color: theme.bgAccent,
+                          ),
+                        )
+                      : Image.file(
+                          File(_imagePath!),
+                          width: 52,
+                          height: 52,
+                          fit: BoxFit.cover,
+                        ),
                 ),
                 const SizedBox(width: AppSpacing.sm),
                 Expanded(

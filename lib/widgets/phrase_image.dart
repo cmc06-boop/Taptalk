@@ -75,9 +75,14 @@ class _PhraseImageState extends State<PhraseImage> {
     super.initState();
     final raw = widget.imagePath?.trim();
     if (raw != null && isPhraseVideoPath(raw)) {
-      _resolvedPath = cachedPhraseImagePathSync(raw) ??
-          existingPhraseImagePath(raw) ??
-          (raw.toLowerCase().startsWith('assets/') ? raw : null);
+      final cached = cachedPhraseImagePathSync(raw);
+      final existing = existingPhraseImagePath(raw);
+      final playable = (cached != null && !isRemotePhraseImagePath(cached))
+          ? cached
+          : (existing != null && !isRemotePhraseImagePath(existing)
+              ? existing
+              : (raw.toLowerCase().startsWith('assets/') ? raw : null));
+      _resolvedPath = playable;
       _resolving = false;
     } else {
       _resolvedPath = existingPhraseImagePath(widget.imagePath);
@@ -91,9 +96,14 @@ class _PhraseImageState extends State<PhraseImage> {
     if (oldWidget.imagePath != widget.imagePath) {
       final raw = widget.imagePath?.trim();
       if (raw != null && isPhraseVideoPath(raw)) {
-        _resolvedPath = cachedPhraseImagePathSync(raw) ??
-            existingPhraseImagePath(raw) ??
-            (raw.toLowerCase().startsWith('assets/') ? raw : null);
+        final cached = cachedPhraseImagePathSync(raw);
+        final existing = existingPhraseImagePath(raw);
+        final playable = (cached != null && !isRemotePhraseImagePath(cached))
+            ? cached
+            : (existing != null && !isRemotePhraseImagePath(existing)
+                ? existing
+                : (raw.toLowerCase().startsWith('assets/') ? raw : null));
+        _resolvedPath = playable;
         _resolving = false;
       } else {
         _resolvedPath = existingPhraseImagePath(widget.imagePath);
@@ -120,10 +130,14 @@ class _PhraseImageState extends State<PhraseImage> {
           cachedPhraseImagePathSync(raw) ??
           existingPhraseImagePath(raw) ??
           (raw.toLowerCase().startsWith('assets/') ? raw : null);
-      if (sticky != null) {
-        if (mounted && (_resolvedPath != sticky || _resolving)) {
+      // Never treat a remote/fs-media ref as a playable sticky path.
+      final stickyPlayable = (sticky != null && !isRemotePhraseImagePath(sticky))
+          ? sticky
+          : null;
+      if (stickyPlayable != null) {
+        if (mounted && (_resolvedPath != stickyPlayable || _resolving)) {
           setState(() {
-            _resolvedPath = sticky;
+            _resolvedPath = stickyPlayable;
             _resolving = false;
           });
         }
@@ -150,7 +164,7 @@ class _PhraseImageState extends State<PhraseImage> {
 
       setState(() {
         _resolvedPath = playable ??
-            (raw.toLowerCase().startsWith('assets/') ? raw : local ?? raw);
+            (raw.toLowerCase().startsWith('assets/') ? raw : null);
         _resolving = false;
       });
       return;
@@ -171,10 +185,17 @@ class _PhraseImageState extends State<PhraseImage> {
       return;
     }
 
+    if (mounted) setState(() => _resolving = true);
     await warmPhraseImageCacheDirectory();
     final local = await ensureLocalPhraseMediaPath(raw);
     if (!mounted) return;
-    setState(() => _resolvedPath = local ?? raw);
+    setState(() {
+      _resolvedPath = local ??
+          (isFirestorePhraseMediaPath(raw) || isRemotePhraseImagePath(raw)
+              ? null
+              : raw);
+      _resolving = false;
+    });
   }
 
   void _cacheAfterNetworkLoad(String raw) {
@@ -212,7 +233,7 @@ class _PhraseImageState extends State<PhraseImage> {
       }
       return RepaintBoundary(
         child: _PhraseVideoView(
-          key: ValueKey('video_$raw'),
+          key: ValueKey('video_${raw}_$path'),
           path: path,
           sourceKey: raw,
           assetFallback: raw.toLowerCase().startsWith('assets/') ? raw : null,
@@ -225,6 +246,9 @@ class _PhraseImageState extends State<PhraseImage> {
 
     final path = _resolvedPath ?? existingPhraseImagePath(raw) ?? raw;
     final lower = path.toLowerCase();
+    if (isFirestorePhraseMediaPath(path) || _resolving) {
+      return _Placeholder(theme: widget.theme);
+    }
     if (lower.startsWith('assets/')) {
       return Image.asset(
         path,
@@ -296,8 +320,13 @@ class _PhraseVideoView extends StatefulWidget {
 
 class _PhraseVideoViewState extends State<_PhraseVideoView>
     with AutomaticKeepAliveClientMixin {
+  /// Newest Speak clip wins the decoder; older cards yield immediately.
+  static int _playbackEpoch = 0;
+  static _PhraseVideoViewState? _activePlayback;
+
   final GlobalKey _captureKey = GlobalKey();
   VideoPlayerController? _controller;
+  int _myEpoch = 0;
   bool _ready = false;
   /// Frozen first-frame PNG. Decoder is released after capture so other
   /// on-screen cards can load. Playback uses a live player only while speaking.
@@ -350,7 +379,10 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
         unawaited(_ensurePlaying());
       }
     } else if (oldWidget.playing && !widget.playing) {
-      unawaited(_freeze());
+      // Speak ended: keep the clip running until its real end.
+      if (!_clipStillPlaying()) {
+        unawaited(_freeze());
+      }
     }
   }
 
@@ -379,7 +411,36 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
       _controller!.value.isInitialized &&
       !_controller!.value.hasError;
 
+  bool _clipStillPlaying() {
+    if (!_runToEnd || !_hasLivePlayer) return false;
+    final c = _controller!;
+    final d = c.value.duration;
+    if (d <= Duration.zero) return false;
+    return c.value.position < d - const Duration(milliseconds: 200);
+  }
+
+  void _claimPlayback() {
+    _myEpoch = ++_playbackEpoch;
+    final prev = _activePlayback;
+    _activePlayback = this;
+    if (prev != null && prev != this) {
+      prev._yieldPlayback();
+    }
+  }
+
+  void _yieldPlayback() {
+    if (!mounted) return;
+    if (_myEpoch == _playbackEpoch) return;
+    _runToEnd = false;
+    unawaited(_freeze());
+  }
+
+  void _clearActivePlayback() {
+    if (_activePlayback == this) _activePlayback = null;
+  }
+
   Future<void> _ensurePlaying() async {
+    _claimPlayback();
     var waited = 0;
     while (_initializing && waited < 80) {
       await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -600,6 +661,7 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
   }
 
   Future<void> _releasePlayerKeepReady() async {
+    _clearActivePlayback();
     _retryTimer?.cancel();
     _gen++;
     _runToEnd = false;
@@ -672,6 +734,7 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
   Future<void> _startFullClip() async {
     final c = _controller;
     if (c == null || !c.value.isInitialized) return;
+    _claimPlayback();
     _runToEnd = true;
     _pictureReady = false;
     try {
@@ -714,6 +777,11 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
       return;
     }
 
+    if (_myEpoch != _playbackEpoch) {
+      _runToEnd = false;
+      unawaited(_freeze());
+      return;
+    }
     if (!_runToEnd) return;
     if (c.value.isPlaying) return;
     if (!_pictureReady) return;
@@ -726,6 +794,7 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
   }
 
   Future<void> _freeze() async {
+    _clearActivePlayback();
     final c = _controller;
     if (c == null || !c.value.isInitialized) return;
     try {
@@ -740,6 +809,7 @@ class _PhraseVideoViewState extends State<_PhraseVideoView>
   }
 
   void _disposeController() {
+    _clearActivePlayback();
     _retryTimer?.cancel();
     _gen++;
     _runToEnd = false;

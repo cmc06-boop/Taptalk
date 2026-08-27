@@ -70,7 +70,10 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
   Future<void> _load() async {
     final phrases = await context
         .read<AppState>()
-        .getEnrolledLessonPhrases(widget.lessonId, cloudSyncInBackground: true);
+        .getEnrolledLessonPhrases(
+          widget.lessonId,
+          cloudSyncInBackground: true,
+        );
     if (!mounted) return;
     if (_samePhrases(_phrases, phrases)) return;
     setState(() => _phrases = phrases);
@@ -188,11 +191,12 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
                   final phrase = _asPhraseModel(lessonPhrase);
                   final displayText = app.localizedPhraseText(phrase);
                   return PhraseCard(
-                    key: ValueKey('lesson_${phrase.id}_${phrase.imagePath ?? ''}'),
+                    key: ValueKey('lesson_phrase_${phrase.id}'),
                     phrase: phrase,
                     displayText: displayText,
                     dense: denseGrid,
-                    isFavorite: app.isFavorite(phrase),
+                    isFavorite: false,
+                    showFavorite: false,
                     showDelete: false,
                     onTap: () => speakWithFeedback(
                       context,
@@ -212,7 +216,7 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
                       lessonTitle: widget.lessonTitle,
                       phraseId: phrase.id,
                     ),
-                    onFavorite: () => app.toggleFavorite(phrase),
+                    onFavorite: () {},
                     onView: () => ViewPhraseDialog.show(
                       context,
                       phrase: phrase,
