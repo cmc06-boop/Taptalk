@@ -20,6 +20,7 @@ import '../widgets/code_qr_sheet.dart';
 import '../widgets/taptalk_result_dialog.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/student_count_badge.dart';
+import '../widgets/app_header.dart';
 import 'lesson_editor_screen.dart';
 
 class TeacherClassDetailScreen extends StatefulWidget {
@@ -220,15 +221,22 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
     );
     final theme = app.theme;
     final lang = app.language;
-    final displayClassName = app.localizedContent(_className);
 
     return LearnerScaffold(
-      title: displayClassName,
-      titleBadge: StudentCountBadge(
-        count: _studentCount,
-        accent: theme.bgAccent,
+      title: '',
+      titleWidget: SizedBox(
+        height: AppHeaderTitle.height,
+        child: Center(
+          child: StudentCountBadge(
+            count: _studentCount,
+            accent: theme.bgAccent,
+          ),
+        ),
       ),
       currentRoute: AppRoute.teacherMyClasses,
+      headerContentHeight: AppHeaderTitle.height,
+      headerBottomSpacing: 0,
+      bodyTopOffset: -4,
       showBottomNav: false,
       body: Stack(
         children: [

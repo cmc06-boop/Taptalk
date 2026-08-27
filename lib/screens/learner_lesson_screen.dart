@@ -11,10 +11,11 @@ import '../core/utils/speak_feedback.dart';
 import '../data/models/lesson_phrase.dart';
 import '../data/models/phrase_model.dart';
 import '../providers/app_state.dart';
-import '../widgets/localized_content_text.dart';
+import '../widgets/app_header.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/panel_card.dart';
 import '../widgets/phrase_card.dart';
+import '../widgets/phrase_composer_panel.dart';
 import '../widgets/view_phrase_dialog.dart';
 
 class LearnerLessonScreen extends StatefulWidget {
@@ -41,6 +42,7 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
   List<LessonPhrase> _phrases = [];
   int _lastContentRevision = 0;
   AppState? _app;
+  final _composerController = PhraseComposerPanelController();
 
   bool _samePhrases(List<LessonPhrase> a, List<LessonPhrase> b) {
     if (a.length != b.length) return false;
@@ -106,6 +108,10 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
 
     return LearnerScaffold(
       title: displayLessonTitle,
+      titleWidget: AppHeaderTitle(displayLessonTitle),
+      headerContentHeight: AppHeaderTitle.height,
+      headerBottomSpacing: 0,
+      bodyTopOffset: -4,
       currentRoute: AppRoute.classes,
       showBottomNav: false,
       body: ListView(
@@ -116,37 +122,14 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
               AppSpacing.lg,
               AppSpacing.sm,
               AppSpacing.lg,
-              AppSpacing.sm,
+              0,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                LocalizedContentText(
-                  widget.lessonTitle,
-                  style: GoogleFonts.poppins(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: theme.textMain,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                LocalizedContentText(
-                  widget.className,
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    color: theme.textMain.withValues(alpha: 0.65),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  AppStrings.welcomeSub(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    color: theme.textMain.withValues(alpha: 0.72),
-                    height: 1.35,
-                  ),
-                ),
-              ],
+            child: PhraseComposerPanel(
+              composerController: _composerController,
+              speakCategoryKey: 'lesson',
+              recordOnPlay: true,
+              showAddAndAttach: false,
+              onAdd: (_, _) async {},
             ),
           ),
           Padding(
@@ -154,7 +137,7 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
               AppSpacing.lg,
               AppSpacing.lg,
               AppSpacing.lg,
-              AppSpacing.sm,
+              AppSpacing.md,
             ),
             child: Text(
               AppStrings.phrasesInLesson(lang),
@@ -162,6 +145,7 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
                 fontSize: 14,
                 fontWeight: FontWeight.w800,
                 color: theme.textMain,
+                height: 1.1,
               ),
             ),
           ),
@@ -182,6 +166,7 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
               child: GridView.builder(
+                padding: EdgeInsets.zero,
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 gridDelegate: AppSpacing.phraseGridDelegate(context),
@@ -198,24 +183,30 @@ class _LearnerLessonScreenState extends State<LearnerLessonScreen> {
                     isFavorite: false,
                     showFavorite: false,
                     showDelete: false,
-                    onTap: () => speakWithFeedback(
-                      context,
-                      displayText,
-                      record: true,
-                      categoryKey: phrase.categoryKey,
-                      className: widget.className,
-                      lessonTitle: widget.lessonTitle,
-                      phraseId: phrase.id,
-                    ),
-                    onSpeak: () => speakWithFeedback(
-                      context,
-                      displayText,
-                      record: true,
-                      categoryKey: phrase.categoryKey,
-                      className: widget.className,
-                      lessonTitle: widget.lessonTitle,
-                      phraseId: phrase.id,
-                    ),
+                    onTap: () {
+                      _composerController.appendPhrase(displayText);
+                      speakWithFeedback(
+                        context,
+                        displayText,
+                        record: true,
+                        categoryKey: phrase.categoryKey,
+                        className: widget.className,
+                        lessonTitle: widget.lessonTitle,
+                        phraseId: phrase.id,
+                      );
+                    },
+                    onSpeak: () {
+                      _composerController.appendPhrase(displayText);
+                      speakWithFeedback(
+                        context,
+                        displayText,
+                        record: true,
+                        categoryKey: phrase.categoryKey,
+                        className: widget.className,
+                        lessonTitle: widget.lessonTitle,
+                        phraseId: phrase.id,
+                      );
+                    },
                     onFavorite: () {},
                     onView: () => ViewPhraseDialog.show(
                       context,

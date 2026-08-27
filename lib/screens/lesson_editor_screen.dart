@@ -10,7 +10,7 @@ import '../core/utils/live_refresh.dart';
 import '../data/models/lesson_phrase.dart';
 import '../data/models/phrase_model.dart';
 import '../providers/app_state.dart';
-import '../widgets/localized_content_text.dart';
+import '../widgets/app_header.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/panel_card.dart';
 import '../widgets/phrase_card.dart';
@@ -213,6 +213,10 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
 
     return LearnerScaffold(
       title: displayLessonTitle,
+      titleWidget: AppHeaderTitle(displayLessonTitle),
+      headerContentHeight: AppHeaderTitle.height,
+      headerBottomSpacing: 0,
+      bodyTopOffset: -4,
       currentRoute: AppRoute.teacherMyClasses,
       showBottomNav: false,
       body: ListView(
@@ -223,41 +227,8 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
               AppSpacing.lg,
               AppSpacing.sm,
               AppSpacing.lg,
-              AppSpacing.sm,
+              0,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                LocalizedContentText(
-                  widget.lessonTitle,
-                  style: GoogleFonts.poppins(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: theme.textMain,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                LocalizedContentText(
-                  widget.className,
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    color: theme.textMain.withValues(alpha: 0.65),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  AppStrings.lessonPhrasesSubtitle(lang),
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    color: theme.textMain.withValues(alpha: 0.72),
-                    height: 1.35,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          PanelCard(
-            margin: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
             child: PhraseComposerPanel(
               composerController: _composerController,
               speakCategoryKey: 'lesson',
@@ -270,7 +241,7 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
               AppSpacing.lg,
               AppSpacing.lg,
               AppSpacing.lg,
-              AppSpacing.sm,
+              AppSpacing.md,
             ),
             child: Text(
               AppStrings.phrasesInLesson(lang),
@@ -278,6 +249,7 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
                 fontSize: 14,
                 fontWeight: FontWeight.w800,
                 color: theme.textMain,
+                height: 1.1,
               ),
             ),
           ),
@@ -297,6 +269,7 @@ class _LessonEditorScreenState extends State<LessonEditorScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
               child: GridView.builder(
+                padding: EdgeInsets.zero,
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 gridDelegate: AppSpacing.phraseGridDelegate(context),

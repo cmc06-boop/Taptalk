@@ -125,10 +125,12 @@ class _PhraseImageState extends State<PhraseImage> {
     }
 
     if (isPhraseVideoPath(raw)) {
+      await warmPhraseImageCacheDirectory();
+      if (!mounted) return;
       // Sticky path: swapping cache/asset remounts the player and drops posters.
-      final sticky = _resolvedPath ??
-          cachedPhraseImagePathSync(raw) ??
+      final sticky = cachedPhraseImagePathSync(raw) ??
           existingPhraseImagePath(raw) ??
+          _resolvedPath ??
           (raw.toLowerCase().startsWith('assets/') ? raw : null);
       // Never treat a remote/fs-media ref as a playable sticky path.
       final stickyPlayable = (sticky != null && !isRemotePhraseImagePath(sticky))

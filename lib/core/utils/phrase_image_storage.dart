@@ -31,13 +31,21 @@ String? firestorePhraseMediaDocId(String imagePath) {
 bool isPhraseVideoPath(String? path) {
   if (path == null || path.trim().isEmpty) return false;
   final lower = path.trim().toLowerCase();
-  final pathOnly = Uri.tryParse(lower)?.path ?? lower;
-  return pathOnly.endsWith('.mp4') ||
-      pathOnly.endsWith('.webm') ||
-      pathOnly.endsWith('.mov') ||
-      pathOnly.endsWith('.m4v') ||
-      lower.contains('video/mp4') ||
-      lower.contains('video/webm');
+  final uri = Uri.tryParse(lower);
+  final candidates = <String>[
+    lower,
+    uri?.path ?? '',
+    uri?.host ?? '',
+  ];
+  for (final value in candidates) {
+    if (value.endsWith('.mp4') ||
+        value.endsWith('.webm') ||
+        value.endsWith('.mov') ||
+        value.endsWith('.m4v')) {
+      return true;
+    }
+  }
+  return lower.contains('video/mp4') || lower.contains('video/webm');
 }
 
 /// Copies gallery/temp media into app storage so paths stay valid after restart.
@@ -54,7 +62,8 @@ Future<String?> persistPhraseImageIfNeeded(String? sourcePath) async {
 
   if (lower.startsWith('http://') ||
       lower.startsWith('https://') ||
-      lower.startsWith('data:')) {
+      lower.startsWith('data:') ||
+      isFirestorePhraseMediaPath(sourcePath)) {
     final cached = await cachePhraseImageLocally(sourcePath);
     return cached ?? sourcePath;
   }
@@ -414,16 +423,20 @@ String _extensionForSource(String source) {
         (mime.startsWith('video/') ? '.mp4' : '.jpg');
   }
 
-  final uri = Uri.tryParse(source);
-  final path = uri?.path.toLowerCase() ?? lower;
-  if (path.endsWith('.mp4')) return '.mp4';
-  if (path.endsWith('.webm')) return '.webm';
-  if (path.endsWith('.mov')) return '.mov';
-  if (path.endsWith('.m4v')) return '.m4v';
-  if (path.endsWith('.png')) return '.png';
-  if (path.endsWith('.webp')) return '.webp';
-  if (path.endsWith('.gif')) return '.gif';
-  if (path.endsWith('.jpeg') || path.endsWith('.jpg')) return '.jpg';
+  final uri = Uri.tryParse(lower);
+  final path = uri?.path ?? '';
+  final host = uri?.host ?? '';
+  bool has(String ext) =>
+      lower.endsWith(ext) || path.endsWith(ext) || host.endsWith(ext);
+
+  if (has('.mp4')) return '.mp4';
+  if (has('.webm')) return '.webm';
+  if (has('.mov')) return '.mov';
+  if (has('.m4v')) return '.m4v';
+  if (has('.png')) return '.png';
+  if (has('.webp')) return '.webp';
+  if (has('.gif')) return '.gif';
+  if (has('.jpeg') || has('.jpg')) return '.jpg';
   if (isPhraseVideoPath(source)) return '.mp4';
   return '.jpg';
 }

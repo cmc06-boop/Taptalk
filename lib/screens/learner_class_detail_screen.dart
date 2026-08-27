@@ -12,6 +12,7 @@ import '../core/theme/theme_tokens.dart';
 import '../data/models/class_lesson.dart';
 import '../data/models/enrolled_class_model.dart';
 import '../providers/app_state.dart';
+import '../widgets/app_header.dart';
 import '../widgets/class_color_card.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/localized_content_text.dart';
@@ -105,10 +106,13 @@ class _LearnerClassDetailScreenState extends State<LearnerClassDetailScreen> {
     final theme = app.theme;
     final lang = app.language;
     final enrolled = widget.enrolledClass;
-    final displayClassName = app.localizedContent(enrolled.className);
 
     return LearnerScaffold(
-      title: displayClassName,
+      title: AppStrings.classes(lang),
+      titleWidget: AppHeaderTitle(AppStrings.classes(lang)),
+      headerContentHeight: AppHeaderTitle.height,
+      headerBottomSpacing: 0,
+      bodyTopOffset: -4,
       currentRoute: AppRoute.classes,
       showBottomNav: false,
       body: RefreshIndicator(

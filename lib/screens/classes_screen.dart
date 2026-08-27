@@ -11,8 +11,8 @@ import '../widgets/class_color_card.dart';
 import '../widgets/compact_popup_menu.dart';
 import '../widgets/enroll_class_dialog.dart';
 import '../widgets/taptalk_result_dialog.dart';
+import '../widgets/app_header.dart';
 import '../widgets/learner_scaffold.dart';
-import '../widgets/taptalk_logo.dart';
 import 'learner_class_detail_screen.dart';
 
 class ClassesScreen extends StatefulWidget {
@@ -112,9 +112,10 @@ class _ClassesScreenState extends State<ClassesScreen> {
     final classes = app.enrolledClasses;
 
     return LearnerScaffold(
-      title: AppStrings.appName(lang),
-      titleWidget: const TapTalkHeaderWordmark(),
+      title: AppStrings.classes(lang),
+      titleWidget: AppHeaderTitle(AppStrings.classes(lang)),
       currentRoute: AppRoute.classes,
+      headerContentHeight: AppHeaderTitle.height,
       headerBottomSpacing: 0,
       bodyTopOffset: -4,
       showBottomNav: false,
@@ -126,41 +127,6 @@ class _ClassesScreenState extends State<ClassesScreen> {
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.only(bottom: 80),
               children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.lg,
-                  ),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    decoration: BoxDecoration(
-                      color: theme.bgMid.withValues(alpha: 0.55),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          AppStrings.classes(lang),
-                          style: GoogleFonts.poppins(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                            color: theme.textMain,
-                          ),
-                        ),
-                        const SizedBox(height: AppSpacing.xs),
-                        Text(
-                          AppStrings.classesSubtitle(lang),
-                          style: GoogleFonts.poppins(
-                            fontSize: 12,
-                            color: theme.textMain.withValues(alpha: 0.72),
-                            height: 1.35,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
                 if (classes.isEmpty)
                   SizedBox(
                     height: MediaQuery.sizeOf(context).height * 0.35,

@@ -36,6 +36,7 @@ class PhraseComposerPanel extends StatefulWidget {
     this.composerController,
     this.speakCategoryKey,
     this.recordOnPlay = true,
+    this.showAddAndAttach = true,
   });
 
   final Future<void> Function(String text, String? imagePath) onAdd;
@@ -43,6 +44,7 @@ class PhraseComposerPanel extends StatefulWidget {
   final PhraseComposerPanelController? composerController;
   final String? speakCategoryKey;
   final bool recordOnPlay;
+  final bool showAddAndAttach;
 
   @override
   State<PhraseComposerPanel> createState() => _PhraseComposerPanelState();
@@ -194,7 +196,7 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
             ),
           ],
         ),
-        if (_imagePath != null)
+        if (widget.showAddAndAttach && _imagePath != null)
           Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.sm),
             child: Row(
@@ -262,8 +264,9 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
                   ),
                 ),
               ),
-              const SizedBox(height: AppSpacing.sm),
-              Align(
+              if (widget.showAddAndAttach) ...[
+                const SizedBox(height: AppSpacing.sm),
+                Align(
                 alignment: Alignment.centerRight,
                 child: Wrap(
                   spacing: AppSpacing.sm,
@@ -322,6 +325,7 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
                   ],
                 ),
               ),
+              ],
             ],
           ),
         ),
