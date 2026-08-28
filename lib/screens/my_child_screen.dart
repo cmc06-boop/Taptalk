@@ -79,8 +79,14 @@ class _MyChildScreenState extends State<MyChildScreen> {
       ),
     );
     if (confirm != true || !context.mounted) return;
-    await app.unlinkChild(child.learnerId);
+    final error = await app.unlinkChild(child.learnerId);
     if (!context.mounted) return;
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error)),
+      );
+      return;
+    }
     await TapTalkResultDialog.showSuccess(
       context,
       title: AppStrings.childUnlinkedTitle(lang),
