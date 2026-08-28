@@ -45,7 +45,6 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
   int _studentCount = 0;
   late String _className;
   int _lastClassRevision = 0;
-  int _lastLiveRevision = 0;
   AppState? _app;
 
   bool _sameLessons(List<ClassLesson> a, List<ClassLesson> b) {
@@ -214,12 +213,6 @@ class _TeacherClassDetailScreenState extends State<TeacherClassDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
-    _lastLiveRevision = bindLiveRevision(
-      lastRevision: _lastLiveRevision,
-      currentRevision: app.liveDataRevision,
-      reload: _load,
-      isMounted: () => mounted,
-    );
     _lastClassRevision = bindClassContentRevision(
       lastClassRevision: _lastClassRevision,
       classRevision: app.classContentRevision(widget.classId),

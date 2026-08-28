@@ -20,6 +20,21 @@ class TeacherMonitoringScreen extends StatefulWidget {
 
 class _TeacherMonitoringScreenState extends State<TeacherMonitoringScreen> {
   bool _refreshing = false;
+  final Map<int, int> _stableStudentCounts = {};
+
+  int _displayStudentCount(AppState app, int classId, {bool force = false}) {
+    final current = app.teacherClassStudentCount(classId);
+    if (force) {
+      _stableStudentCounts[classId] = current;
+      return current;
+    }
+    final cached = _stableStudentCounts[classId];
+    if (current == 0 && cached != null && cached > 0) {
+      return cached;
+    }
+    _stableStudentCounts[classId] = current;
+    return current;
+  }
 
   @override
   void initState() {
@@ -36,6 +51,7 @@ class _TeacherMonitoringScreenState extends State<TeacherMonitoringScreen> {
     if (_refreshing) return;
     setState(() => _refreshing = true);
     try {
+      _stableStudentCounts.clear();
       await context.read<AppState>().refreshTeacherClasses(
             cloudSyncInBackground: false,
           );
@@ -123,7 +139,7 @@ class _TeacherMonitoringScreenState extends State<TeacherMonitoringScreen> {
                     title: teacherClass.name,
                     badge: teacherClass.code,
                     subtitle: AppStrings.studentsInClass(
-                      app.teacherClassStudentCount(teacherClass.id),
+                      _displayStudentCount(app, teacherClass.id),
                       lang,
                     ),
                     icon: Icons.monitor_heart_outlined,

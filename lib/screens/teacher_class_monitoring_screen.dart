@@ -8,7 +8,6 @@ import '../core/constants/app_spacing.dart';
 import '../core/navigation/route_transitions.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
-import '../core/utils/live_refresh.dart';
 import '../data/models/monitored_learner.dart';
 import '../data/models/parent_notification.dart';
 import '../data/models/teacher_class_student.dart';
@@ -51,7 +50,6 @@ class _TeacherClassMonitoringScreenState
     extends State<TeacherClassMonitoringScreen> {
   List<TeacherClassStudent> _students = [];
   bool _refreshing = false;
-  int _lastLiveRevision = 0;
 
   bool _sameStudents(List<TeacherClassStudent> a, List<TeacherClassStudent> b) {
     if (a.length != b.length) return false;
@@ -417,12 +415,6 @@ class _TeacherClassMonitoringScreenState
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
-    _lastLiveRevision = bindLiveRevision(
-      lastRevision: _lastLiveRevision,
-      currentRevision: app.liveDataRevision,
-      reload: _loadStudents,
-      isMounted: () => mounted,
-    );
     final theme = app.theme;
     final lang = app.language;
     final displayClassName = app.localizedContent(widget.className);
