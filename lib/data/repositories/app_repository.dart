@@ -620,7 +620,6 @@ class AppRepository {
     required int parentUserId,
     required Set<String> remoteLearnerFirebaseUids,
   }) async {
-    if (remoteLearnerFirebaseUids.isEmpty) return;
     final children = await getLinkedChildren(parentUserId);
     for (final child in children) {
       final learner = await findUserById(child.learnerId);

@@ -926,6 +926,7 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     await deleteWhere(linkCollectionName, 'learnerFirebaseUid');
     await deleteWhere(enrollmentCollectionName, 'learnerFirebaseUid');
     await deleteWhere(joinRequestCollectionName, 'learnerFirebaseUid');
+    await deleteWhere(activityCollectionName, 'learnerFirebaseUid');
     try {
       await db.collection(userProfileCollectionName).doc(uid).delete();
     } catch (e, st) {

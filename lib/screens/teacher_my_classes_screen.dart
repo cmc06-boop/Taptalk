@@ -23,26 +23,7 @@ class TeacherMyClassesScreen extends StatefulWidget {
 }
 
 class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
-  final Map<int, int> _stableStudentCounts = {};
-
-  int _displayStudentCount(AppState app, int classId, {bool force = false}) {
-    final current = app.teacherClassStudentCount(classId);
-    if (force) {
-      _stableStudentCounts[classId] = current;
-      return current;
-    }
-    final cached = _stableStudentCounts[classId];
-    if (current == 0 && cached != null && cached > 0) {
-      return cached;
-    }
-    _stableStudentCounts[classId] = current;
-    return current;
-  }
-
   Future<void> _refresh({bool forceCloud = false}) async {
-    if (forceCloud) {
-      _stableStudentCounts.clear();
-    }
     await context.read<AppState>().refreshTeacherClasses(
           cloudSyncInBackground: !forceCloud,
         );
@@ -248,7 +229,7 @@ class _TeacherMyClassesScreenState extends State<TeacherMyClassesScreen> {
                       title: teacherClass.name,
                       badge: teacherClass.code,
                       subtitle: AppStrings.studentsInClass(
-                        _displayStudentCount(app, teacherClass.id),
+                        app.teacherClassStudentCount(teacherClass.id),
                         lang,
                       ),
                       icon: Icons.menu_book_rounded,

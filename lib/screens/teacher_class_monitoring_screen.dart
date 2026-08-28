@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
+import '../core/utils/live_refresh.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/navigation/route_transitions.dart';
 import '../core/l10n/app_strings.dart';
@@ -50,6 +51,7 @@ class _TeacherClassMonitoringScreenState
     extends State<TeacherClassMonitoringScreen> {
   List<TeacherClassStudent> _students = [];
   bool _refreshing = false;
+  int _lastLiveRevision = -1;
 
   bool _sameStudents(List<TeacherClassStudent> a, List<TeacherClassStudent> b) {
     if (a.length != b.length) return false;
@@ -415,6 +417,12 @@ class _TeacherClassMonitoringScreenState
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
+    _lastLiveRevision = bindLiveRevision(
+      lastRevision: _lastLiveRevision,
+      currentRevision: app.liveDataRevision,
+      reload: () => _loadStudents(),
+      isMounted: () => mounted,
+    );
     final theme = app.theme;
     final lang = app.language;
     final displayClassName = app.localizedContent(widget.className);
@@ -442,7 +450,7 @@ class _TeacherClassMonitoringScreenState
               ),
               const SizedBox(width: 8),
               StudentCountBadge(
-                count: _students.length,
+                count: app.teacherClassStudentCount(widget.classId),
                 accent: theme.bgAccent,
               ),
             ],

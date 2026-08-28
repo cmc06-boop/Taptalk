@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
+import '../core/utils/live_refresh.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/navigation/route_transitions.dart';
 import '../core/l10n/app_strings.dart';
@@ -23,6 +24,8 @@ class MyChildScreen extends StatefulWidget {
 }
 
 class _MyChildScreenState extends State<MyChildScreen> {
+  int _lastLiveRevision = -1;
+
   @override
   void initState() {
     super.initState();
@@ -88,6 +91,12 @@ class _MyChildScreenState extends State<MyChildScreen> {
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
+    _lastLiveRevision = bindLiveRevision(
+      lastRevision: _lastLiveRevision,
+      currentRevision: app.liveDataRevision,
+      reload: () => _refresh(context),
+      isMounted: () => mounted,
+    );
     final theme = app.theme;
     final lang = app.language;
     final children = app.linkedChildren;

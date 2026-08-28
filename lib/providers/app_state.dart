@@ -1004,7 +1004,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         try {
           await _syncLinkedChildrenFromCloud();
           _linkedChildren = await _repo.getLinkedChildren(_user!.id);
+          if (_linkedChildren.isEmpty) {
+            _selectedChildId = null;
+          } else if (_selectedChildId == null ||
+              !_linkedChildren.any((c) => c.learnerId == _selectedChildId)) {
+            _selectedChildId = _linkedChildren.first.learnerId;
+          }
           _bumpLiveDataRevision();
+          notifyListeners();
         } catch (e, st) {
           debugPrint('Parent child link live sync failed: $e\n$st');
         }
@@ -1023,16 +1030,18 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       onEnrollmentsChanged: (enrollments) async {
         if (_user == null || !_user!.isTeacher) return;
         try {
+          final filtered = enrollments
+              .where(
+                (e) => !_deletedClassCodes.contains(
+                  AppRepository.normalizeClassCode(e.classCode),
+                ),
+              )
+              .toList();
           await _repo.mergeRemoteEnrollmentsForTeacher(
             teacherUserId: _user!.id,
-            enrollments: enrollments
-                .where(
-                  (e) => !_deletedClassCodes.contains(
-                    AppRepository.normalizeClassCode(e.classCode),
-                  ),
-                )
-                .toList(),
+            enrollments: filtered,
           );
+          await _loadTeacherClasses();
           await _refreshTeacherClassCounts();
           _bumpLiveDataRevision();
         } catch (e, st) {
@@ -3105,6 +3114,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       unawaited(_syncPendingLearnerActivityToCloud());
     }
     unawaited(_enforceFirebaseAccountStillExists());
+    if (_user != null && _user!.isParent && CloudScope.syncMonitoring) {
+      unawaited(refreshLinkedChildren(cloudSyncInBackground: true));
+    }
   }
 
   void _startMonitoringConnectivitySync() {
@@ -3145,6 +3157,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     if (_user!.isLearner && CloudScope.syncMonitoring) {
+      await _syncFirebaseSessionAfterRestore();
+      await _enforceFirebaseAccountStillExists();
       await _syncLearnerCloudData();
       await refreshEnrolledClasses(cloudSyncInBackground: false);
       await _startLearnerEnrollmentSync();
@@ -3689,6 +3703,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _history.removeWhere((e) => e.id == item.id);
     notifyListeners();
     await _repo.removeHistory(item.id);
+
+    if (!CloudScope.syncMonitoring || !_notificationSync.isCloudAvailable) return;
+    final uid = await _personalBoardCloudUid();
+    if (uid == null || uid.isEmpty) return;
+    final local = await _repo.getHistoryForCloudSync(_user!.id);
+    await _notificationSync.syncLearnerSpeakHistory(
+      learnerFirebaseUid: uid,
+      history: local,
+    );
   }
 
   Future<void> clearAllHistory() async {
@@ -3913,10 +3936,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (expected != null &&
         expected.isNotEmpty &&
         restoredUid == null &&
-        (_user!.isTeacher || _user!.isParent)) {
-      debugPrint(
-        'No Firebase session for ${_user!.role}; SMS/cloud need sign-in again.',
-      );
+        _user!.isOnlineAccount) {
+      if (_user!.isTeacher || _user!.isParent) {
+        debugPrint(
+          'No Firebase session for ${_user!.role}; SMS/cloud need sign-in again.',
+        );
+      }
       _watchForLateFirebaseAuthRestore();
     }
     if (restoredUid != null) {
@@ -3930,8 +3955,67 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (_user == null || !_user!.isOnlineAccount) return;
     if (!FirebaseService.instance.isAvailable) return;
     if (await NetworkStatus.isOffline()) return;
-    if (!await FirebaseService.instance.currentUserWasDeleted()) return;
-    await _logoutBecauseFirebaseAccountDeleted();
+
+    final firebaseAuth = FirebaseService.instance.auth;
+    final authUser = firebaseAuth?.currentUser;
+    final expectedUid = _user!.firebaseUid?.trim() ?? '';
+
+    if (authUser == null) {
+      if (expectedUid.isNotEmpty) {
+        await Future<void>.delayed(const Duration(milliseconds: 800));
+        if (_user == null ||
+            FirebaseService.instance.currentUid != null ||
+            await NetworkStatus.isOffline()) {
+          return;
+        }
+        await _logoutBecauseFirebaseAccountDeleted();
+      }
+      return;
+    }
+
+    final learnerUid =
+        _user!.isLearner ? (expectedUid.isNotEmpty ? expectedUid : authUser.uid) : '';
+
+    Future<void> logoutDeletedLearner() async {
+      if (learnerUid.isNotEmpty) {
+        await _notificationSync.purgeLearnerCloudPresence(learnerUid);
+      }
+      await _logoutBecauseFirebaseAccountDeleted(alreadyPurged: true);
+    }
+
+    try {
+      await authUser.getIdToken(true);
+    } on FirebaseAuthException catch (e) {
+      if (_isDeletedFirebaseAuthError(e.code)) {
+        await logoutDeletedLearner();
+        return;
+      }
+    }
+
+    try {
+      await authUser.reload();
+      if (firebaseAuth!.currentUser == null) {
+        await logoutDeletedLearner();
+      }
+    } on FirebaseAuthException catch (e) {
+      if (_isDeletedFirebaseAuthError(e.code)) {
+        await logoutDeletedLearner();
+      }
+    } catch (e, st) {
+      debugPrint('Firebase account existence check failed: $e\n$st');
+    }
+  }
+
+  bool _isDeletedFirebaseAuthError(String code) {
+    switch (code) {
+      case 'user-not-found':
+      case 'user-disabled':
+      case 'user-token-expired':
+      case 'invalid-user-token':
+        return true;
+      default:
+        return false;
+    }
   }
 
   void _watchFirebaseAccountInvalidation() {
@@ -3949,15 +4033,19 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _logoutBecauseFirebaseAccountDeleted() async {
+  Future<void> _logoutBecauseFirebaseAccountDeleted({
+    bool alreadyPurged = false,
+  }) async {
     if (_loggingOutDeletedFirebaseAccount || _user == null) return;
     _loggingOutDeletedFirebaseAccount = true;
     debugPrint('Firebase account deleted; signing out local session.');
     try {
-      final uid =
-          FirebaseService.instance.currentUid ?? _user!.firebaseUid?.trim();
-      if (uid != null && uid.isNotEmpty) {
-        await _notificationSync.purgeLearnerCloudPresence(uid);
+      if (!alreadyPurged && _user!.isLearner) {
+        final uid = _user!.firebaseUid?.trim() ??
+            FirebaseService.instance.currentUid?.trim();
+        if (uid != null && uid.isNotEmpty) {
+          await _notificationSync.purgeLearnerCloudPresence(uid);
+        }
       }
       await logout();
     } finally {
@@ -3995,6 +4083,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       await _enforceFirebaseAccountStillExists();
       _watchFirebaseAccountInvalidation();
     });
+
+    unawaited(
+      Future<void>.delayed(const Duration(seconds: 15), () async {
+        if (_user == null || !_user!.isOnlineAccount) return;
+        if (FirebaseService.instance.currentUid != null) return;
+        if (await NetworkStatus.isOffline()) return;
+        await _logoutBecauseFirebaseAccountDeleted();
+      }),
+    );
   }
 
   Future<void> markNotificationRead(int notificationId) async {
@@ -4169,15 +4266,16 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       final enrollments = await _notificationSync
           .getClassEnrollmentsFromCloud(teacherFirebaseUid)
           .timeout(const Duration(seconds: 12));
+      final filteredEnrollments = enrollments
+          .where(
+            (e) => !_deletedClassCodes.contains(
+              AppRepository.normalizeClassCode(e.classCode),
+            ),
+          )
+          .toList();
       await _repo.mergeRemoteEnrollmentsForTeacher(
         teacherUserId: _user!.id,
-        enrollments: enrollments
-            .where(
-              (e) => !_deletedClassCodes.contains(
-                AppRepository.normalizeClassCode(e.classCode),
-              ),
-            )
-            .toList(),
+        enrollments: filteredEnrollments,
       );
 
       await _purgeDeletedTeacherClasses();

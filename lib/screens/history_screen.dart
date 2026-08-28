@@ -10,6 +10,7 @@ import '../core/theme/theme_tokens.dart';
 import '../data/models/history_model.dart';
 import '../data/repositories/app_repository.dart';
 import '../providers/app_state.dart';
+import '../widgets/compact_popup_menu.dart';
 import '../widgets/learner_scaffold.dart';
 
 class HistoryScreen extends StatefulWidget {
@@ -380,37 +381,66 @@ class _HistoryCard extends StatelessWidget {
                 ),
               ],
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Stack(
+              clipBehavior: Clip.none,
               children: [
-                Row(
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Flexible(
-                      child: _categoryChip(
-                        item.isLessonEntry ? lessonClassName! : categoryLabel,
+                    Padding(
+                      padding: const EdgeInsets.only(right: 28),
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: _categoryChip(
+                              item.isLessonEntry
+                                  ? lessonClassName!
+                                  : categoryLabel,
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                          Text(
+                            formattedTime,
+                            style: GoogleFonts.poppins(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: theme.textMain.withValues(alpha: 0.58),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: AppSpacing.sm),
+                    const SizedBox(height: AppSpacing.sm),
                     Text(
-                      formattedTime,
+                      phraseText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                        color: theme.textMain.withValues(alpha: 0.58),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: theme.textMain,
+                        height: 1.3,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  phraseText,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.poppins(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: theme.textMain,
-                    height: 1.3,
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  child: CompactPopupMenu(
+                    alignToEnd: true,
+                    iconColor: theme.textMain.withValues(alpha: 0.65),
+                    onSelected: (value) {
+                      if (value == 'delete') onRemove();
+                    },
+                    actions: [
+                      CompactMenuAction(
+                        value: 'delete',
+                        label: AppStrings.delete(app.language),
+                        icon: Icons.delete_outline_rounded,
+                        color: const Color(0xFFC62828),
+                      ),
+                    ],
                   ),
                 ),
               ],

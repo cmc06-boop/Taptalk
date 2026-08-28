@@ -25,6 +25,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final _firstNameController = TextEditingController();
   final _lastNameController = TextEditingController();
+  final _emailController = TextEditingController();
   final _addressController = TextEditingController();
   final _ageController = TextEditingController();
   final _yearController = TextEditingController();
@@ -86,6 +87,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _scrollController.dispose();
     _firstNameController.dispose();
     _lastNameController.dispose();
+    _emailController.dispose();
     _addressController.dispose();
     _ageController.dispose();
     _yearController.dispose();
@@ -145,6 +147,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _applyNameToControllers(first: firstName, last: lastName);
+      final email = app.user?.email ?? '';
+      if (_emailController.text != email) {
+        _emailController.text = email;
+      }
       if (_addressController.text != address) {
         _addressController.text = address;
       }
@@ -793,10 +799,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ],
                 ),
                 const SizedBox(height: AppSpacing.md),
-                _ProfileReadOnlyValue(
+                _ProfileField(
                   label: AppStrings.emailAddress(lang),
-                  value: user?.email ?? '',
+                  controller: _emailController,
                   theme: theme,
+                  enabled: false,
+                  readOnly: true,
+                  locked: true,
+                  keyboardType: TextInputType.emailAddress,
                 ),
                 if ((user?.isLearner ?? false) ||
                     (user?.isParent ?? false) ||
@@ -1441,55 +1451,6 @@ class _DatePartField extends StatelessWidget {
   }
 }
 
-class _ProfileReadOnlyValue extends StatelessWidget {
-  const _ProfileReadOnlyValue({
-    required this.label,
-    required this.value,
-    required this.theme,
-  });
-
-  final String label;
-  final String value;
-  final TapTalkThemeToken theme;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: GoogleFonts.poppins(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: theme.textMain.withValues(alpha: 0.85),
-          ),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.sm,
-            vertical: AppSpacing.sm,
-          ),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Text(
-            value,
-            style: GoogleFonts.poppins(
-              fontSize: 12,
-              fontWeight: FontWeight.w400,
-              color: theme.textMain,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _ProfileField extends StatelessWidget {
   const _ProfileField({
     required this.label,
@@ -1502,6 +1463,8 @@ class _ProfileField extends StatelessWidget {
     this.hintText,
     this.showLabel = true,
     this.enabled = true,
+    this.readOnly = false,
+    this.locked = false,
     this.inputFormatters,
     this.contentPadding,
   });
@@ -1516,6 +1479,8 @@ class _ProfileField extends StatelessWidget {
   final String? hintText;
   final bool showLabel;
   final bool enabled;
+  final bool readOnly;
+  final bool locked;
   final List<TextInputFormatter>? inputFormatters;
   final EdgeInsetsGeometry? contentPadding;
 
@@ -1538,6 +1503,7 @@ class _ProfileField extends StatelessWidget {
         TextField(
           controller: controller,
           enabled: enabled,
+          readOnly: readOnly,
           obscureText: obscure,
           onChanged: onChanged,
           keyboardType: keyboardType,
@@ -1545,12 +1511,16 @@ class _ProfileField extends StatelessWidget {
           style: GoogleFonts.poppins(
             fontSize: 12,
             fontWeight: FontWeight.w400,
-            color: theme.textMain,
+            color: locked
+                ? theme.textMain.withValues(alpha: 0.62)
+                : theme.textMain,
           ),
           decoration: InputDecoration(
             isDense: true,
             filled: true,
-            fillColor: Colors.white,
+            fillColor: locked
+                ? theme.textMain.withValues(alpha: 0.06)
+                : Colors.white,
             hintText: hintText,
             hintStyle: GoogleFonts.poppins(
               fontSize: 12,
@@ -1584,6 +1554,10 @@ class _ProfileField extends StatelessWidget {
                     ),
                   ),
             border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide.none,
+            ),
+            disabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
               borderSide: BorderSide.none,
             ),
