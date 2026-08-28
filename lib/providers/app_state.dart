@@ -170,6 +170,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   int _liveDataRevision = 0;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   StreamSubscription<User?>? _firebaseAuthRestoreSubscription;
+  StreamSubscription<User?>? _firebaseAccountInvalidationSubscription;
+  bool _loggingOutDeletedFirebaseAccount = false;
   bool _loggedCloudAuthMissing = false;
   bool _monitoringSyncInFlight = false;
   final Map<int, Future<void>> _monitoringHistoryPullChain = {};
@@ -2656,6 +2658,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _connectivitySubscription = null;
     await _firebaseAuthRestoreSubscription?.cancel();
     _firebaseAuthRestoreSubscription = null;
+    await _firebaseAccountInvalidationSubscription?.cancel();
+    _firebaseAccountInvalidationSubscription = null;
     _loggedCloudAuthMissing = false;
     await _notificationSync.stopParentSync();
     await _notificationSync.stopMonitoringSync();
@@ -3098,6 +3102,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (_user != null && _user!.isLearner && CloudScope.syncMonitoring) {
       unawaited(_syncPendingLearnerActivityToCloud());
     }
+    unawaited(_enforceFirebaseAccountStillExists());
   }
 
   void _startMonitoringConnectivitySync() {
@@ -3451,20 +3456,18 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       );
       changed = true;
     }
-    if (snapshot.customPhrases.isNotEmpty) {
-      final before = (await _repo.getCustomPhraseAdditions(
-        learnerUserId: learnerUserId,
-      )).length;
-      await _repo.mergeRemoteLearnerCustomPhrases(
-        learnerUserId: learnerUserId,
-        phrases: snapshot.customPhrases,
-      );
-      await _repo.dedupeCustomPhrases(learnerUserId);
-      final after = (await _repo.getCustomPhraseAdditions(
-        learnerUserId: learnerUserId,
-      )).length;
-      if (after != before) changed = true;
-    }
+    final beforeCustom = (await _repo.getCustomPhraseAdditions(
+      learnerUserId: learnerUserId,
+    )).length;
+    await _repo.mergeRemoteLearnerCustomPhrases(
+      learnerUserId: learnerUserId,
+      phrases: snapshot.customPhrases,
+    );
+    await _repo.dedupeCustomPhrases(learnerUserId);
+    final afterCustom = (await _repo.getCustomPhraseAdditions(
+      learnerUserId: learnerUserId,
+    )).length;
+    if (afterCustom != beforeCustom) changed = true;
     if (snapshot.speakHistory.isNotEmpty) {
       final inserted = await _repo.mergeRemoteLearnerSpeakHistory(
         learnerUserId: learnerUserId,
@@ -3913,6 +3916,45 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       );
       _watchForLateFirebaseAuthRestore();
     }
+    if (restoredUid != null) {
+      await _enforceFirebaseAccountStillExists();
+      _watchFirebaseAccountInvalidation();
+    }
+  }
+
+  Future<void> _enforceFirebaseAccountStillExists() async {
+    if (_loggingOutDeletedFirebaseAccount) return;
+    if (_user == null || !_user!.isOnlineAccount) return;
+    if (!FirebaseService.instance.isAvailable) return;
+    if (await NetworkStatus.isOffline()) return;
+    if (!await FirebaseService.instance.currentUserWasDeleted()) return;
+    await _logoutBecauseFirebaseAccountDeleted();
+  }
+
+  void _watchFirebaseAccountInvalidation() {
+    _firebaseAccountInvalidationSubscription?.cancel();
+    _firebaseAccountInvalidationSubscription = null;
+    if (_user == null || !_user!.isOnlineAccount) return;
+    final firebaseAuth = FirebaseService.instance.auth;
+    if (firebaseAuth == null || firebaseAuth.currentUser == null) return;
+
+    _firebaseAccountInvalidationSubscription =
+        firebaseAuth.idTokenChanges().listen((user) {
+      if (_loggingOutDeletedFirebaseAccount || _user == null) return;
+      if (user != null) return;
+      unawaited(_logoutBecauseFirebaseAccountDeleted());
+    });
+  }
+
+  Future<void> _logoutBecauseFirebaseAccountDeleted() async {
+    if (_loggingOutDeletedFirebaseAccount || _user == null) return;
+    _loggingOutDeletedFirebaseAccount = true;
+    debugPrint('Firebase account deleted; signing out local session.');
+    try {
+      await logout();
+    } finally {
+      _loggingOutDeletedFirebaseAccount = false;
+    }
   }
 
   /// Firebase Auth can restore a persisted session shortly after startup.
@@ -3942,6 +3984,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
       debugPrint('Firebase auth restored; resuming cloud sync.');
       unawaited(_activateMonitoringSync());
+      await _enforceFirebaseAccountStillExists();
+      _watchFirebaseAccountInvalidation();
     });
   }
 
@@ -6146,12 +6190,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final phrasesUsed = usageStats.length;
     final phraseTaps = usageStats.fold<int>(0, (sum, stat) => sum + stat.count);
 
-    final firstUsesFromCustom = await _repo.getCustomPhraseAdditions(
+    final firstUses = await _repo.getCustomPhraseAdditions(
       learnerUserId: learnerUserId,
     );
-    final firstUses = firstUsesFromCustom.isNotEmpty
-        ? firstUsesFromCustom
-        : await _repo.getPhraseFirstUses(learnerUserId: learnerUserId);
     final periodFirstUses = firstUses
         .where(
           (entry) =>

@@ -258,6 +258,32 @@ class FirebaseService {
     await auth?.signOut();
   }
 
+  /// True when Firebase Auth says the persisted user no longer exists.
+  /// Network and timeout errors return false so offline sessions stay signed in.
+  Future<bool> currentUserWasDeleted() async {
+    if (!_initialized) return false;
+    final firebaseAuth = auth;
+    final user = firebaseAuth?.currentUser;
+    if (firebaseAuth == null || user == null) return false;
+    try {
+      await user.reload();
+      return firebaseAuth.currentUser == null;
+    } on FirebaseAuthException catch (e) {
+      switch (e.code) {
+        case 'user-not-found':
+        case 'user-disabled':
+        case 'user-token-expired':
+        case 'invalid-user-token':
+          return true;
+        default:
+          return false;
+      }
+    } catch (e, st) {
+      debugPrint('Firebase currentUser reload failed: $e\n$st');
+      return false;
+    }
+  }
+
   /// Sends Firebase's password-reset email (for online accounts).
   Future<FirebasePasswordResetResult> sendPasswordResetEmail({
     required String email,

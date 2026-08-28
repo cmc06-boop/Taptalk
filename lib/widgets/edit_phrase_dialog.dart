@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -7,8 +5,8 @@ import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
-import '../core/utils/phrase_image_storage.dart';
 import '../providers/app_state.dart';
+import 'composer_attachment_preview.dart';
 
 class EditPhraseResult {
   const EditPhraseResult({
@@ -119,68 +117,21 @@ class _EditPhraseDialogState extends State<EditPhraseDialog> {
     final app = context.watch<AppState>();
     final theme = app.theme;
     final lang = app.language;
-    final title = widget.title ?? AppStrings.editPhrase(lang);
 
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      title: Text(
-        title,
-        style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
-      ),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (_imagePath != null) ...[
-              ClipRRect(
-                borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                child: isPhraseVideoPath(_imagePath)
-                    ? Container(
-                        width: 96,
-                        height: 96,
-                        color: theme.bgMid,
-                        alignment: Alignment.center,
-                        child: Icon(
-                          Icons.videocam_rounded,
-                          size: 36,
-                          color: theme.bgAccent,
-                        ),
-                      )
-                    : _imagePath!.toLowerCase().startsWith('assets/')
-                    ? Image.asset(
-                        _imagePath!,
-                        width: 96,
-                        height: 96,
-                        fit: BoxFit.cover,
-                      )
-                    : Image.file(
-                        File(_imagePath!),
-                        width: 96,
-                        height: 96,
-                        fit: BoxFit.cover,
-                      ),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              Wrap(
-                spacing: AppSpacing.sm,
-                runSpacing: AppSpacing.xs,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _busy ? null : _pickImage,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: theme.bgAccent,
-                      side: BorderSide(color: theme.bgAccent.withValues(alpha: 0.45)),
-                    ),
-                    icon: const Icon(Icons.perm_media_rounded, size: 16),
-                    label: Text(AppStrings.attachImage(lang)),
-                  ),
-                  TextButton.icon(
-                    onPressed: _busy ? null : _removeImage,
-                    icon: const Icon(Icons.close_rounded, size: 18),
-                    label: Text(AppStrings.remove(lang)),
-                  ),
-                ],
+              ComposerAttachmentPreview(
+                path: _imagePath!,
+                theme: theme,
+                width: double.infinity,
+                height: 80,
+                onRemove: _busy ? () {} : _removeImage,
               ),
               const SizedBox(height: AppSpacing.md),
             ] else ...[
@@ -209,23 +160,27 @@ class _EditPhraseDialogState extends State<EditPhraseDialog> {
               ),
               onSubmitted: (_) => _busy ? null : _submit(),
             ),
+            const SizedBox(height: AppSpacing.md),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: _busy ? null : () => Navigator.pop(context),
+                  child: Text(AppStrings.cancel(lang)),
+                ),
+                const Spacer(),
+                FilledButton(
+                  onPressed: _busy ? null : _submit,
+                  style: FilledButton.styleFrom(backgroundColor: theme.bgAccent),
+                  child: Text(
+                    AppStrings.saveChanges(lang),
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: _busy ? null : () => Navigator.pop(context),
-          child: Text(AppStrings.cancel(lang)),
-        ),
-        FilledButton(
-          onPressed: _busy ? null : _submit,
-          style: FilledButton.styleFrom(backgroundColor: theme.bgAccent),
-          child: Text(
-            AppStrings.saveChanges(lang),
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
-          ),
-        ),
-      ],
     );
   }
 }

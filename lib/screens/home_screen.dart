@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -21,6 +20,7 @@ import '../widgets/phrase_card.dart';
 import '../widgets/highlighting_text_controller.dart';
 import '../widgets/tts_speed_selector.dart';
 import '../widgets/view_phrase_dialog.dart';
+import '../widgets/composer_attachment_preview.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -345,34 +345,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 ),
-                if (_attachedImagePath != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                    child: Row(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                          child: Image.file(
-                            File(_attachedImagePath!),
-                            width: 52,
-                            height: 52,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        Expanded(
-                          child: Text(
-                            AppStrings.imageAttached(lang),
-                            style: GoogleFonts.poppins(fontSize: 12),
-                          ),
-                        ),
-                        IconButton(
-                          onPressed: () => setState(() => _attachedImagePath = null),
-                          icon: const Icon(Icons.close),
-                        ),
-                      ],
-                    ),
-                  ),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
                   child: Stack(
@@ -436,24 +408,58 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      TextField(
-                        controller: _textController,
-                        scrollController: _composerScroll,
-                        maxLines: 4,
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w400,
-                          color: theme.textMain,
-                          height: 1.45,
-                        ),
-                        decoration: InputDecoration(
-                          hintText: AppStrings.enterText(lang),
-                          filled: true,
-                          fillColor: Colors.white,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                            borderSide: BorderSide.none,
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(
+                            AppSpacing.radiusMd,
                           ),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (_attachedImagePath != null)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  8,
+                                  8,
+                                  8,
+                                  0,
+                                ),
+                                child: ComposerAttachmentPreview(
+                                  path: _attachedImagePath!,
+                                  theme: theme,
+                                  onRemove: () => setState(
+                                    () => _attachedImagePath = null,
+                                  ),
+                                ),
+                              ),
+                            TextField(
+                              controller: _textController,
+                              scrollController: _composerScroll,
+                              maxLines: 4,
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w400,
+                                color: theme.textMain,
+                                height: 1.45,
+                              ),
+                              decoration: InputDecoration(
+                                hintText: AppStrings.enterText(lang),
+                                filled: true,
+                                fillColor: Colors.white,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(
+                                    _attachedImagePath != null
+                                        ? 0
+                                        : AppSpacing.radiusMd,
+                                  ),
+                                  borderSide: BorderSide.none,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       const SizedBox(height: AppSpacing.sm),

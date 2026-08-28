@@ -1708,7 +1708,16 @@ class AppRepository {
     required int learnerUserId,
     required List<RemoteLearnerCustomPhrase> phrases,
   }) async {
-    if (phrases.isEmpty) return;
+    if (phrases.isEmpty) {
+      final db = await _dbHelper.database;
+      await db.update(
+        'phrases',
+        {'is_active': 0},
+        where: 'user_id = ? AND is_builtin = 0 AND is_active = 1',
+        whereArgs: [learnerUserId],
+      );
+      return;
+    }
     final deduped = <String, RemoteLearnerCustomPhrase>{};
     for (final remote in phrases) {
       final text = storedUserText(remote.phraseText);

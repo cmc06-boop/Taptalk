@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -9,11 +8,11 @@ import 'package:provider/provider.dart';
 
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
-import '../core/utils/phrase_image_storage.dart';
 import '../core/utils/speak_feedback.dart';
 import '../providers/app_state.dart';
 import 'highlighting_text_controller.dart';
 import 'tts_speed_selector.dart';
+import 'composer_attachment_preview.dart';
 
 /// External handle for appending phrases into [PhraseComposerPanel].
 class PhraseComposerPanelController {
@@ -188,45 +187,6 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
             ],
           ),
         ),
-        if (widget.showAddAndAttach && _imagePath != null)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-            child: Row(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                  child: isPhraseVideoPath(_imagePath)
-                      ? Container(
-                          width: 52,
-                          height: 52,
-                          color: theme.bgMid,
-                          alignment: Alignment.center,
-                          child: Icon(
-                            Icons.videocam_rounded,
-                            color: theme.bgAccent,
-                          ),
-                        )
-                      : Image.file(
-                          File(_imagePath!),
-                          width: 52,
-                          height: 52,
-                          fit: BoxFit.cover,
-                        ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Text(
-                    AppStrings.imageAttached(lang),
-                    style: GoogleFonts.poppins(fontSize: 12),
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => setState(() => _imagePath = null),
-                  icon: const Icon(Icons.close),
-                ),
-              ],
-            ),
-          ),
         ClipRRect(
           borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           child: Stack(
@@ -288,24 +248,47 @@ class _PhraseComposerPanelState extends State<PhraseComposerPanel> {
                 child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              TextField(
-                controller: _controller,
-                scrollController: _composerScroll,
-                maxLines: 4,
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w400,
-                  color: theme.textMain,
-                  height: 1.45,
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
                 ),
-                decoration: InputDecoration(
-                  hintText: AppStrings.enterText(lang),
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                    borderSide: BorderSide.none,
-                  ),
+                clipBehavior: Clip.antiAlias,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (widget.showAddAndAttach && _imagePath != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                        child: ComposerAttachmentPreview(
+                          path: _imagePath!,
+                          theme: theme,
+                          onRemove: () => setState(() => _imagePath = null),
+                        ),
+                      ),
+                    TextField(
+                      controller: _controller,
+                      scrollController: _composerScroll,
+                      maxLines: 4,
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w400,
+                        color: theme.textMain,
+                        height: 1.45,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: AppStrings.enterText(lang),
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(
+                            _imagePath != null ? 0 : AppSpacing.radiusMd,
+                          ),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
               if (widget.showAddAndAttach) ...[
