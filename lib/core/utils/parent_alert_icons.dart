@@ -9,6 +9,7 @@ abstract final class ParentAlertIcons {
         ParentAlertType.distress => Icons.mood_bad_outlined,
         ParentAlertType.schoolNeeded => Icons.school_outlined,
         ParentAlertType.teacherAlert => Icons.campaign_outlined,
+        ParentAlertType.customMessage => Icons.edit_outlined,
       };
 
   static Color iconColor(ParentAlertType type) => switch (type) {
@@ -16,6 +17,7 @@ abstract final class ParentAlertIcons {
         ParentAlertType.distress => const Color(0xFFE65100),
         ParentAlertType.schoolNeeded => const Color(0xFF1565C0),
         ParentAlertType.teacherAlert => const Color(0xFF546E7A),
+        ParentAlertType.customMessage => const Color(0xFF6A1B9A),
       };
 
   static Color iconBackground(ParentAlertType type) => switch (type) {
@@ -23,5 +25,6 @@ abstract final class ParentAlertIcons {
         ParentAlertType.distress => const Color(0xFFFFF3E0),
         ParentAlertType.schoolNeeded => const Color(0xFFE3F2FD),
         ParentAlertType.teacherAlert => const Color(0xFFECEFF1),
+        ParentAlertType.customMessage => const Color(0xFFF3E5F5),
       };
 }

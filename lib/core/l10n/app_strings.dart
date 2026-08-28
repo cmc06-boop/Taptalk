@@ -628,6 +628,8 @@ abstract final class AppStrings {
           lang == AppLanguage.filipino
               ? 'General classroom concern'
               : 'General classroom concern',
+        ParentAlertType.customMessage =>
+          lang == AppLanguage.filipino ? 'Custom message' : 'Custom message',
       };
 
   static String teacherAlertTitle(
@@ -652,6 +654,10 @@ abstract final class AppStrings {
       lang == AppLanguage.filipino
           ? 'Alert mula kay $teacherName — $childName'
           : 'Alert from $teacherName — $childName',
+    ParentAlertType.customMessage =>
+      lang == AppLanguage.filipino
+          ? 'Mensahe mula kay Teacher $teacherName — $childName'
+          : 'Message from Teacher $teacherName — $childName',
   };
 
   static String teacherAlertBody(
@@ -676,6 +682,10 @@ abstract final class AppStrings {
       lang == AppLanguage.filipino
           ? 'Si Teacher $teacherName ay nagpadala ng urgent alert para kay $childName. Pakitingnan po agad. Salamat.'
           : 'Teacher $teacherName sent an urgent alert for $childName. Please check in as soon as you can. Thank you.',
+    ParentAlertType.customMessage =>
+      lang == AppLanguage.filipino
+          ? 'May custom na mensahe mula kay Teacher $teacherName.'
+          : 'Custom message from Teacher $teacherName.',
   };
 
   static String teacherCustomAlertTitle(

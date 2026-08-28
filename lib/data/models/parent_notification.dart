@@ -3,6 +3,7 @@ enum ParentAlertType {
   distress,
   schoolNeeded,
   teacherAlert,
+  customMessage,
 }
 
 class ParentNotification {

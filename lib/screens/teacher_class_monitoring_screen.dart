@@ -21,15 +21,14 @@ import '../widgets/taptalk_result_dialog.dart';
 import 'child_monitoring_screen.dart';
 
 class _TeacherAlertSelection {
-  const _TeacherAlertSelection.preset(this.alertType) : customMessage = null;
+  const _TeacherAlertSelection.preset(this.alertType) : wantsCustomMessage = false;
 
-  const _TeacherAlertSelection.custom(this.customMessage)
-      : alertType = ParentAlertType.teacherAlert;
+  const _TeacherAlertSelection.customOption()
+      : alertType = ParentAlertType.customMessage,
+        wantsCustomMessage = true;
 
   final ParentAlertType alertType;
-  final String? customMessage;
-
-  bool get isCustom => customMessage != null;
+  final bool wantsCustomMessage;
 }
 
 class TeacherClassMonitoringScreen extends StatefulWidget {
@@ -113,6 +112,7 @@ class _TeacherClassMonitoringScreenState
     final controller = TextEditingController();
     return showDialog<String>(
       context: context,
+      useRootNavigator: true,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: Text(
@@ -201,7 +201,8 @@ class _TeacherClassMonitoringScreenState
               ),
               const SizedBox(height: AppSpacing.sm),
               for (final type in ParentAlertType.values)
-                Padding(
+                if (type != ParentAlertType.customMessage)
+                  Padding(
                   padding: const EdgeInsets.only(bottom: 6),
                   child: Material(
                     color: Colors.transparent,
@@ -250,7 +251,7 @@ class _TeacherClassMonitoringScreenState
                     borderRadius: BorderRadius.circular(12),
                     onTap: () => Navigator.pop(
                       ctx,
-                      const _TeacherAlertSelection.custom(''),
+                      const _TeacherAlertSelection.customOption(),
                     ),
                     child: Ink(
                       padding: const EdgeInsets.symmetric(
@@ -303,7 +304,9 @@ class _TeacherClassMonitoringScreenState
     if (selected == null || !mounted) return;
 
     String? customMessage;
-    if (selected.isCustom) {
+    if (selected.wantsCustomMessage) {
+      await Future<void>.delayed(Duration.zero);
+      if (!mounted) return;
       customMessage = await _promptCustomAlertMessage(lang, theme);
       if (customMessage == null || customMessage.trim().isEmpty || !mounted) {
         return;
@@ -311,11 +314,16 @@ class _TeacherClassMonitoringScreenState
       customMessage = customMessage.trim();
     }
 
-    final alertPreview =
-        customMessage ?? AppStrings.alertTypeLabel(lang, selected.alertType);
+    final alertPreview = selected.wantsCustomMessage
+        ? customMessage!
+        : AppStrings.alertTypeLabel(lang, selected.alertType);
+
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
 
     final confirm = await showDialog<bool>(
       context: context,
+      useRootNavigator: true,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         contentPadding: const EdgeInsets.fromLTRB(
@@ -383,7 +391,9 @@ class _TeacherClassMonitoringScreenState
       learnerName: student.fullName,
       classId: widget.classId,
       className: widget.className,
-      alertType: selected.alertType,
+      alertType: selected.wantsCustomMessage
+          ? ParentAlertType.customMessage
+          : selected.alertType,
       customMessage: customMessage,
     );
     if (!mounted) return;

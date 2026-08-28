@@ -65,36 +65,13 @@ class NotificationSyncService {
     required ParentAlertType alertType,
     required String title,
     required String body,
-    String? teacherFirebaseUid,
     String? learnerFirebaseUid,
-    String? classCode,
   }) async {
-    var teacherUid = teacherFirebaseUid?.trim() ?? '';
-    if (teacherUid.isEmpty) {
-      teacherUid =
-          (await _repository.getFirebaseUidForUser(teacherUserId))?.trim() ?? '';
-    }
-
-    var learnerUid = learnerFirebaseUid?.trim() ?? '';
-    if (learnerUid.isEmpty) {
-      learnerUid =
-          (await _repository.getFirebaseUidForUser(learnerUserId))?.trim() ?? '';
-    }
-    if (learnerUid.isEmpty && teacherUid.isNotEmpty) {
-      learnerUid = (await _resolveLearnerUidFromTeacherEnrollments(
-            teacherFirebaseUid: teacherUid,
-            learnerUserId: learnerUserId,
-            learnerName: learnerName,
-            classCode: classCode,
-          ))?.trim() ??
-          '';
-    }
-
     var parentIds = await _repository.getLinkedParentIds(learnerUserId);
     if (parentIds.isEmpty) {
       parentIds = await _resolveLinkedParentIdsFromCloud(
         learnerUserId,
-        learnerFirebaseUid: learnerUid.isNotEmpty ? learnerUid : null,
+        learnerFirebaseUid: learnerFirebaseUid,
       );
     }
 
@@ -113,42 +90,40 @@ class NotificationSyncService {
       createdAt: createdAt,
     );
 
-    if (!_cloud.isAvailable || teacherUid.isEmpty) {
+    if (!_cloud.isAvailable) {
       return result;
     }
 
-    if (learnerUid.isEmpty) {
-      learnerUid = (await _resolveLearnerUidFromTeacherEnrollments(
-            teacherFirebaseUid: teacherUid,
-            learnerUserId: learnerUserId,
-            learnerName: learnerName,
-            classCode: classCode,
-          ))?.trim() ??
-          '';
+    final teacherFirebaseUid =
+        await _repository.getFirebaseUidForUser(teacherUserId);
+    if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) {
+      return result;
     }
 
     var cloudPublished = 0;
-    final publishedParentUids = <String>{};
-    final fallbackNotificationId =
-        result.notificationIds.isNotEmpty ? result.notificationIds.first : -1;
+    final resolvedLearnerUid =
+        await _resolveLearnerFirebaseUidForAlert(
+          learnerUserId,
+          providedUid: learnerFirebaseUid,
+        );
 
-    Future<void> publishToParent({
-      required String parentFirebaseUid,
-      required int parentUserId,
-      required int notificationId,
-    }) async {
-      final parentUid = parentFirebaseUid.trim();
-      if (parentUid.isEmpty || publishedParentUids.contains(parentUid)) return;
+    for (final notificationId in result.notificationIds) {
+      final parentId =
+          await _repository.parentUserIdForNotification(notificationId);
+      if (parentId == null || parentId <= 0) continue;
+      final parentFirebaseUid =
+          await _repository.getFirebaseUidForUser(parentId);
+      if (parentFirebaseUid == null || parentFirebaseUid.isEmpty) continue;
       try {
         final remoteId = await _cloud.publishTeacherAlert(
           TeacherAlertCloudEvent(
             localNotificationId: notificationId,
-            parentUserId: parentUserId,
-            parentFirebaseUid: parentUid,
+            parentUserId: parentId,
+            parentFirebaseUid: parentFirebaseUid,
             learnerUserId: learnerUserId,
             childName: learnerName,
             teacherUserId: teacherUserId,
-            teacherFirebaseUid: teacherUid,
+            teacherFirebaseUid: teacherFirebaseUid,
             teacherName: teacherName,
             classId: classId,
             className: className,
@@ -158,42 +133,57 @@ class NotificationSyncService {
             createdAt: createdAt,
           ),
         );
-        if (remoteId != null && remoteId.isNotEmpty && notificationId > 0) {
+        if (remoteId != null && remoteId.isNotEmpty) {
           await _repository.markNotificationRemoteId(
             notificationId: notificationId,
             remoteId: remoteId,
           );
         }
-        publishedParentUids.add(parentUid);
         cloudPublished++;
       } catch (e, st) {
         debugPrint('Cloud alert publish failed: $e\n$st');
       }
     }
 
-    for (final notificationId in result.notificationIds) {
-      final parentId =
-          await _repository.parentUserIdForNotification(notificationId);
-      if (parentId == null || parentId <= 0) continue;
-      final parentFirebaseUid =
-          await _repository.getFirebaseUidForUser(parentId);
-      if (parentFirebaseUid == null || parentFirebaseUid.isEmpty) continue;
-      await publishToParent(
-        parentFirebaseUid: parentFirebaseUid,
-        parentUserId: parentId,
-        notificationId: notificationId,
-      );
-    }
-
-    if (learnerUid.isNotEmpty) {
-      final parentUids =
-          await _cloud.getLinkedParentFirebaseUids(learnerUid);
-      for (final parentUid in parentUids) {
-        await publishToParent(
-          parentFirebaseUid: parentUid,
-          parentUserId: -1,
-          notificationId: fallbackNotificationId,
-        );
+    if (cloudPublished == 0) {
+      if (resolvedLearnerUid != null && resolvedLearnerUid.isNotEmpty) {
+        final parentUids =
+            await _cloud.getLinkedParentFirebaseUids(resolvedLearnerUid);
+        final localNotificationId =
+            result.notificationIds.isNotEmpty ? result.notificationIds.first : -1;
+        for (final parentUid in parentUids) {
+          try {
+            final remoteId = await _cloud.publishTeacherAlert(
+              TeacherAlertCloudEvent(
+                localNotificationId: localNotificationId,
+                parentUserId: -1,
+                parentFirebaseUid: parentUid,
+                learnerUserId: learnerUserId,
+                childName: learnerName,
+                teacherUserId: teacherUserId,
+                teacherFirebaseUid: teacherFirebaseUid,
+                teacherName: teacherName,
+                classId: classId,
+                className: className,
+                alertType: alertType.name,
+                title: title,
+                body: body,
+                createdAt: createdAt,
+              ),
+            );
+            if (remoteId != null &&
+                remoteId.isNotEmpty &&
+                localNotificationId > 0) {
+              await _repository.markNotificationRemoteId(
+                notificationId: localNotificationId,
+                remoteId: remoteId,
+              );
+            }
+            cloudPublished++;
+          } catch (e, st) {
+            debugPrint('Cloud-only alert publish failed: $e\n$st');
+          }
+        }
       }
     }
 
@@ -206,76 +196,20 @@ class NotificationSyncService {
       );
     }
 
-    if (cloudPublished > 0 &&
-        result.status == TeacherAlertStatus.sent &&
-        result.notificationsSent == 0) {
-      return TeacherAlertResult(
-        status: TeacherAlertStatus.sent,
-        notificationsSent: cloudPublished,
-        notificationIds: result.notificationIds,
-      );
-    }
-
     return result;
   }
 
-  Future<String?> resolveLearnerFirebaseUidForTeacherAlert({
-    required String teacherFirebaseUid,
-    required int learnerUserId,
-    required String learnerName,
-    String? classCode,
-  }) {
-    return _resolveLearnerUidFromTeacherEnrollments(
-      teacherFirebaseUid: teacherFirebaseUid,
-      learnerUserId: learnerUserId,
-      learnerName: learnerName,
-      classCode: classCode,
-    );
-  }
-
-  Future<String?> _resolveLearnerUidFromTeacherEnrollments({
-    required String teacherFirebaseUid,
-    required int learnerUserId,
-    String? learnerName,
-    String? classCode,
+  Future<String?> _resolveLearnerFirebaseUidForAlert(
+    int learnerUserId, {
+    String? providedUid,
   }) async {
-    if (!_cloud.isAvailable || teacherFirebaseUid.trim().isEmpty) return null;
-    try {
-      final enrollments =
-          await getClassEnrollmentsFromCloud(teacherFirebaseUid.trim());
-      final targetName = learnerName?.trim().toLowerCase() ?? '';
-      final targetCode = classCode != null && classCode.trim().isNotEmpty
-          ? AppRepository.normalizeClassCode(classCode)
-          : '';
-
-      RemoteClassEnrollment? match;
-      for (final enrollment in enrollments) {
-        final uid = enrollment.learnerFirebaseUid.trim();
-        if (uid.isEmpty) continue;
-
-        if (enrollment.learnerUserId == learnerUserId) {
-          match = enrollment;
-          break;
-        }
-
-        if (targetName.isNotEmpty &&
-            enrollment.learnerName.trim().toLowerCase() == targetName) {
-          final enrollmentCode =
-              AppRepository.normalizeClassCode(enrollment.classCode);
-          if (targetCode.isEmpty || enrollmentCode == targetCode) {
-            match = enrollment;
-            break;
-          }
-        }
-      }
-
-      if (match == null) return null;
-      final uid = match.learnerFirebaseUid.trim();
-      if (uid.isEmpty) return null;
-      await _repository.linkFirebaseUid(learnerUserId, uid);
-      return uid;
-    } catch (e, st) {
-      debugPrint('Resolve learner uid from enrollments failed: $e\n$st');
+    final fromProvided = providedUid?.trim();
+    if (fromProvided != null && fromProvided.isNotEmpty) {
+      return fromProvided;
+    }
+    final fromLocal = await _repository.getFirebaseUidForUser(learnerUserId);
+    if (fromLocal != null && fromLocal.isNotEmpty) {
+      return fromLocal;
     }
     return null;
   }
@@ -285,14 +219,14 @@ class NotificationSyncService {
     String? learnerFirebaseUid,
   }) async {
     if (!_cloud.isAvailable) return const [];
-    var uid = learnerFirebaseUid?.trim() ?? '';
-    if (uid.isEmpty) {
-      uid =
-          (await _repository.getFirebaseUidForUser(learnerUserId))?.trim() ??
-              '';
+    final resolvedUid = await _resolveLearnerFirebaseUidForAlert(
+      learnerUserId,
+      providedUid: learnerFirebaseUid,
+    );
+    if (resolvedUid == null || resolvedUid.isEmpty) {
+      return const [];
     }
-    if (uid.isEmpty) return const [];
-    final parentUids = await _cloud.getLinkedParentFirebaseUids(uid);
+    final parentUids = await _cloud.getLinkedParentFirebaseUids(resolvedUid);
     if (parentUids.isEmpty) return const [];
 
     final parentIds = <int>[];

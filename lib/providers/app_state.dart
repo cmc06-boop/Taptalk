@@ -5336,8 +5336,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     final trimmedCustom = customMessage?.trim();
-    final isCustom = trimmedCustom != null && trimmedCustom.isNotEmpty;
+    final isCustom =
+        alertType == ParentAlertType.customMessage ||
+        (trimmedCustom != null && trimmedCustom.isNotEmpty);
     final teacherName = _user!.fullName;
+    final effectiveAlertType =
+        isCustom ? ParentAlertType.customMessage : alertType;
 
     final title = isCustom
         ? AppStrings.teacherCustomAlertTitle(
@@ -5349,55 +5353,31 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
             _language,
             teacherName,
             learnerName,
-            alertType,
+            effectiveAlertType,
           );
     final body = isCustom
         ? AppStrings.teacherCustomAlertBody(
             _language,
             teacherName,
-            trimmedCustom,
+            trimmedCustom!,
           )
         : AppStrings.teacherAlertBody(
             _language,
             teacherName,
             learnerName,
-            alertType,
+            effectiveAlertType,
           );
 
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
-    if (CloudScope.syncMonitoring && _notificationSync.isCloudAvailable) {
-      if (!await _ensureCloudAuthSession()) {
-        return TeacherAlertDeliveryResult(
-          inAppError: AppStrings.loginNeedsInternet(_language),
-          sms: SmsAlertResult.empty,
-        );
-      }
+    if (CloudScope.syncMonitoring) {
+      await _ensureCloudAuthSession();
     }
 
-    final teacherFirebaseUid = await _resolveAccountFirebaseUid();
-    final classRow = await _repo.findClassById(classId);
-    final classCode = (classRow?['class_code'] as String?)?.trim();
-
-    var learnerFirebaseUid = await _repo.getFirebaseUidForUser(learnerUserId);
-    learnerFirebaseUid ??= await _resolveLearnerFirebaseUid(learnerUserId);
-    if ((learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) &&
-        teacherFirebaseUid != null &&
-        teacherFirebaseUid.isNotEmpty) {
-      learnerFirebaseUid =
-          await _notificationSync.resolveLearnerFirebaseUidForTeacherAlert(
-        teacherFirebaseUid: teacherFirebaseUid,
-        learnerUserId: learnerUserId,
-        learnerName: learnerName,
-        classCode: classCode,
-      );
-    }
-    if (learnerFirebaseUid != null && learnerFirebaseUid.isNotEmpty) {
-      final storedUid = await _repo.getFirebaseUidForUser(learnerUserId);
-      if (storedUid?.trim() != learnerFirebaseUid) {
-        await _repo.linkFirebaseUid(learnerUserId, learnerFirebaseUid);
-      }
-    }
+    final learnerFirebaseUid = await _resolveLearnerFirebaseUid(
+      learnerUserId,
+      forMonitoring: true,
+    );
 
     final result = await _notificationSync.sendTeacherAlert(
       teacherUserId: _user!.id,
@@ -5406,12 +5386,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       learnerName: learnerName,
       classId: classId,
       className: className,
-      alertType: alertType,
+      alertType: effectiveAlertType,
       title: title,
       body: body,
-      teacherFirebaseUid: teacherFirebaseUid,
       learnerFirebaseUid: learnerFirebaseUid,
-      classCode: classCode,
     );
 
     final inAppError = switch (result.status) {
@@ -5449,13 +5427,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         ? AppStrings.teacherCustomAlertSms(
             teacherName,
             learnerName,
-            trimmedCustom,
+            trimmedCustom!,
           )
         : AppStrings.teacherAlertSms(
             _language,
             teacherName,
             learnerName,
-            alertType,
+            effectiveAlertType,
           );
 
     if (contacts.isEmpty) {
