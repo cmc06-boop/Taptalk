@@ -3807,6 +3807,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _syncLinkedChildrenFromCloud() async {
     if (_user == null || !_user!.isParent) return;
+    if (!_notificationSync.isCloudAvailable) return;
+    if (await NetworkStatus.isOffline()) return;
     final parentFirebaseUid = await _resolveParentFirebaseUid();
     if (parentFirebaseUid == null) return;
 
@@ -3818,16 +3820,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         parentUserId: _user!.id,
         links: links,
       );
-      if (links.isNotEmpty) {
-        final remoteUids = links
-            .map((l) => l.learnerFirebaseUid.trim())
-            .where((uid) => uid.isNotEmpty)
-            .toSet();
-        await _repo.pruneStaleParentChildLinks(
-          parentUserId: _user!.id,
-          remoteLearnerFirebaseUids: remoteUids,
-        );
-      }
+      final remoteUids = links
+          .map((l) => l.learnerFirebaseUid.trim())
+          .where((uid) => uid.isNotEmpty)
+          .toSet();
+      await _repo.pruneStaleParentChildLinks(
+        parentUserId: _user!.id,
+        remoteLearnerFirebaseUids: remoteUids,
+      );
       for (final link in links) {
         final uid = link.learnerFirebaseUid.trim();
         if (uid.isEmpty) continue;
@@ -3951,6 +3951,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _loggingOutDeletedFirebaseAccount = true;
     debugPrint('Firebase account deleted; signing out local session.');
     try {
+      final uid =
+          FirebaseService.instance.currentUid ?? _user!.firebaseUid?.trim();
+      if (uid != null && uid.isNotEmpty) {
+        await _notificationSync.purgeLearnerCloudPresence(uid);
+      }
       await logout();
     } finally {
       _loggingOutDeletedFirebaseAccount = false;
@@ -4067,16 +4072,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _refreshTeacherClassCounts() async {
     if (_user == null || !_user!.isTeacher) return;
+    final nextCounts = <int, int>{};
+    for (final teacherClass in _teacherClasses) {
+      nextCounts[teacherClass.id] = await _repo.countStudentsInClass(
+        teacherClass.id,
+      );
+    }
     _teacherClassStudentCounts
       ..clear()
-      ..addEntries(
-        await Future.wait(
-          _teacherClasses.map((c) async {
-            final count = await _repo.countStudentsInClass(c.id);
-            return MapEntry(c.id, count);
-          }),
-        ),
-      );
+      ..addAll(nextCounts);
     _teacherStudentCount = await _repo.countEnrolledStudentsForTeacher(
       _user!.id,
     );
@@ -5493,6 +5497,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final classId = classRow['id'] as int;
     if (await _repo.isLearnerEnrolled(_user!.id, classId)) {
       return AppStrings.classAlreadyEnrolled(_language);
+    }
+    final existingRequest = await _repo.findJoinRequest(
+      learnerUserId: _user!.id,
+      classId: classId,
+    );
+    if (existingRequest != null && existingRequest.isPending) {
+      return AppStrings.joinRequestAlreadyPending(_language);
     }
     final learnerFirebaseUid =
         (FirebaseService.instance.currentUid ?? _user!.firebaseUid)

@@ -688,6 +688,15 @@ class NotificationSyncService {
     );
   }
 
+  Future<void> purgeLearnerCloudPresence(String learnerFirebaseUid) async {
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return;
+    try {
+      await _cloud.purgeLearnerCloudPresence(learnerFirebaseUid);
+    } catch (e, st) {
+      debugPrint('purgeLearnerCloudPresence failed: $e\n$st');
+    }
+  }
+
   Future<RemoteUserProfile?> getUserProfileFromCloud(String firebaseUid) async {
     if (!_cloud.isAvailable || firebaseUid.trim().isEmpty) return null;
     return _cloud.getUserProfile(firebaseUid);

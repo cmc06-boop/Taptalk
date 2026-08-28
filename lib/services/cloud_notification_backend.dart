@@ -709,6 +709,10 @@ abstract class CloudNotificationBackend {
     String? learnerProfileCode,
   });
 
+  /// Removes this learner from parent links, class enrollments, join requests,
+  /// and their profile docs so other roles stop seeing the deleted account.
+  Future<void> purgeLearnerCloudPresence(String learnerFirebaseUid);
+
   Future<void> upsertLearnerEmergencyContacts({
     required int learnerUserId,
     required String learnerName,
@@ -956,6 +960,9 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
     required String learnerName,
     String? learnerProfileCode,
   }) async {}
+
+  @override
+  Future<void> purgeLearnerCloudPresence(String learnerFirebaseUid) async {}
 
   @override
   Future<void> upsertLearnerEmergencyContacts({

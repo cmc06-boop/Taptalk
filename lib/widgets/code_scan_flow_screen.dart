@@ -9,6 +9,7 @@ import '../core/constants/app_spacing.dart';
 import '../core/navigation/route_transitions.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/utils/code_qr_utils.dart';
+import '../core/utils/gallery_qr_decoder.dart';
 import '../providers/app_state.dart';
 import 'code_manual_entry_sheet.dart';
 import 'qr_viewfinder_overlay.dart';
@@ -138,11 +139,17 @@ class _CodeScanFlowScreenState extends State<CodeScanFlowScreen> {
 
   Future<void> _completeWithCode(String code) async {
     if (_busy) return;
+    await _submitScannedCode(code);
+  }
+
+  Future<void> _submitScannedCode(String code) async {
     final lang = context.read<AppState>().language;
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
+    if (!_busy) {
+      setState(() {
+        _busy = true;
+        _error = null;
+      });
+    }
     String? error;
     try {
       error = await widget.onSubmit(code);
@@ -196,8 +203,11 @@ class _CodeScanFlowScreenState extends State<CodeScanFlowScreen> {
   Future<void> _pickQrFromGallery() async {
     if (_busy) return;
     final lang = context.read<AppState>().language;
-    final picked =
-        await ImagePicker().pickImage(source: ImageSource.gallery);
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 2400,
+      maxHeight: 2400,
+    );
     if (picked == null || !mounted) return;
 
     setState(() {
@@ -206,35 +216,43 @@ class _CodeScanFlowScreenState extends State<CodeScanFlowScreen> {
     });
 
     try {
-      final result = await _controller.analyzeImage(picked.path);
+      try {
+        await _controller.stop();
+      } catch (_) {}
+      final raw = await decodeQrFromGalleryImage(
+        controller: _controller,
+        path: picked.path,
+      );
       if (!mounted) return;
-      if (result == null || result.barcodes.isEmpty) {
+      if (raw == null || raw.isEmpty) {
+        try {
+          await _controller.start();
+        } catch (_) {}
+        if (!mounted) return;
         setState(() {
           _busy = false;
           _error = AppStrings.noQrFoundInImage(lang);
         });
         return;
       }
-      for (final barcode in result.barcodes) {
-        final raw = barcode.rawValue?.trim();
-        if (raw == null || raw.isEmpty) continue;
-        final code = _extractCode(raw);
-        if (code == null) {
-          setState(() {
-            _busy = false;
-            _error = AppStrings.qrCodeNotRecognized(lang);
-          });
-          return;
-        }
-        _handled = true;
-        await _completeWithCode(code);
+      final code = _extractCode(raw);
+      if (code == null) {
+        try {
+          await _controller.start();
+        } catch (_) {}
+        if (!mounted) return;
+        setState(() {
+          _busy = false;
+          _error = AppStrings.qrCodeNotRecognized(lang);
+        });
         return;
       }
-      setState(() {
-        _busy = false;
-        _error = AppStrings.noQrFoundInImage(lang);
-      });
+      _handled = true;
+      await _submitScannedCode(code);
     } catch (_) {
+      try {
+        await _controller.start();
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
         _busy = false;

@@ -34,6 +34,8 @@ dependencies:
   url_launcher: ^6.3.1
   flutter_svg: ^2.3.0
   mobile_scanner: ^7.4.0
+  image: ^4.5.4
+  zxing2: ^0.2.4
   qr_flutter: ^4.1.0
   share_plus: ^13.3.0
   video_player: ^2.10.0

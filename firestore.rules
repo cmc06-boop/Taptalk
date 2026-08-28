@@ -31,7 +31,10 @@ service cloud.firestore {
         && request.resource.data.learnerFirebaseUid is string;
 
       allow delete: if request.auth != null
-        && resource.data.parentFirebaseUid == request.auth.uid;
+        && (
+          resource.data.parentFirebaseUid == request.auth.uid
+          || resource.data.learnerFirebaseUid == request.auth.uid
+        );
     }
 
     match /class_enrollments_cloud/{enrollmentId} {
@@ -91,7 +94,7 @@ service cloud.firestore {
       allow create, update: if request.auth != null
         && request.auth.uid == learnerUid
         && request.resource.data.learnerFirebaseUid == learnerUid;
-      allow delete: if false;
+      allow delete: if request.auth != null && request.auth.uid == learnerUid;
     }
 
     match /user_profiles/{userId} {
@@ -101,7 +104,7 @@ service cloud.firestore {
         || resource.data.role == 'teacher'
       );
       allow create, update: if request.auth != null && request.auth.uid == userId;
-      allow delete: if false;
+      allow delete: if request.auth != null && request.auth.uid == userId;
     }
 
     match /learner_activity/{docId} {

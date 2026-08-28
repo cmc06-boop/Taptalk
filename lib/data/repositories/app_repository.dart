@@ -3817,6 +3817,23 @@ class AppRepository {
     return (rows.first['c'] as int?) ?? 0;
   }
 
+  /// Keep a local accept/reject when cloud is still the old pending row.
+  /// A real re-request after reject uses a newer [remoteRequestedAt].
+  bool _isStalePendingAfterDecision({
+    required ClassJoinRequest existing,
+    required ClassJoinRequestStatus remoteStatus,
+    required DateTime remoteRequestedAt,
+  }) {
+    if (existing.isPending) return false;
+    if (remoteStatus != ClassJoinRequestStatus.pending) return false;
+    if (remoteRequestedAt.isAfter(existing.requestedAt)) return false;
+    final respondedAt = existing.respondedAt;
+    if (respondedAt != null && remoteRequestedAt.isAfter(respondedAt)) {
+      return false;
+    }
+    return true;
+  }
+
   Future<void> mergeRemoteJoinRequestsForTeacher({
     required int teacherUserId,
     required List<RemoteClassJoinRequest> requests,
@@ -3874,8 +3891,11 @@ class AppRepository {
         );
         final remoteStatus = ClassJoinRequest.statusFromString(remote.status);
         if (existing != null &&
-            !existing.isPending &&
-            remoteStatus == ClassJoinRequestStatus.pending) {
+            _isStalePendingAfterDecision(
+              existing: existing,
+              remoteStatus: remoteStatus,
+              remoteRequestedAt: remote.requestedAt,
+            )) {
           continue;
         }
         await upsertJoinRequest(
@@ -4162,14 +4182,11 @@ class AppRepository {
       }
     }
 
-    // Only prune when cloud returned enrollment rows. An empty snapshot usually
-    // means sync is still in progress, not that every student left.
-    if (remoteKeys.isNotEmpty) {
-      await _pruneStaleEnrollmentsForTeacher(
-        teacherUserId: teacherUserId,
-        remoteEnrollmentKeys: remoteKeys,
-      );
-    }
+    // Cloud list is source of truth after a successful fetch, including empty.
+    await _pruneStaleEnrollmentsForTeacher(
+      teacherUserId: teacherUserId,
+      remoteEnrollmentKeys: remoteKeys,
+    );
   }
 
   Future<void> _pruneStaleEnrollmentsForTeacher({

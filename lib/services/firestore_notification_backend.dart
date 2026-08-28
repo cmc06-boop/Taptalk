@@ -771,16 +771,11 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     String parentFirebaseUid,
   ) async {
     if (!isAvailable || parentFirebaseUid.trim().isEmpty) return const [];
-    try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection(linkCollectionName)
-          .where('parentFirebaseUid', isEqualTo: parentFirebaseUid.trim())
-          .get();
-      return snapshot.docs.map(_parentChildLinkFromDocument).toList();
-    } catch (e, st) {
-      debugPrint('getParentChildLinksForParent failed: $e\n$st');
-      return const [];
-    }
+    final snapshot = await FirebaseFirestore.instance
+        .collection(linkCollectionName)
+        .where('parentFirebaseUid', isEqualTo: parentFirebaseUid.trim())
+        .get();
+    return snapshot.docs.map(_parentChildLinkFromDocument).toList();
   }
 
   @override
@@ -880,6 +875,44 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       }
     } catch (e, st) {
       debugPrint('updateLearnerReferencesOnCloud failed: $e\n$st');
+    }
+  }
+
+  @override
+  Future<void> purgeLearnerCloudPresence(String learnerFirebaseUid) async {
+    final uid = learnerFirebaseUid.trim();
+    if (!isAvailable || uid.isEmpty) return;
+    final db = FirebaseFirestore.instance;
+
+    Future<void> deleteWhere(
+      String collection,
+      String field,
+    ) async {
+      try {
+        final snapshot = await db
+            .collection(collection)
+            .where(field, isEqualTo: uid)
+            .get();
+        for (final doc in snapshot.docs) {
+          await doc.reference.delete();
+        }
+      } catch (e, st) {
+        debugPrint('purge $collection failed: $e\n$st');
+      }
+    }
+
+    await deleteWhere(linkCollectionName, 'learnerFirebaseUid');
+    await deleteWhere(enrollmentCollectionName, 'learnerFirebaseUid');
+    await deleteWhere(joinRequestCollectionName, 'learnerFirebaseUid');
+    try {
+      await db.collection(userProfileCollectionName).doc(uid).delete();
+    } catch (e, st) {
+      debugPrint('purge user_profiles failed: $e\n$st');
+    }
+    try {
+      await db.collection(learnerProfileCollectionName).doc(uid).delete();
+    } catch (e, st) {
+      debugPrint('purge learner_profiles failed: $e\n$st');
     }
   }
 
