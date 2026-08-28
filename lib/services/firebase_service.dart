@@ -153,19 +153,23 @@ class FirebaseService {
         ? Platform.environment['APP_CHECK_DEBUG_TOKEN']?.trim()
         : null;
 
-    // Windows only supports the debug provider; without a registered token,
-    // enforced App Check blocks Firestore even when Auth is valid.
-    if (isWindows &&
-        kDebugMode &&
-        (windowsDebugToken == null || windowsDebugToken.isEmpty)) {
-      if (!_appCheckSkipLogged) {
-        _appCheckSkipLogged = true;
-        debugPrint(
-          'Skipping Firebase App Check on Windows (no APP_CHECK_DEBUG_TOKEN). '
-          'Set APP_CHECK_DEBUG_TOKEN if cloud sync is blocked.',
-        );
+    // Debug builds: unregistered App Check tokens block Firestore writes
+    // (PERMISSION_DENIED) even when Firebase Auth is valid.
+    if (kDebugMode) {
+      final hasWindowsToken =
+          isWindows &&
+          windowsDebugToken != null &&
+          windowsDebugToken.isNotEmpty;
+      if (!hasWindowsToken) {
+        if (!_appCheckSkipLogged) {
+          _appCheckSkipLogged = true;
+          debugPrint(
+            'Skipping Firebase App Check in debug mode. '
+            'Set APP_CHECK_DEBUG_TOKEN on Windows if you need App Check locally.',
+          );
+        }
+        return;
       }
-      return;
     }
 
     try {

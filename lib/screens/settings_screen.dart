@@ -8,7 +8,6 @@ import '../core/theme/theme_tokens.dart';
 import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/language_dropdown_field.dart';
-import '../widgets/panel_card.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});

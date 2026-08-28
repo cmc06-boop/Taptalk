@@ -80,6 +80,8 @@ service cloud.firestore {
     match /teacher_classes_cloud/{classCode} {
       allow read: if request.auth != null;
 
+      // Stamp live Auth uid on the payload. Update is allowed when the NEW
+      // document belongs to the signed-in teacher (so a re-login can reclaim).
       allow create, update: if request.auth != null
         && request.resource.data.teacherFirebaseUid == request.auth.uid
         && request.resource.data.classCode is string

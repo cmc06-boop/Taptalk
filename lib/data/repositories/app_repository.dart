@@ -3817,23 +3817,6 @@ class AppRepository {
     return (rows.first['c'] as int?) ?? 0;
   }
 
-  /// Keep a local accept/reject when cloud is still the old pending row.
-  /// A real re-request after reject uses a newer [remoteRequestedAt].
-  bool _isStalePendingAfterDecision({
-    required ClassJoinRequest existing,
-    required ClassJoinRequestStatus remoteStatus,
-    required DateTime remoteRequestedAt,
-  }) {
-    if (existing.isPending) return false;
-    if (remoteStatus != ClassJoinRequestStatus.pending) return false;
-    if (remoteRequestedAt.isAfter(existing.requestedAt)) return false;
-    final respondedAt = existing.respondedAt;
-    if (respondedAt != null && remoteRequestedAt.isAfter(respondedAt)) {
-      return false;
-    }
-    return true;
-  }
-
   Future<void> mergeRemoteJoinRequestsForTeacher({
     required int teacherUserId,
     required List<RemoteClassJoinRequest> requests,
@@ -3885,19 +3868,7 @@ class AppRepository {
         if (learner == null) continue;
 
         final remoteId = remote.remoteId ?? '${code}_$learnerUid';
-        final existing = await findJoinRequest(
-          learnerUserId: learner.id,
-          classId: classId,
-        );
         final remoteStatus = ClassJoinRequest.statusFromString(remote.status);
-        if (existing != null &&
-            _isStalePendingAfterDecision(
-              existing: existing,
-              remoteStatus: remoteStatus,
-              remoteRequestedAt: remote.requestedAt,
-            )) {
-          continue;
-        }
         await upsertJoinRequest(
           learnerUserId: learner.id,
           classId: classId,
@@ -4081,6 +4052,12 @@ class AppRepository {
       final code = normalizeClassCode((row['class_code'] as String?) ?? '');
       if (!isValidClassCodeFormat(code)) continue;
       if (skipClassCodes.contains(code)) continue;
+      final createdAt = row['created_at'] as int? ?? 0;
+      // A class just created locally may not be in cloud yet. Don't delete it
+      // before the create write lands, or learners get "class not found".
+      if (DateTime.now().millisecondsSinceEpoch - createdAt < 5 * 60 * 1000) {
+        continue;
+      }
       if (!remoteClassCodes.contains(code)) {
         await deleteTeacherClass(
           teacherUserId: teacherUserId,
@@ -5832,7 +5809,7 @@ class AppRepository {
             'lesson_phrases',
             {
               'image_path': imagePath,
-              if (cloudKey != null) 'cloud_phrase_key': cloudKey,
+              'cloud_phrase_key': cloudKey,
             },
             where: 'id = ?',
             whereArgs: [existingId],

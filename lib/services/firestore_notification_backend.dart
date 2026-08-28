@@ -19,6 +19,14 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   @override
   bool get isAvailable => FirebaseService.instance.isAvailable;
 
+  /// Live signed-in Firebase uid; waits briefly for auth restore after startup.
+  Future<String?> _liveAuthUid() async {
+    var uid = FirebaseService.instance.currentUid?.trim() ?? '';
+    if (uid.isNotEmpty) return uid;
+    uid = (await FirebaseService.instance.waitForAuthUid())?.trim() ?? '';
+    return uid.isEmpty ? null : uid;
+  }
+
   @override
   Future<void> initialize() async {
     await FirebaseService.instance.initialize();
@@ -415,6 +423,10 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     }
     final docId = AppRepository.normalizeClassCode(content.classCode);
     final className = content.className.trim();
+    final teacherUid = await _liveAuthUid();
+    if (teacherUid == null) {
+      throw StateError('Class content upsert missing Firebase auth session');
+    }
     // Ensure class metadata exists before merging lessons (merge never deletes fields).
     await FirebaseFirestore.instance
         .collection(teacherClassCollectionName)
@@ -423,14 +435,15 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
           {
             'classCode': docId,
             'className': className,
-            'teacherFirebaseUid': content.teacherFirebaseUid.trim(),
+            'teacherFirebaseUid': teacherUid,
           },
           SetOptions(merge: true),
-        );
+        )
+        .timeout(const Duration(seconds: 8));
     final payload = <String, Object?>{
       'classCode': docId,
       'className': className,
-      'teacherFirebaseUid': content.teacherFirebaseUid.trim(),
+      'teacherFirebaseUid': teacherUid,
       'contentUpdatedAt': Timestamp.fromDate(content.updatedAt.toUtc()),
       'lessons': content.lessons.map((lesson) {
         return <String, Object?>{
@@ -454,7 +467,8 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     await FirebaseFirestore.instance
         .collection(teacherClassCollectionName)
         .doc(docId)
-        .set(payload, SetOptions(merge: true));
+        .set(payload, SetOptions(merge: true))
+        .timeout(const Duration(seconds: 8));
   }
 
   @override
@@ -546,18 +560,25 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
 
   @override
   Future<void> upsertTeacherClass(TeacherClassCloudEvent event) async {
-    if (!isAvailable ||
-        event.classCode.trim().isEmpty ||
-        event.teacherFirebaseUid.trim().isEmpty) {
+    if (!isAvailable || event.classCode.trim().isEmpty) {
       return;
     }
+    final authUid = await _liveAuthUid();
+    if (authUid == null) return;
     final docId = AppRepository.normalizeClassCode(event.classCode);
+    final className = event.className.trim().isEmpty
+        ? 'Class'
+        : event.className.trim();
     final payload = event.toFirestoreMap()
-      ..['createdAt'] = Timestamp.fromDate(event.createdAt.toUtc());
+      ..['createdAt'] = Timestamp.fromDate(event.createdAt.toUtc())
+      ..['classCode'] = docId
+      ..['className'] = className
+      ..['teacherFirebaseUid'] = authUid;
     await FirebaseFirestore.instance
         .collection(teacherClassCollectionName)
         .doc(docId)
-        .set(payload, SetOptions(merge: true));
+        .set(payload, SetOptions(merge: true))
+        .timeout(const Duration(seconds: 8));
   }
 
   @override
@@ -567,10 +588,11 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     final docRef = FirebaseFirestore.instance
         .collection(teacherClassCollectionName)
         .doc(docId);
-    final authUid = FirebaseService.instance.currentUid?.trim() ?? '';
+    final authUid = await _liveAuthUid();
+    if (authUid == null) return;
     try {
       final doc = await docRef.get();
-      if (doc.exists && authUid.isNotEmpty) {
+      if (doc.exists) {
         final owner = (doc.data()?['teacherFirebaseUid'] as String?)?.trim() ?? '';
         if (owner != authUid) {
           await docRef.set(

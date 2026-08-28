@@ -174,6 +174,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   bool _loggingOutDeletedFirebaseAccount = false;
   bool _loggedCloudAuthMissing = false;
   bool _monitoringSyncInFlight = false;
+  bool _teacherClassCloudSyncInFlight = false;
+  bool _deletedClassCloudPurgeAttempted = false;
   final Map<int, Future<void>> _monitoringHistoryPullChain = {};
   final Map<int, int> _childMonitoringRevision = {};
   final Map<int, int> _classContentRevision = {};
@@ -1476,6 +1478,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _teacherStudentCount = 0;
     _teacherClassStudentCounts.clear();
     _deletedClassCodes.clear();
+    _deletedClassCloudPurgeAttempted = false;
+    _teacherClassCloudSyncInFlight = false;
   }
 
   Future<void> _loadLearnerData({bool cloudSyncInBackground = false}) async {
@@ -1736,9 +1740,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       birthdate: (profile.birthdate?.trim().isNotEmpty ?? false)
           ? profile.birthdate
           : cloudSource.birthdate,
-      lastName: profile.lastName != null
-          ? profile.lastName
-          : cloudSource.lastName,
+      lastName: profile.lastName ?? cloudSource.lastName,
     );
   }
 
@@ -3759,9 +3761,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final storedUid = _user!.firebaseUid?.trim();
     if (storedUid != null && storedUid.isNotEmpty && storedUid != authUid) {
       debugPrint(
-        'Firebase UID mismatch (db=$storedUid, auth=$authUid); cloud sync skipped.',
+        'Firebase UID changed (db=$storedUid, auth=$authUid); relinking for cloud sync.',
       );
-      return null;
+      await _repo.linkFirebaseUid(_user!.id, authUid);
+      _user = _user!.copyWith(firebaseUid: authUid);
     }
 
     if (storedUid == null || storedUid.isEmpty) {
@@ -4072,15 +4075,16 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _refreshTeacherClassCounts() async {
     if (_user == null || !_user!.isTeacher) return;
-    final nextCounts = <int, int>{};
-    for (final teacherClass in _teacherClasses) {
-      nextCounts[teacherClass.id] = await _repo.countStudentsInClass(
-        teacherClass.id,
-      );
-    }
     _teacherClassStudentCounts
       ..clear()
-      ..addAll(nextCounts);
+      ..addEntries(
+        await Future.wait(
+          _teacherClasses.map((c) async {
+            final count = await _repo.countStudentsInClass(c.id);
+            return MapEntry(c.id, count);
+          }),
+        ),
+      );
     _teacherStudentCount = await _repo.countEnrolledStudentsForTeacher(
       _user!.id,
     );
@@ -4113,19 +4117,31 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (!_notificationSync.isCloudAvailable) return;
     if (await NetworkStatus.isOffline()) return;
     if (NetworkStatus.isCloudBlocked) return;
+    if (_teacherClassCloudSyncInFlight) return;
     if (!await _ensureCloudAuthSession()) return;
 
     final teacherFirebaseUid = await _resolveAccountFirebaseUid();
     if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) return;
 
+    _teacherClassCloudSyncInFlight = true;
     try {
       await _loadDeletedClassCodes();
       await _retryRemoveDeletedClassesFromCloud();
       await _purgeDeletedTeacherClasses();
+
+      final remoteClasses = await _notificationSync
+          .getTeacherClassesFromCloud(teacherFirebaseUid)
+          .timeout(const Duration(seconds: 12));
+      final remoteCodes = remoteClasses
+          .map((c) => AppRepository.normalizeClassCode(c.classCode))
+          .where(AppRepository.isValidClassCodeFormat)
+          .toSet();
+
       final localClasses = await _repo.getTeacherClasses(_user!.id);
       for (final teacherClass in localClasses) {
         final code = AppRepository.normalizeClassCode(teacherClass.code);
         if (_deletedClassCodes.contains(code)) continue;
+        if (remoteCodes.contains(code)) continue;
         await _notificationSync.syncTeacherClass(
           classCode: teacherClass.code,
           className: teacherClass.name,
@@ -4135,10 +4151,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           teacherName: _teacherNameForCloudSync(),
         );
       }
-
-      final remoteClasses = await _notificationSync
-          .getTeacherClassesFromCloud(teacherFirebaseUid)
-          .timeout(const Duration(seconds: 12));
       await _repo.mergeRemoteTeacherClasses(
         teacherUserId: _user!.id,
         remoteClasses: remoteClasses,
@@ -4182,6 +4194,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       }
     } catch (e, st) {
       debugPrint('Teacher class cloud sync failed: $e\n$st');
+    } finally {
+      _teacherClassCloudSyncInFlight = false;
     }
   }
 
@@ -4191,18 +4205,26 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }) async {
     if (!CloudScope.syncMonitoring) return;
     if (_user == null || !_user!.isTeacher) return;
-    if (!await _ensureCloudAuthSession()) return;
-    final teacherFirebaseUid = await _resolveAccountFirebaseUid();
-    if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) return;
-
-    await _notificationSync.syncTeacherClass(
-      classCode: classCode,
-      className: className,
-      teacherFirebaseUid: teacherFirebaseUid,
-      teacherUserId: _user!.id,
-      createdAt: DateTime.now(),
-      teacherName: _teacherNameForCloudSync(),
-    );
+    var uid = await _resolveAccountFirebaseUid();
+    if (uid == null || uid.isEmpty) {
+      if (!await _ensureCloudAuthSession()) return;
+      uid = await _resolveAccountFirebaseUid();
+    }
+    if (uid == null || uid.isEmpty) return;
+    try {
+      await _notificationSync
+          .syncTeacherClass(
+            classCode: classCode,
+            className: className,
+            teacherFirebaseUid: uid,
+            teacherUserId: _user!.id,
+            createdAt: DateTime.now(),
+            teacherName: _teacherNameForCloudSync(),
+          )
+          .timeout(const Duration(seconds: 8));
+    } catch (e, st) {
+      debugPrint('Push teacher class to cloud failed: $e\n$st');
+    }
   }
 
   String _teacherNameForCloudSync() {
@@ -4454,13 +4476,25 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
     if (!_notificationSync.isCloudAvailable) return;
+    if (_deletedClassCloudPurgeAttempted) return;
+    _deletedClassCloudPurgeAttempted = true;
+
     for (final code in _deletedClassCodes.toList()) {
       try {
         await _notificationSync
             .removeTeacherClass(classCode: code)
             .timeout(const Duration(seconds: 8));
+        _deletedClassCodes.remove(code);
+        await _persistDeletedClassCodes();
       } catch (e, st) {
         debugPrint('Retry remove deleted class $code failed: $e\n$st');
+        final msg = e.toString().toLowerCase();
+        if (msg.contains('permission-denied') ||
+            msg.contains('permission_denied') ||
+            e is TimeoutException) {
+          _deletedClassCodes.remove(code);
+          await _persistDeletedClassCodes();
+        }
       }
     }
   }
@@ -4476,11 +4510,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (result.error == 'empty') {
       return AppStrings.enterClassName(_language);
     }
-    await _pushTeacherClassToCloud(
+    unawaited(_pushTeacherClassToCloud(
       classCode: result.code,
       className: result.name,
-    );
-    await refreshTeacherClasses();
+    ));
+    await _loadTeacherClasses();
+    await _refreshTeacherClassCounts();
+    notifyListeners();
     return null;
   }
 
@@ -5300,19 +5336,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         continue;
       }
       remoteClassCodes.add(code);
-      if (classRow == null) {
-        classRow = await _repo.importRemoteTeacherClassForEnrollment(
-          remoteClass,
-        );
-      }
+      classRow ??= await _repo.importRemoteTeacherClassForEnrollment(
+        remoteClass,
+      );
       if (classRow == null) continue;
 
       final teacherId = classRow['teacher_user_id'] as int?;
       if (teacherId != null) {
         try {
-          remoteClass ??= await _notificationSync
-              .getTeacherClassByCodeFromCloud(code)
-              .timeout(const Duration(seconds: 8));
           await _applyCloudTeacherDisplayName(
             teacherUserId: teacherId,
             remoteClass: remoteClass,
@@ -5497,13 +5528,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final classId = classRow['id'] as int;
     if (await _repo.isLearnerEnrolled(_user!.id, classId)) {
       return AppStrings.classAlreadyEnrolled(_language);
-    }
-    final existingRequest = await _repo.findJoinRequest(
-      learnerUserId: _user!.id,
-      classId: classId,
-    );
-    if (existingRequest != null && existingRequest.isPending) {
-      return AppStrings.joinRequestAlreadyPending(_language);
     }
     final learnerFirebaseUid =
         (FirebaseService.instance.currentUid ?? _user!.firebaseUid)
