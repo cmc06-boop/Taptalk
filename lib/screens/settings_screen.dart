@@ -5,9 +5,11 @@ import 'package:provider/provider.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
+import '../core/utils/auth_validation.dart';
 import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/language_dropdown_field.dart';
+import '../widgets/switch_account_sheet.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -99,6 +101,79 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     value: lang,
                     label: AppStrings.language(lang),
                     onChanged: app.setLanguage,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: theme.bgMid.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    AppStrings.accountsSection(lang),
+                    style: GoogleFonts.poppins(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: theme.textMain,
+                    ),
+                  ),
+                  if (app.user != null) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      AppStrings.currentAccount(lang),
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: theme.textMain.withValues(alpha: 0.62),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      app.user!.fullName,
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: theme.textMain,
+                      ),
+                    ),
+                    Text(
+                      '${AppStrings.accountRoleLabel(lang, app.user!.role)} · ${AuthValidation.normalizeEmail(app.user!.email)}',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        color: theme.textMain.withValues(alpha: 0.68),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: AppSpacing.md),
+                  OutlinedButton.icon(
+                    onPressed: () => SwitchAccountSheet.show(context),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: theme.bgAccent,
+                      side: BorderSide(
+                        color: theme.bgAccent.withValues(alpha: 0.45),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: AppSpacing.sm,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    icon: const Icon(Icons.switch_account_outlined, size: 20),
+                    label: Text(
+                      AppStrings.switchAccount(lang),
+                      style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                    ),
                   ),
                 ],
               ),

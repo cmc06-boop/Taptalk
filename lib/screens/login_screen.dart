@@ -24,6 +24,19 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _error;
   bool _busy = false;
   bool _obscurePassword = true;
+  bool _appliedLoginPrefill = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_appliedLoginPrefill) return;
+    final prefill = context.read<AppState>().loginPrefillEmail;
+    if (prefill != null && prefill.isNotEmpty) {
+      _email.text = prefill;
+      context.read<AppState>().clearLoginPrefill();
+    }
+    _appliedLoginPrefill = true;
+  }
 
   @override
   void dispose() {

@@ -6,6 +6,7 @@ import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../providers/app_state.dart';
+import 'switch_account_sheet.dart';
 
 Widget _settingsDrawerItem({
   required TapTalkThemeToken theme,
@@ -209,6 +210,12 @@ class SourceDrawer extends StatelessWidget {
                             ),
                           ],
                           const Spacer(),
+                          _DrawerItem(
+                            theme: theme,
+                            icon: Icons.switch_account_outlined,
+                            label: AppStrings.switchAccount(lang),
+                            onTap: () => SwitchAccountSheet.show(context),
+                          ),
                           _DrawerItem(
                             theme: theme,
                             icon: Icons.logout_rounded,

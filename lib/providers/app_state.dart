@@ -38,6 +38,7 @@ import '../data/models/phrase_model.dart';
 import '../data/models/phrase_usage_stat.dart';
 import '../data/models/class_lesson.dart';
 import '../data/models/lesson_phrase.dart';
+import '../data/models/saved_account.dart';
 import '../data/models/sms_alert_result.dart';
 import '../data/models/teacher_alert_result.dart';
 import '../data/models/teacher_class_student.dart';
@@ -50,6 +51,7 @@ import '../services/firestore_notification_backend.dart';
 import '../services/notification_sync_service.dart';
 import '../services/device_sms_service.dart';
 import '../services/network_status.dart';
+import '../services/saved_accounts_store.dart';
 import '../services/stt_service.dart';
 import '../services/tts_service.dart';
 
@@ -99,6 +101,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   final AppRepository _repo = AppRepository(DatabaseHelper.instance);
+  final SavedAccountsStore _savedAccountsStore = SavedAccountsStore();
   final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
   late final NavigatorObserver navigatorObserver = _AppNavigatorObserver(this);
   AppScreenBuilder? _screenBuilder;
@@ -121,6 +124,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   String _selectedCategoryKey = 'emotions';
   String? _selectedSubcategoryKey;
   bool _drawerOpen = false;
+  String? _loginPrefillEmail;
+  List<SavedAccount> _savedAccounts = [];
   bool _routeChanging = false;
   DateTime? _lastSubcategoryBackAt;
   bool _isSpeaking = false;
@@ -334,6 +339,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   bool get drawerOpen => _drawerOpen;
+  String? get loginPrefillEmail => _loginPrefillEmail;
+  List<SavedAccount> get savedAccounts => List.unmodifiable(_savedAccounts);
   bool get isSpeaking => _isSpeaking;
   String get speakingText => _speakingText;
   int? get speakingPhraseId => _speakingPhraseId;
@@ -710,6 +717,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       }
       _loading = false;
       notifyListeners();
+      unawaited(refreshSavedAccounts());
+      if (_user != null) {
+        unawaited(_recordCurrentAccount());
+      }
       unawaited(_initCloudServicesInBackground());
     }
   }
@@ -2379,6 +2390,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       debugPrint('Post-login data load failed (session is saved): $e\n$st');
     }
 
+    await _recordCurrentAccount();
     notifyListeners();
     return null;
   }
@@ -2573,6 +2585,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       debugPrint('Post-register data load failed (account is saved): $e\n$st');
     }
 
+    await _recordCurrentAccount();
     return null;
   }
 
@@ -2651,7 +2664,60 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     return null;
   }
 
-  Future<void> logout() async {
+  Future<void> logout({bool keepSavedAccounts = true}) async {
+    await _endActiveSession();
+    if (!keepSavedAccounts) {
+      await _savedAccountsStore.clear();
+      _savedAccounts = [];
+    }
+    await _goToRouteReplacingStack(AppRoute.welcome);
+    _drawerOpen = false;
+    notifyListeners();
+  }
+
+  Future<void> refreshSavedAccounts() async {
+    _savedAccounts = await _savedAccountsStore.load();
+  }
+
+  void clearLoginPrefill() {
+    _loginPrefillEmail = null;
+  }
+
+  Future<void> prepareSwitchToAccount(String email) async {
+    final normalized = AuthValidation.normalizeEmail(email);
+    if (normalized.isEmpty) return;
+    _drawerOpen = false;
+    await _endActiveSession();
+    _loginPrefillEmail = normalized;
+    await _goToRouteReplacingStack(AppRoute.login);
+    notifyListeners();
+  }
+
+  Future<void> prepareAddAccount() async {
+    _drawerOpen = false;
+    await _endActiveSession();
+    _loginPrefillEmail = null;
+    await _goToRouteReplacingStack(AppRoute.login);
+    notifyListeners();
+  }
+
+  Future<void> _recordCurrentAccount() async {
+    if (_user == null) return;
+    final email = AuthValidation.normalizeEmail(_user!.email);
+    if (email.isEmpty || AppRepository.isStubEmail(_user!.email)) return;
+    await _savedAccountsStore.upsert(
+      SavedAccount(
+        email: email,
+        displayName: _user!.fullName.trim(),
+        role: _user!.role,
+        lastUsedAtMs: DateTime.now().millisecondsSinceEpoch,
+        firebaseUid: _user!.firebaseUid,
+      ),
+    );
+    await refreshSavedAccounts();
+  }
+
+  Future<void> _endActiveSession() async {
     _pendingActivitySyncTimer?.cancel();
     _pendingActivitySyncTimer = null;
     _liveMonitoredLearnerIds.clear();
@@ -2685,9 +2751,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _resetAccountSession();
     _theme = TapTalkThemes.appDefault;
     _resetSpeechTracking();
-    await _goToRouteReplacingStack(AppRoute.welcome);
-    _drawerOpen = false;
-    notifyListeners();
   }
 
   Future<void> completeLanguageSelection(AppLanguage lang) async {

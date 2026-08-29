@@ -855,6 +855,42 @@ abstract final class AppStrings {
   static String logout(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Mag-logout' : 'Logout';
 
+  static String switchAccount(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Magpalit ng account' : 'Switch account';
+
+  static String switchAccountTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Magpalit ng account' : 'Switch account';
+
+  static String switchAccountSubtitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Pipiliin ang account at mag-login muli gamit ang password.'
+          : 'Choose an account and sign in again with your password.';
+
+  static String switchAccountEmpty(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Wala pang ibang naka-save na account.'
+          : 'No other saved accounts yet.';
+
+  static String addAnotherAccount(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Magdagdag ng account'
+          : 'Add another account';
+
+  static String accountsSection(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Mga Account' : 'Accounts';
+
+  static String currentAccount(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Kasalukuyang account' : 'Current account';
+
+  static String accountRoleLabel(AppLanguage lang, String role) =>
+      switch (role) {
+        'learner' =>
+          lang == AppLanguage.filipino ? 'Mag-aaral' : 'Learner',
+        'parent' => lang == AppLanguage.filipino ? 'Magulang' : 'Parent',
+        'teacher' => lang == AppLanguage.filipino ? 'Guro' : 'Teacher',
+        _ => role,
+      };
+
   static String speak(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Magsalita' : 'Speak';
 
