@@ -288,7 +288,7 @@ class _LessonProgressCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tapped = entry.practicedPhrases;
-    final total = lesson.phraseCount > 0 ? lesson.phraseCount : 1;
+    final total = lesson.phraseCount;
     final displayTapped = tapped > total ? total : tapped;
     final percent =
         total > 0 ? ((displayTapped / total) * 100).round().clamp(0, 100) : 0;

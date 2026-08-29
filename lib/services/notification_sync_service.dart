@@ -444,6 +444,26 @@ class NotificationSyncService {
     await _cloud.removeTeacherClass(classCode: classCode);
   }
 
+  Future<void> addTeacherDeletedClassCode({
+    required String teacherFirebaseUid,
+    required String classCode,
+  }) async {
+    if (!_cloud.isAvailable) return;
+    await _cloud.addTeacherDeletedClassCode(
+      teacherFirebaseUid: teacherFirebaseUid,
+      classCode: classCode,
+    );
+  }
+
+  Future<List<String>> getTeacherDeletedClassCodes(
+    String teacherFirebaseUid,
+  ) async {
+    if (!_cloud.isAvailable || teacherFirebaseUid.trim().isEmpty) {
+      return const [];
+    }
+    return _cloud.getTeacherDeletedClassCodes(teacherFirebaseUid);
+  }
+
   Future<void> removeClassEnrollmentsForClass({required String classCode}) async {
     if (!_cloud.isAvailable || classCode.trim().isEmpty) return;
     await _cloud.removeClassEnrollmentsForClass(classCode: classCode);

@@ -4228,6 +4228,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _teacherClassCloudSyncInFlight = true;
     try {
       await _loadDeletedClassCodes();
+      await _mergeDeletedClassCodesFromCloud(teacherFirebaseUid);
       await _retryRemoveDeletedClassesFromCloud();
       await _purgeDeletedTeacherClasses();
 
@@ -4676,6 +4677,44 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
+  Future<void> _mergeDeletedClassCodesFromCloud(String teacherFirebaseUid) async {
+    if (_user == null || !_user!.isTeacher) return;
+    if (!_notificationSync.isCloudAvailable) return;
+    try {
+      final cloudCodes = await _notificationSync
+          .getTeacherDeletedClassCodes(teacherFirebaseUid)
+          .timeout(const Duration(seconds: 8));
+      var changed = false;
+      for (final code in cloudCodes) {
+        if (_deletedClassCodes.add(code)) {
+          changed = true;
+        }
+      }
+      if (changed) {
+        await _persistDeletedClassCodes();
+      }
+    } catch (e, st) {
+      debugPrint('Merge deleted class codes from cloud failed: $e\n$st');
+    }
+  }
+
+  Future<void> _recordDeletedClassCodeOnCloud(String classCode) async {
+    if (!CloudScope.syncMonitoring) return;
+    if (_user == null || !_user!.isTeacher) return;
+    final uid = await _resolveAccountFirebaseUid();
+    if (uid == null || uid.isEmpty) return;
+    try {
+      await _notificationSync
+          .addTeacherDeletedClassCode(
+            teacherFirebaseUid: uid,
+            classCode: classCode,
+          )
+          .timeout(const Duration(seconds: 8));
+    } catch (e, st) {
+      debugPrint('Record deleted class code on cloud failed: $e\n$st');
+    }
+  }
+
   Future<void> _purgeDeletedTeacherClasses() async {
     if (_user == null || !_user!.isTeacher || _deletedClassCodes.isEmpty) {
       return;
@@ -4752,8 +4791,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     );
     if (!ok) return AppStrings.classNotFound(_language);
     if (classCode != null && classCode.isNotEmpty) {
-      _deletedClassCodes.add(AppRepository.normalizeClassCode(classCode));
+      final normalized = AppRepository.normalizeClassCode(classCode);
+      _deletedClassCodes.add(normalized);
       await _persistDeletedClassCodes();
+      unawaited(_recordDeletedClassCodeOnCloud(classCode));
       try {
         await _notificationSync
             .removeTeacherClass(classCode: classCode)

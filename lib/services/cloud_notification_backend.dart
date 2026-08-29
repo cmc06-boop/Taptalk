@@ -676,6 +676,13 @@ abstract class CloudNotificationBackend {
 
   Future<void> removeTeacherClass({required String classCode});
 
+  Future<void> addTeacherDeletedClassCode({
+    required String teacherFirebaseUid,
+    required String classCode,
+  });
+
+  Future<List<String>> getTeacherDeletedClassCodes(String teacherFirebaseUid);
+
   Future<void> removeClassEnrollmentsForClass({required String classCode});
 
   Future<List<RemoteTeacherClass>> getTeacherClassesForTeacher(
@@ -907,6 +914,18 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
 
   @override
   Future<void> removeTeacherClass({required String classCode}) async {}
+
+  @override
+  Future<void> addTeacherDeletedClassCode({
+    required String teacherFirebaseUid,
+    required String classCode,
+  }) async {}
+
+  @override
+  Future<List<String>> getTeacherDeletedClassCodes(
+    String teacherFirebaseUid,
+  ) async =>
+      const [];
 
   @override
   Future<void> removeClassEnrollmentsForClass({required String classCode}) async {}

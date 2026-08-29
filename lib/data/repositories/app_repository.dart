@@ -4824,7 +4824,6 @@ class AppRepository {
     if (items.isEmpty) return;
     final db = await _dbHelper.database;
     for (final item in items) {
-      if (item.teacherUserId != teacherUserId) continue;
       final createdAtMs = item.createdAt.millisecondsSinceEpoch;
       final existing = await db.query(
         'parent_notifications',

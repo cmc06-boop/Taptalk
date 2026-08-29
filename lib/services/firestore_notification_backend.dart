@@ -1454,10 +1454,7 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
         .collection(collectionName)
         .where('teacherFirebaseUid', isEqualTo: teacherFirebaseUid.trim())
         .get();
-    final items = snapshot.docs
-        .map(_teacherAlertFromDocument)
-        .where((item) => item.teacherUserId == teacherUserId)
-        .toList();
+    final items = snapshot.docs.map(_teacherAlertFromDocument).toList();
     items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return items;
   }
@@ -1477,13 +1474,61 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
         .where('teacherFirebaseUid', isEqualTo: teacherFirebaseUid.trim())
         .snapshots()
         .map((snapshot) {
-      final items = snapshot.docs
-          .map(_teacherAlertFromDocument)
-          .where((item) => item.teacherUserId == teacherUserId)
-          .toList();
+      final items = snapshot.docs.map(_teacherAlertFromDocument).toList();
       items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
       return items;
     });
+  }
+
+  @override
+  Future<void> addTeacherDeletedClassCode({
+    required String teacherFirebaseUid,
+    required String classCode,
+  }) async {
+    if (!isAvailable) return;
+    final uid = teacherFirebaseUid.trim();
+    final code = AppRepository.normalizeClassCode(classCode);
+    if (uid.isEmpty || !AppRepository.isValidClassCodeFormat(code)) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection(userProfileCollectionName)
+          .doc(uid)
+          .set(
+        {
+          'deletedTeacherClassCodes': FieldValue.arrayUnion([code]),
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+    } catch (e, st) {
+      debugPrint('addTeacherDeletedClassCode failed: $e\n$st');
+    }
+  }
+
+  @override
+  Future<List<String>> getTeacherDeletedClassCodes(
+    String teacherFirebaseUid,
+  ) async {
+    if (!isAvailable) return const [];
+    final uid = teacherFirebaseUid.trim();
+    if (uid.isEmpty) return const [];
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection(userProfileCollectionName)
+          .doc(uid)
+          .get();
+      final raw = doc.data()?['deletedTeacherClassCodes'];
+      if (raw is! List) return const [];
+      return raw
+          .whereType<String>()
+          .map(AppRepository.normalizeClassCode)
+          .where(AppRepository.isValidClassCodeFormat)
+          .toSet()
+          .toList();
+    } catch (e, st) {
+      debugPrint('getTeacherDeletedClassCodes failed: $e\n$st');
+      return const [];
+    }
   }
 
   DateTime _readTimestamp(Object? raw) {
