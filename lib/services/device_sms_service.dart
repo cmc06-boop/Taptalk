@@ -14,19 +14,38 @@ class DeviceSmsService {
   static const _channel = MethodChannel('com.taptalk/direct_sms');
 
   String? normalizePhoneNumber(String raw) {
-    final cleaned = raw.replaceAll(RegExp(r'[^\d+]'), '').trim();
+    var cleaned = raw.replaceAll(RegExp(r'[^\d+]'), '').trim();
     if (cleaned.isEmpty) return null;
     if (cleaned.startsWith('+')) {
-      if (RegExp(r'^\+\d{10,15}$').hasMatch(cleaned)) return cleaned;
-      return null;
+      cleaned = '+${cleaned.substring(1).replaceAll('+', '')}';
     }
+
+    // +6309XXXXXXXXX → +639XXXXXXXXX
+    if (RegExp(r'^\+630\d{10}$').hasMatch(cleaned)) {
+      return '+63${cleaned.substring(4)}';
+    }
+    // +639XXXXXXXXX (PH mobile E.164)
+    if (RegExp(r'^\+63\d{10}$').hasMatch(cleaned)) {
+      return cleaned;
+    }
+    // Other valid E.164 (no leading 0 after +)
+    if (RegExp(r'^\+[1-9]\d{9,14}$').hasMatch(cleaned)) {
+      return cleaned;
+    }
+    // 09XXXXXXXXX
+    if (RegExp(r'^09\d{9}$').hasMatch(cleaned)) {
+      return '+63${cleaned.substring(1)}';
+    }
+    // 0XXXXXXXXXX (11-digit local, including 09…)
     if (RegExp(r'^0\d{10}$').hasMatch(cleaned)) {
       return '+63${cleaned.substring(1)}';
     }
-    if (RegExp(r'^63\d{10}$').hasMatch(cleaned)) {
-      return '+$cleaned';
+    // 9XXXXXXXXX — PH mobile without leading 0
+    if (RegExp(r'^9\d{9}$').hasMatch(cleaned)) {
+      return '+63$cleaned';
     }
-    if (RegExp(r'^\d{10,15}$').hasMatch(cleaned)) {
+    // 639XXXXXXXXX
+    if (RegExp(r'^63\d{10}$').hasMatch(cleaned)) {
       return '+$cleaned';
     }
     return null;

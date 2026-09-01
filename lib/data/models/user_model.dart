@@ -7,6 +7,7 @@ class UserModel {
     this.themeKey,
     this.passwordHash,
     this.firebaseUid,
+    this.phoneNumber,
   });
 
   final int id;
@@ -16,9 +17,15 @@ class UserModel {
   final String? themeKey;
   final String? passwordHash;
   final String? firebaseUid;
+  final String? phoneNumber;
 
   bool get isOnlineAccount =>
       firebaseUid != null && firebaseUid!.trim().isNotEmpty;
+
+  bool get isPhoneAccount => isStubEmail(email);
+
+  static bool isStubEmail(String email) =>
+      email.trim().toLowerCase().endsWith('@taptalk.stub');
 
   bool get isLearner => role == 'learner';
   bool get isParent => role == 'parent';
@@ -33,6 +40,7 @@ class UserModel {
     String? themeKey,
     String? passwordHash,
     String? firebaseUid,
+    String? phoneNumber,
   }) {
     return UserModel(
       id: id ?? this.id,
@@ -42,6 +50,7 @@ class UserModel {
       themeKey: themeKey ?? this.themeKey,
       passwordHash: passwordHash ?? this.passwordHash,
       firebaseUid: firebaseUid ?? this.firebaseUid,
+      phoneNumber: phoneNumber ?? this.phoneNumber,
     );
   }
 
@@ -53,6 +62,7 @@ class UserModel {
         'theme': themeKey,
         'password_hash': passwordHash,
         'firebase_uid': firebaseUid,
+        'phone_number': phoneNumber,
       };
 
   factory UserModel.fromMap(Map<String, Object?> map) {
@@ -64,6 +74,8 @@ class UserModel {
       themeKey: map['theme'] as String?,
       passwordHash: map['password_hash'] as String?,
       firebaseUid: map['firebase_uid'] as String?,
+      phoneNumber: map['phone_number'] as String?,
     );
   }
 }
+

@@ -119,13 +119,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    AppStrings.accountsSection(lang),
-                    style: GoogleFonts.poppins(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
-                      color: theme.textMain,
-                    ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          AppStrings.accountsSection(lang),
+                          style: GoogleFonts.poppins(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            color: theme.textMain,
+                          ),
+                        ),
+                      ),
+                      Material(
+                        color: theme.textMain.withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(8),
+                        child: InkWell(
+                          onTap: app.logout,
+                          borderRadius: BorderRadius.circular(8),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 5,
+                            ),
+                            child: Text(
+                              AppStrings.logout(lang),
+                              style: GoogleFonts.poppins(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: theme.textMain.withValues(alpha: 0.72),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   if (app.user != null) ...[
                     const SizedBox(height: AppSpacing.sm),
@@ -222,32 +251,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: _ThemePickerGrid(
               selectedKey: theme.key,
               onSelect: app.setTheme,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Center(
-            child: TextButton.icon(
-              onPressed: app.logout,
-              style: TextButton.styleFrom(
-                foregroundColor: theme.textMain,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.lg,
-                  vertical: AppSpacing.sm,
-                ),
-              ),
-              icon: Icon(
-                Icons.logout_rounded,
-                size: 20,
-                color: theme.textMain,
-              ),
-              label: Text(
-                AppStrings.logout(lang),
-                style: GoogleFonts.poppins(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                  color: theme.textMain,
-                ),
-              ),
             ),
           ),
         ],

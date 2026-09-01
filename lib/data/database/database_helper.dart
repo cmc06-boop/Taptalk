@@ -30,7 +30,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 21,
+      version: 22,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE users (
@@ -41,7 +41,8 @@ class DatabaseHelper {
             role TEXT NOT NULL,
             theme TEXT,
             settings_json TEXT,
-            firebase_uid TEXT UNIQUE
+            firebase_uid TEXT UNIQUE,
+            phone_number TEXT
           )
         ''');
         await db.execute('''
@@ -232,6 +233,11 @@ class DatabaseHelper {
           await _ensureCategoryParentColumn(db);
           await _seedSubcategoriesForAllUsers(db);
           await _migrateFoodDrinkPhrasesToSubcategories(db);
+        }
+        if (oldVersion < 22) {
+          await db.execute(
+            'ALTER TABLE users ADD COLUMN phone_number TEXT',
+          );
         }
       },
     );

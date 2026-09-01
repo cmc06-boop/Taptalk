@@ -2,10 +2,14 @@ import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:math';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 
 import '../data/models/firebase_password_reset_result.dart';
 import '../firebase_options.dart';
@@ -59,6 +63,180 @@ class FirebaseService {
   String? get currentUserEmail => auth?.currentUser?.email;
 
   String? get currentUserDisplayName => auth?.currentUser?.displayName;
+
+  static const String _userSecurityCollectionName = 'user_security';
+
+  Future<String> _sessionFingerprint() async {
+    final prefs = await SharedPreferences.getInstance();
+    final id = prefs.getString('device_session_fingerprint');
+    if (id != null && id.isNotEmpty) return id;
+    final generated = const Uuid().v4();
+    await prefs.setString('device_session_fingerprint', generated);
+    return generated;
+  }
+
+  Future<String> _localSessionId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final sessionId = prefs.getString('active_session_id');
+    if (sessionId != null && sessionId.isNotEmpty) return sessionId;
+    final generated = const Uuid().v4();
+    await prefs.setString('active_session_id', generated);
+    return generated;
+  }
+
+  Future<void> _persistSessionState(String uid, String sessionId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('active_session_id', sessionId);
+    await prefs.setString('active_session_uid', uid);
+  }
+
+  Future<void> _clearSessionState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('active_session_id');
+    await prefs.remove('active_session_uid');
+  }
+
+  Future<void> _markSessionMismatch(String uid, String localSessionId) async {
+    final db = FirebaseFirestore.instance;
+    final ref = db.collection(_userSecurityCollectionName).doc(uid);
+    final previous = (await ref.get()).data();
+    final previousDevice = (previous?['currentDeviceId'] as String?)?.trim() ?? '';
+    final previousSession = (previous?['currentSessionId'] as String?)?.trim() ?? '';
+
+    await ref.set({
+      'uid': uid,
+      'currentSessionId': localSessionId,
+      'currentDeviceId': await _sessionFingerprint(),
+      'previousSessionId': previousSession,
+      'previousDeviceId': previousDevice,
+      'deviceChangeAt': FieldValue.serverTimestamp(),
+      'lastSeenAt': FieldValue.serverTimestamp(),
+      'lastMismatchAt': FieldValue.serverTimestamp(),
+      'mismatchCount': FieldValue.increment(1),
+      'fraudRisk': 'session_mismatch',
+      'suspiciousLogin': true,
+    }, SetOptions(merge: true));
+  }
+
+  Future<bool> validateCurrentSessionForThisDevice({String? uid}) async {
+    if (!_initialized) return true;
+    final firebaseAuth = auth;
+    final currentUid = uid ?? firebaseAuth?.currentUser?.uid;
+    if (currentUid == null || currentUid.isEmpty) return true;
+
+    final prefs = await SharedPreferences.getInstance();
+    final localSessionId = prefs.getString('active_session_id');
+    final deviceId = await _sessionFingerprint();
+    final ref = FirebaseFirestore.instance
+        .collection(_userSecurityCollectionName)
+        .doc(currentUid);
+    final snapshot = await ref.get();
+    final data = snapshot.data();
+    final serverSessionId = (data?['currentSessionId'] as String?)?.trim() ?? '';
+    final serverDeviceId = (data?['currentDeviceId'] as String?)?.trim() ?? '';
+
+    if (serverSessionId.isEmpty) {
+      final newSessionId = await _localSessionId();
+      await ref.set({
+        'uid': currentUid,
+        'currentSessionId': newSessionId,
+        'currentDeviceId': deviceId,
+        'lastSeenAt': FieldValue.serverTimestamp(),
+        'createdAt': FieldValue.serverTimestamp(),
+        'fraudRisk': 'none',
+      }, SetOptions(merge: true));
+      await _persistSessionState(currentUid, newSessionId);
+      return true;
+    }
+
+    if (localSessionId == null || localSessionId.isEmpty) {
+      final generated = await _localSessionId();
+      await _persistSessionState(currentUid, generated);
+      if (serverSessionId != generated) {
+        await _markSessionMismatch(currentUid, generated);
+        return false;
+      }
+    }
+
+    if (serverSessionId != localSessionId) {
+      await _markSessionMismatch(currentUid, localSessionId ?? await _localSessionId());
+      return false;
+    }
+
+    if (serverDeviceId.isNotEmpty && serverDeviceId != deviceId) {
+      await ref.set({
+        'uid': currentUid,
+        'currentDeviceId': deviceId,
+        'lastDeviceMismatchAt': FieldValue.serverTimestamp(),
+        'fraudRisk': 'device_change',
+      }, SetOptions(merge: true));
+      return false;
+    }
+
+    await ref.set({
+      'uid': currentUid,
+      'currentSessionId': serverSessionId,
+      'currentDeviceId': deviceId,
+      'lastSeenAt': FieldValue.serverTimestamp(),
+      'fraudRisk': 'none',
+    }, SetOptions(merge: true));
+
+    return true;
+  }
+
+  Future<void> registerActiveSessionForCurrentUser() async {
+    if (!_initialized) return;
+    final uid = auth?.currentUser?.uid;
+    if (uid == null || uid.isEmpty) return;
+
+    final sessionId = const Uuid().v4();
+    final deviceId = await _sessionFingerprint();
+    final ref = FirebaseFirestore.instance
+        .collection(_userSecurityCollectionName)
+        .doc(uid);
+
+    final previous = (await ref.get()).data();
+    await ref.set({
+      'uid': uid,
+      'currentSessionId': sessionId,
+      'currentDeviceId': deviceId,
+      'previousSessionId': (previous?['currentSessionId'] as String?)?.trim() ?? '',
+      'previousDeviceId': (previous?['currentDeviceId'] as String?)?.trim() ?? '',
+      'lastSeenAt': FieldValue.serverTimestamp(),
+      'createdAt': FieldValue.serverTimestamp(),
+      'fraudRisk': 'none',
+    }, SetOptions(merge: true));
+
+    await _persistSessionState(uid, sessionId);
+  }
+
+  Future<void> _tryRegisterActiveSession() async {
+    try {
+      await registerActiveSessionForCurrentUser()
+          .timeout(const Duration(seconds: 8));
+    } catch (e, st) {
+      debugPrint('Session register after auth failed: $e\n$st');
+    }
+  }
+
+  Future<void> invalidateCurrentUserSession({String? reason}) async {
+    if (!_initialized) return;
+    final uid = auth?.currentUser?.uid;
+    if (uid == null || uid.isEmpty) return;
+    final ref = FirebaseFirestore.instance
+        .collection(_userSecurityCollectionName)
+        .doc(uid);
+    await ref.set({
+      'uid': uid,
+      'currentSessionId': '',
+      'currentDeviceId': '',
+      'lastSeenAt': FieldValue.serverTimestamp(),
+      'revokedAt': FieldValue.serverTimestamp(),
+      'revokedReason': reason ?? 'manual',
+      'fraudRisk': reason == null ? 'none' : 'forced_revoke',
+    }, SetOptions(merge: true));
+    await _clearSessionState();
+  }
 
   Future<void> updateDisplayName(String displayName) async {
     if (!_initialized) return;
@@ -201,7 +379,7 @@ class FirebaseService {
     _clearAuthError();
     final firebaseAuth = auth;
     if (firebaseAuth == null) return null;
-    return _withAuthTimeout<String?>(() async {
+    final uid = await _withAuthTimeout<String?>(() async {
       try {
         final credential = await firebaseAuth.signInWithEmailAndPassword(
           email: email.trim().toLowerCase(),
@@ -218,6 +396,10 @@ class FirebaseService {
         return null;
       }
     }, label: 'sign-in');
+    if (uid != null && uid.isNotEmpty) {
+      await _tryRegisterActiveSession();
+    }
+    return uid;
   }
 
   Future<String?> createAccount({
@@ -228,7 +410,7 @@ class FirebaseService {
     _clearAuthError();
     final firebaseAuth = auth;
     if (firebaseAuth == null) return null;
-    return _withAuthTimeout<String?>(() async {
+    final uid = await _withAuthTimeout<String?>(() async {
       try {
         final credential = await firebaseAuth.createUserWithEmailAndPassword(
           email: email.trim().toLowerCase(),
@@ -245,6 +427,10 @@ class FirebaseService {
         return null;
       }
     }, label: 'create-account');
+    if (uid != null && uid.isNotEmpty) {
+      await _tryRegisterActiveSession();
+    }
+    return uid;
   }
 
   /// Signs in existing Firebase users or creates one for legacy local accounts.
@@ -259,7 +445,11 @@ class FirebaseService {
 
   Future<void> signOut() async {
     if (!_initialized) return;
-    await auth?.signOut();
+    try {
+      await auth?.signOut();
+    } finally {
+      await _clearSessionState();
+    }
   }
 
   /// True when Firebase Auth says the persisted user no longer exists.
@@ -328,7 +518,7 @@ class FirebaseService {
       try {
         final credential = await firebaseAuth.createUserWithEmailAndPassword(
           email: email.trim().toLowerCase(),
-          password: _temporaryPassword(),
+          password: temporaryPassword(),
         );
         return credential.user?.uid;
       } on FirebaseAuthException catch (e) {
@@ -346,10 +536,134 @@ class FirebaseService {
     }, label: 'provision-for-reset');
   }
 
-  String _temporaryPassword() {
+  String temporaryPassword() {
     const chars =
         'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#\$%';
     final random = Random.secure();
     return List.generate(32, (_) => chars[random.nextInt(chars.length)]).join();
+  }
+
+  // ── Phone Auth ─────────────────────────────────────────────────────────────
+
+  /// True only on Android and iOS — Firebase Phone Auth is not supported on
+  /// Windows or web.
+  static bool get isPhoneAuthSupported {
+    if (kIsWeb) return false;
+    return defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS;
+  }
+
+  static bool get isGoogleAuthSupported {
+    if (kIsWeb) return false;
+    return defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS;
+  }
+
+  Future<String?> signInWithGoogle() async {
+    if (!_initialized) return null;
+    _clearAuthError();
+    final firebaseAuth = auth;
+    if (firebaseAuth == null) return null;
+
+    try {
+      final googleSignIn = GoogleSignIn.instance;
+      await googleSignIn.initialize();
+      final account = await googleSignIn.authenticate();
+
+      final auth = account.authentication;
+      final credential = GoogleAuthProvider.credential(
+        idToken: auth.idToken,
+      );
+
+      final result = await firebaseAuth.signInWithCredential(credential);
+      return result.user?.uid;
+    } on FirebaseAuthException catch (e) {
+      _setAuthError(e.code);
+      debugPrint('Google sign-in failed: ${e.code} — ${e.message}');
+      return null;
+    } on StateError catch (e) {
+      _setAuthError('google-config-missing');
+      debugPrint('Google sign-in config error: $e');
+      return null;
+    } catch (e, st) {
+      _setAuthError('unknown');
+      debugPrint('Google sign-in error: $e\n$st');
+      return null;
+    }
+  }
+
+  /// Triggers Firebase SMS OTP for [phoneNumber] (E.164 format, e.g. +639XXXXXXXXX).
+  ///
+  /// Calls [onCodeSent] with the verificationId when the SMS is dispatched.
+  /// Calls [onAutoVerified] if the device auto-reads the SMS (Android only).
+  /// Calls [onError] with a human-readable error code on failure.
+  void verifyPhoneNumber({
+    required String phoneNumber,
+    required void Function(String verificationId, int? resendToken) onCodeSent,
+    required void Function(String uid) onAutoVerified,
+    required void Function(String code) onError,
+    int? resendToken,
+  }) {
+    final firebaseAuth = auth;
+    if (firebaseAuth == null) {
+      onError('unavailable');
+      return;
+    }
+    firebaseAuth.verifyPhoneNumber(
+      phoneNumber: phoneNumber,
+      timeout: const Duration(seconds: 60),
+      forceResendingToken: resendToken,
+      verificationCompleted: (PhoneAuthCredential credential) async {
+        // Auto-verified on Android (SMS auto-read).
+        try {
+          final result = await firebaseAuth.signInWithCredential(credential);
+          final uid = result.user?.uid;
+          if (uid != null) onAutoVerified(uid);
+        } catch (e) {
+          debugPrint('Phone auto-verify sign-in failed: $e');
+          onError('auto-verify-failed');
+        }
+      },
+      verificationFailed: (FirebaseAuthException e) {
+        debugPrint('Phone verification failed: ${e.code} — ${e.message}');
+        onError(e.code);
+      },
+      codeSent: (String verificationId, int? resendToken) {
+        onCodeSent(verificationId, resendToken);
+      },
+      codeAutoRetrievalTimeout: (_) {
+        // Timeout — user must enter code manually, nothing to do here.
+      },
+    );
+  }
+
+  /// Signs in with the SMS [smsCode] using the [verificationId] from [verifyPhoneNumber].
+  /// Returns the Firebase UID on success, or null on failure (error code set in [lastAuthErrorCode]).
+  Future<String?> signInWithPhoneOtp({
+    required String verificationId,
+    required String smsCode,
+  }) async {
+    if (!_initialized) return null;
+    _clearAuthError();
+    final firebaseAuth = auth;
+    if (firebaseAuth == null) return null;
+    return _withAuthTimeout<String?>(() async {
+      try {
+        final credential = PhoneAuthProvider.credential(
+          verificationId: verificationId,
+          smsCode: smsCode,
+        );
+        final result = await firebaseAuth.signInWithCredential(credential);
+        return result.user?.uid;
+      } on FirebaseAuthException catch (e) {
+        _setAuthError(e.code);
+        debugPrint('Phone OTP sign-in failed: ${e.code} — ${e.message}');
+        return null;
+      } catch (e, st) {
+        _setAuthError('unknown');
+        debugPrint('Phone OTP sign-in error: $e\n$st');
+        return null;
+      }
+    }, label: 'phone-otp-sign-in');
   }
 }

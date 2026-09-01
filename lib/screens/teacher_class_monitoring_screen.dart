@@ -568,17 +568,16 @@ class _StudentMonitoringTile extends StatelessWidget {
                   borderRadius: BorderRadius.circular(10),
                   child: Row(
                     children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: theme.bgAccent.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          Icons.person_outline_rounded,
-                          color: theme.bgAccent,
-                          size: 22,
+                      CircleAvatar(
+                        radius: 20,
+                        backgroundColor: theme.bgAccent.withValues(alpha: 0.18),
+                        child: Text(
+                          _initials(student.fullName),
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w700,
+                            color: theme.bgAccent,
+                            fontSize: 14,
+                          ),
                         ),
                       ),
                       const SizedBox(width: AppSpacing.sm),
@@ -639,5 +638,14 @@ class _StudentMonitoringTile extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.length >= 2 && parts.first.isNotEmpty && parts.last.isNotEmpty) {
+      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+    }
+    if (name.trim().isNotEmpty) return name.trim()[0].toUpperCase();
+    return '?';
   }
 }

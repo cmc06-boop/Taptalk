@@ -6,6 +6,7 @@ import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/utils/auth_validation.dart';
 import '../providers/app_state.dart';
+import '../services/firebase_service.dart';
 import '../widgets/offline_notice_banner.dart';
 import '../widgets/taptalk_logo.dart';
 import '../widgets/taptalk_shell.dart';
@@ -55,6 +56,7 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = null;
       _busy = true;
     });
+
     try {
       final err = await context.read<AppState>().login(
             _email.text,
@@ -75,6 +77,87 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       });
     }
+  }
+
+  Widget _googleIcon() {
+    return Image.asset(
+      'assets/images/Logo/google.png',
+      width: 20,
+      height: 20,
+      filterQuality: FilterQuality.medium,
+    );
+  }
+
+  Widget _field(
+    String label,
+    TextEditingController controller, {
+    bool obscure = false,
+    VoidCallback? onToggleObscure,
+    TextInputType? keyboard,
+    TextInputAction? textInputAction,
+    bool autocorrect = true,
+    ValueChanged<String>? onFieldSubmitted,
+    String? Function(String?)? validator,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        TextFormField(
+          controller: controller,
+          obscureText: obscure,
+          keyboardType: keyboard,
+          textInputAction: textInputAction,
+          autocorrect: autocorrect,
+          onFieldSubmitted: onFieldSubmitted,
+          validator: validator,
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: const Color(0xFFEFF8F3),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            errorStyle: GoogleFonts.poppins(fontSize: 11),
+            suffixIcon: onToggleObscure == null
+                ? null
+                : IconButton(
+                    icon: Icon(
+                      obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                      color: const Color(0xFF5A6B63),
+                      size: 19,
+                    ),
+                    onPressed: onToggleObscure,
+                    constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
+                  ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFDCECE4)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFDCECE4)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(
+                color: const Color(0xFF5BB88A).withValues(alpha: 0.65),
+                width: 1.6,
+              ),
+            ),
+            errorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFC62828)),
+            ),
+            focusedErrorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFC62828), width: 1.6),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -99,6 +182,7 @@ class _LoginScreenState extends State<LoginScreen> {
           final contentTop = compactHeight ? 16.0 : 22.0;
           final sectionGap = compactHeight ? 12.0 : 16.0;
           final fieldGap = compactHeight ? 10.0 : 14.0;
+
           return Column(
             children: [
               Container(
@@ -279,6 +363,52 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ],
                               ),
                             ),
+                            if (FirebaseService.isGoogleAuthSupported)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8, bottom: 2),
+                                child: Align(
+                                  alignment: Alignment.center,
+                                  child: TextButton.icon(
+                                    onPressed: _busy
+                                        ? null
+                                        : () async {
+                                            setState(() {
+                                              _error = null;
+                                              _busy = true;
+                                            });
+                                            final err = await app.signInWithGoogle(
+                                              role: 'learner',
+                                            );
+                                            if (!mounted) return;
+                                            setState(() => _busy = false);
+                                            if (err != null) {
+                                              setState(() => _error = err);
+                                            }
+                                          },
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: const Color(0xFF2F5E48),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 6,
+                                      ),
+                                      minimumSize: const Size(0, 36),
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      backgroundColor: Colors.transparent,
+                                      surfaceTintColor: Colors.transparent,
+                                      overlayColor: const Color(0xFF5BB88A).withValues(alpha: 0.08),
+                                    ),
+                                    icon: _googleIcon(),
+                                    label: Text(
+                                      'Continue with Google',
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: const Color(0xFF2F5E48),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
                             SizedBox(height: compactHeight ? 4 : 6),
                           ],
                         ),
@@ -291,78 +421,6 @@ class _LoginScreenState extends State<LoginScreen> {
           );
         },
       ),
-    );
-  }
-
-  Widget _field(
-    String label,
-    TextEditingController controller, {
-    bool obscure = false,
-    VoidCallback? onToggleObscure,
-    TextInputType? keyboard,
-    TextInputAction? textInputAction,
-    bool autocorrect = true,
-    ValueChanged<String>? onFieldSubmitted,
-    String? Function(String?)? validator,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        TextFormField(
-          controller: controller,
-          obscureText: obscure,
-          keyboardType: keyboard,
-          textInputAction: textInputAction,
-          autocorrect: autocorrect,
-          onFieldSubmitted: onFieldSubmitted,
-          validator: validator,
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: const Color(0xFFEFF8F3),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            errorStyle: GoogleFonts.poppins(fontSize: 11),
-            suffixIcon: onToggleObscure == null
-                ? null
-                : IconButton(
-                    icon: Icon(
-                      obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                      color: const Color(0xFF5A6B63),
-                      size: 19,
-                    ),
-                    onPressed: onToggleObscure,
-                    constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
-                  ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFDCECE4)),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFDCECE4)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide(
-                color: const Color(0xFF5BB88A).withValues(alpha: 0.65),
-                width: 1.6,
-              ),
-            ),
-            errorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFC62828)),
-            ),
-            focusedErrorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFC62828), width: 1.6),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

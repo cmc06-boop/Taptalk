@@ -8,6 +8,7 @@ import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/utils/auth_validation.dart';
 import '../providers/app_state.dart';
+import '../services/firebase_service.dart';
 import '../widgets/offline_notice_banner.dart';
 import '../widgets/password_strength_hint.dart';
 import '../widgets/taptalk_logo.dart';
@@ -65,7 +66,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Future<void> _checkEmailAvailability() async {
-    final rawEmail = _email.text;
+    final rawEmail = _email.text.trim();
     final normalized = AuthValidation.normalizeEmail(rawEmail);
     if (!AuthValidation.isValidEmail(normalized)) {
       if (_emailInUse != null && mounted) {
@@ -114,16 +115,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _error = null;
       _busy = true;
     });
+
     try {
       final err = await app.register(
-            fullName:
-                '${_firstName.text.trim()} ${_lastName.text.trim()}'.trim(),
-            firstName: _firstName.text.trim(),
-            lastName: _lastName.text.trim(),
-            email: _email.text,
-            password: _password.text,
-            role: _role,
-          );
+        fullName: '${_firstName.text.trim()} ${_lastName.text.trim()}'.trim(),
+        firstName: _firstName.text.trim(),
+        lastName: _lastName.text.trim(),
+        email: _email.text,
+        password: _password.text,
+        role: _role,
+      );
       if (!mounted) return;
       setState(() {
         _busy = false;
@@ -259,12 +260,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                     _firstName,
                                     textInputAction: TextInputAction.next,
                                     validator: (value) {
-                                      if (value == null ||
-                                          value.trim().isEmpty) {
+                                      if (value == null || value.trim().isEmpty) {
                                         return AppStrings.fillAllFields(lang);
                                       }
-                                      if (!AuthValidation.isValidFullName(
-                                          value)) {
+                                      if (!AuthValidation.isValidFullName(value)) {
                                         return AppStrings.invalidFullName(lang);
                                       }
                                       return null;
@@ -278,12 +277,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                     _lastName,
                                     textInputAction: TextInputAction.next,
                                     validator: (value) {
-                                      if (value == null ||
-                                          value.trim().isEmpty) {
+                                      if (value == null || value.trim().isEmpty) {
                                         return AppStrings.fillAllFields(lang);
                                       }
-                                      if (!AuthValidation.isValidFullName(
-                                          value)) {
+                                      if (!AuthValidation.isValidFullName(value)) {
                                         return AppStrings.invalidFullName(lang);
                                       }
                                       return null;
@@ -317,11 +314,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             _field(
                               AppStrings.password(lang),
                               _password,
-                              liveBorderStrength: _attemptedSubmit ||
-                                      _password.text.isNotEmpty
-                                  ? AuthValidation.evaluatePasswordStrength(
-                                      _password.text,
-                                    )
+                              liveBorderStrength: (_attemptedSubmit || _password.text.isNotEmpty)
+                                  ? AuthValidation.evaluatePasswordStrength(_password.text)
                                   : PasswordStrength.empty,
                               obscure: _obscurePassword,
                               textInputAction: TextInputAction.next,
@@ -469,6 +463,47 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 ),
                               ),
                             ),
+                            if (FirebaseService.isGoogleAuthSupported)
+                              Align(
+                                alignment: Alignment.center,
+                                child: TextButton.icon(
+                                  onPressed: _busy
+                                      ? null
+                                      : () async {
+                                          setState(() {
+                                            _error = null;
+                                            _busy = true;
+                                          });
+                                          final err = await app.signInWithGoogle(role: _role);
+                                          if (!mounted) return;
+                                          setState(() => _busy = false);
+                                          if (err != null) {
+                                            setState(() => _error = err);
+                                          }
+                                        },
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: const Color(0xFF2F5E48),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 6,
+                                    ),
+                                    minimumSize: const Size(0, 36),
+                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    backgroundColor: Colors.transparent,
+                                    surfaceTintColor: Colors.transparent,
+                                    overlayColor: const Color(0xFF5BB88A).withValues(alpha: 0.08),
+                                  ),
+                                  icon: _googleIcon(),
+                                  label: Text(
+                                    'Continue with Google',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: const Color(0xFF2F5E48),
+                                    ),
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -480,6 +515,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
           );
         },
       ),
+    );
+  }
+
+  Widget _googleIcon() {
+    return Image.asset(
+      'assets/images/Logo/google.png',
+      width: 20,
+      height: 20,
+      filterQuality: FilterQuality.medium,
     );
   }
 

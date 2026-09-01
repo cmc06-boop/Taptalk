@@ -182,8 +182,7 @@ class AppRepository {
     return UserModel.fromMap(rows.first);
   }
 
-  static bool isStubEmail(String email) =>
-      email.trim().toLowerCase().endsWith('@taptalk.stub');
+  static bool isStubEmail(String email) => UserModel.isStubEmail(email);
 
   static bool isGenericAccountName(String name) {
     final n = name.trim().toLowerCase();
@@ -757,6 +756,7 @@ class AppRepository {
     required String password,
     required String role,
     String? firebaseUid,
+    String? phoneNumber,
   }) async {
     final db = await _dbHelper.database;
     final settings = <String, dynamic>{
@@ -775,6 +775,8 @@ class AppRepository {
       'role': role,
       'theme': role == 'learner' ? null : 'mint_green',
       'settings_json': jsonEncode(settings),
+      if (phoneNumber != null && phoneNumber.trim().isNotEmpty)
+        'phone_number': phoneNumber.trim(),
     };
     var uidToStore = firebaseUid;
     late int id;

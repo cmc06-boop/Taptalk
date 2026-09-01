@@ -1746,4 +1746,67 @@ abstract final class AppStrings {
 
   static String learnerNameLabel(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Mag-aaral' : 'Learner';
+
+  // ── Phone Auth ───────────────────────────────────────────────────────────
+
+  static String phoneNumber(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Numero ng Telepono' : 'Phone Number';
+
+  static String sendOtp(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Magpadala ng OTP' : 'Send OTP';
+
+  static String verifyOtp(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'I-verify ang OTP' : 'Verify OTP';
+
+  static String enterOtp(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Ilagay ang 6-digit na OTP'
+      : 'Enter 6-digit OTP';
+
+  static String otpSentTo(String phone, AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Napadala ang OTP sa $phone'
+      : 'OTP sent to $phone';
+
+  static String resendOtp(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Ipadala ulit ang OTP' : 'Resend OTP';
+
+  static String resendIn(int seconds, AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Ipadala ulit sa ${seconds}s'
+      : 'Resend in ${seconds}s';
+
+  static String invalidOtp(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Mali o expired na OTP. Subukang muli.'
+      : 'Invalid or expired OTP. Please try again.';
+
+  static String invalidPhone(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Maglagay ng wastong numero ng telepono.'
+      : 'Enter a valid phone number.';
+
+  static String signUpWithEmail(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Email' : 'Email';
+
+  static String signUpWithPhone(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Telepono' : 'Phone';
+
+  static String phoneAuthUnavailable(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Ang pag-login sa pamamagitan ng telepono ay available lamang sa Android at iOS.'
+      : 'Phone sign-in is only available on Android and iOS.';
+
+  static String otpVerifying(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Bine-verify...' : 'Verifying...';
+
+  static String phoneAlreadyInUse(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Ang numerong ito ay ginagamit na ng ibang account.'
+      : 'This phone number is already linked to another account.';
+
+  static String phoneLoginNotFound(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Walang account na nakakonekta sa numerong ito. Mag-sign up muna.'
+      : 'No account linked to this number. Please sign up first.';
 }

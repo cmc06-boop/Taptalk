@@ -78,6 +78,7 @@ enum AppRoute {
   teacherAlertHistory,
   teacherRecentLessons,
   teacherJoinRequests,
+  phoneOtp,
 }
 
 typedef AppScreenBuilder = Widget Function(AppRoute route);
@@ -743,6 +744,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           (_user!.isLearner || _user!.isParent || _user!.isTeacher) &&
           !await NetworkStatus.isOffline()) {
         try {
+          final sessionOk = await FirebaseService.instance
+              .validateCurrentSessionForThisDevice();
+          if (!sessionOk) {
+            debugPrint('Session invalidated during app restore: forcing logout.');
+            await _endActiveSession();
+            _resetNavigationStack(AppRoute.welcome);
+            notifyListeners();
+            return;
+          }
           await _restoreAccountFromCloud();
           await _refreshPersonalBoard();
           await _applyCrossDevicePreferencesFromAccount();
@@ -2585,6 +2595,316 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       debugPrint('Post-register data load failed (account is saved): $e\n$st');
     }
 
+    await _recordCurrentAccount();
+    return null;
+  }
+
+  // ── Phone Auth ─────────────────────────────────────────────────────────────
+
+  /// Pending phone auth state — set by the OTP trigger, read by PhoneOtpScreen.
+  String? _pendingPhoneVerificationId;
+  int? _pendingPhoneResendToken;
+  String? _pendingPhoneNumber;
+  String? _pendingPhoneFirstName;
+  String? _pendingPhoneLastName;
+  String? _pendingPhoneRole;
+  bool _pendingPhoneIsRegister = false;
+
+  String? get pendingPhoneVerificationId => _pendingPhoneVerificationId;
+  int? get pendingPhoneResendToken => _pendingPhoneResendToken;
+  String? get pendingPhoneNumber => _pendingPhoneNumber;
+  String? get pendingPhoneFirstName => _pendingPhoneFirstName;
+  String? get pendingPhoneLastName => _pendingPhoneLastName;
+  String? get pendingPhoneRole => _pendingPhoneRole;
+  bool get pendingPhoneIsRegister => _pendingPhoneIsRegister;
+
+  /// Called by the Register/Login screen to start the OTP send flow and
+  /// navigate to the OTP entry screen.
+  void setPendingPhoneAuth({
+    required String verificationId,
+    required int? resendToken,
+    required String phoneNumber,
+    required bool isRegister,
+    String? firstName,
+    String? lastName,
+    String? role,
+  }) {
+    _pendingPhoneVerificationId = verificationId;
+    _pendingPhoneResendToken = resendToken;
+    _pendingPhoneNumber = phoneNumber;
+    _pendingPhoneIsRegister = isRegister;
+    _pendingPhoneFirstName = firstName;
+    _pendingPhoneLastName = lastName;
+    _pendingPhoneRole = role;
+    notifyListeners();
+    setRoute(AppRoute.phoneOtp);
+  }
+
+  void updatePhoneResendToken(String verificationId, int? resendToken) {
+    _pendingPhoneVerificationId = verificationId;
+    _pendingPhoneResendToken = resendToken;
+    notifyListeners();
+  }
+
+  void clearPendingPhoneAuth() {
+    _pendingPhoneVerificationId = null;
+    _pendingPhoneResendToken = null;
+    _pendingPhoneNumber = null;
+    _pendingPhoneFirstName = null;
+    _pendingPhoneLastName = null;
+    _pendingPhoneRole = null;
+    _pendingPhoneIsRegister = false;
+    notifyListeners();
+  }
+
+  /// Completes phone login after OTP verification (uid from [FirebaseService.signInWithPhoneOtp]).
+  /// Mirrors [_loginImpl] but uses firebase UID as the entry point.
+  Future<String?> loginWithPhone(String uid, String phoneNumber) async {
+    try {
+      return await _loginWithPhoneImpl(uid, phoneNumber);
+    } catch (e, st) {
+      debugPrint('loginWithPhone error: $e\n$st');
+      return AppStrings.loginFailedTryAgain(_language);
+    }
+  }
+
+  Future<String?> signInWithGoogle({required String role}) async {
+    try {
+      final uid = await FirebaseService.instance.signInWithGoogle();
+      if (uid == null) {
+        return AppStrings.loginFailedTryAgain(_language);
+      }
+
+      final existing = await _repo.findUserByFirebaseUid(uid);
+      if (existing != null) {
+        return await loginWithPhone(uid, existing.email);
+      }
+
+      final profileEmail = FirebaseService.instance.currentUserEmail;
+      if (profileEmail == null || profileEmail.trim().isEmpty) {
+        return AppStrings.loginFailedTryAgain(_language);
+      }
+
+      final profileName = FirebaseService.instance.currentUserDisplayName ??
+          profileEmail.split('@').first;
+      final names = profileName.split(RegExp(r'\s+'));
+      final firstName = names.first.trim();
+      final lastName = names.length > 1 ? names.sublist(1).join(' ') : 'Google';
+
+      final user = await _repo.registerUser(
+        fullName: profileName.trim(),
+        firstName: firstName,
+        lastName: lastName,
+        email: profileEmail,
+        password: FirebaseService.instance.temporaryPassword(),
+        role: role,
+        firebaseUid: uid,
+      );
+
+      _user = user;
+      _resetAccountSession();
+      await _notificationSync.initialize();
+      await _syncUserProfileToCloud();
+      await _loadLearnerData(cloudSyncInBackground: true);
+      await _ensureStarterData();
+      if (role == 'teacher') {
+        await refreshTeacherClasses(cloudSyncInBackground: true);
+      }
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('user_id', _user!.id);
+      await _recordCurrentAccount();
+      notifyListeners();
+      return null;
+    } catch (e, st) {
+      debugPrint('Google sign in error: $e\n$st');
+      return AppStrings.signUpFailedTryAgain(_language);
+    }
+  }
+
+  Future<String?> _loginWithPhoneImpl(String uid, String phoneNumber) async {
+    await _notificationSync.initialize();
+
+    // Look up local account by firebase UID.
+    var user = await _repo.findUserByFirebaseUid(uid);
+    if (user == null) {
+      // No local account — this phone isn't registered yet.
+      clearPendingPhoneAuth();
+      return AppStrings.phoneLoginNotFound(_language);
+    }
+
+    _user = user;
+    if (_user == null) return AppStrings.loginFailed(_language);
+
+    _resetAccountSession();
+
+    try {
+      await _notificationSync.initialize();
+      await _restoreAccountFromCloud();
+      await _refreshPersonalBoard();
+    } catch (e, st) {
+      debugPrint('Phone login cloud restore failed: $e\n$st');
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('user_id', _user!.id);
+    await _applyCrossDevicePreferencesFromAccount();
+
+    if (_user!.isLearner || _user!.isParent || _user!.isTeacher) {
+      await _routeUserAfterOnboardingChecks();
+    } else {
+      await _goToRouteReplacingStack(AppRoute.login);
+      notifyListeners();
+      return AppStrings.parentTeacherComingSoon(_language);
+    }
+    notifyListeners();
+
+    try {
+      if (_user!.isLearner) {
+        await _loadLearnerData(cloudSyncInBackground: false);
+        await _ensureStarterData();
+      } else if (_user!.isParent) {
+        await _loadLearnerData(cloudSyncInBackground: false);
+        await _ensureStarterData();
+        await _loadLinkedChildren(syncCloudInBackground: true);
+        await _notificationSync.initialize();
+        await _syncFirebaseSessionAfterRestore();
+        await _syncCloudDataAfterFirebaseReady();
+      } else if (_user!.isTeacher) {
+        await _loadLearnerData(cloudSyncInBackground: false);
+        await _ensureStarterData();
+        await refreshTeacherClasses(cloudSyncInBackground: false);
+        await _notificationSync.initialize();
+        await _syncFirebaseSessionAfterRestore();
+      }
+      if (FirebaseService.instance.isAvailable) {
+        await _pullPersonalBoardFromCloud();
+        await _refreshPersonalBoard();
+        await _syncAccountPersonalDataToCloud();
+      }
+      await _applyCrossDevicePreferencesFromAccount();
+      unawaited(_activateMonitoringSync());
+    } catch (e, st) {
+      debugPrint('Post-phone-login data load failed (session saved): $e\n$st');
+    }
+
+    clearPendingPhoneAuth();
+    await _recordCurrentAccount();
+    notifyListeners();
+    return null;
+  }
+
+  /// Registers a new account using phone (Firebase UID already verified by OTP).
+  /// Uses a synthetic stub email so the NOT NULL constraint on the users table is satisfied.
+  Future<String?> registerWithPhone({
+    required String uid,
+    required String phoneNumber,
+    required String firstName,
+    required String lastName,
+    required String role,
+  }) async {
+    try {
+      return await _registerWithPhoneImpl(
+        uid: uid,
+        phoneNumber: phoneNumber,
+        firstName: firstName,
+        lastName: lastName,
+        role: role,
+      );
+    } catch (e, st) {
+      debugPrint('registerWithPhone error: $e\n$st');
+      return AppStrings.signUpFailedTryAgain(_language);
+    }
+  }
+
+  Future<String?> _registerWithPhoneImpl({
+    required String uid,
+    required String phoneNumber,
+    required String firstName,
+    required String lastName,
+    required String role,
+  }) async {
+    if (!AuthValidation.isValidFullName('$firstName $lastName')) {
+      return AppStrings.invalidFullName(_language);
+    }
+
+    // Check if this UID is already registered.
+    final existing = await _repo.findUserByFirebaseUid(uid);
+    if (existing != null) {
+      // Account already exists — log them in instead.
+      return await loginWithPhone(uid, phoneNumber);
+    }
+
+    // Synthetic email so SQLite NOT NULL constraint is met.
+    final stubEmail = 'ph_${uid.toLowerCase()}@taptalk.stub';
+    final fullName = '$firstName $lastName'.trim();
+    // Use a random password — phone users never use it.
+    final fakePassword = FirebaseService.instance.temporaryPassword();
+
+    await _notificationSync.initialize();
+
+    try {
+      _user = await _repo.registerUser(
+        fullName: fullName,
+        firstName: firstName,
+        lastName: lastName,
+        email: stubEmail,
+        password: fakePassword,
+        role: role,
+        firebaseUid: uid,
+        phoneNumber: phoneNumber,
+      );
+    } catch (e) {
+      debugPrint('registerWithPhone DB error: $e');
+      rethrow;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('user_id', _user!.id);
+    _resetAccountSession();
+    _welcomeFirstName = firstName.trim();
+    _profileLastName = lastName.trim();
+    _hasStoredLastName = true;
+
+    if (role == 'learner') {
+      _theme = TapTalkThemes.appDefault;
+      await _setLanguageOnboardingDone(_user!.id, false);
+      await _setCategoryOnboardingDone(_user!.id, false);
+      await _goToRouteReplacingStack(AppRoute.chooseLanguage);
+    } else if (role == 'parent') {
+      _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
+      await _setLanguageOnboardingDone(_user!.id, false);
+      await _goToRouteReplacingStack(AppRoute.chooseLanguage);
+    } else if (role == 'teacher') {
+      _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
+      await _setLanguageOnboardingDone(_user!.id, false);
+      await _goToRouteReplacingStack(AppRoute.chooseLanguage);
+    } else {
+      await _goToRouteReplacingStack(AppRoute.login);
+    }
+
+    notifyListeners();
+
+    try {
+      await _syncUserProfileToCloud();
+      if (role == 'learner') {
+        await _loadLearnerData(cloudSyncInBackground: false);
+        await _ensureStarterData();
+      } else if (role == 'parent') {
+        await _loadLearnerData(cloudSyncInBackground: true);
+        await _ensureStarterData();
+        await _loadLinkedChildren(syncCloudInBackground: true);
+      } else if (role == 'teacher') {
+        await _loadLearnerData(cloudSyncInBackground: true);
+        await _ensureStarterData();
+        await refreshTeacherClasses(cloudSyncInBackground: true);
+      }
+      unawaited(_activateMonitoringSync());
+      notifyListeners();
+    } catch (e, st) {
+      debugPrint('Post-phone-register data load failed: $e\n$st');
+    }
+
+    clearPendingPhoneAuth();
     await _recordCurrentAccount();
     return null;
   }
@@ -6797,6 +7117,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       passwordHash: AppRepository.hashPassword(newPassword),
     );
     notifyListeners();
+    await FirebaseService.instance.invalidateCurrentUserSession(
+      reason: 'password_change',
+    );
+    await _endActiveSession();
     return null;
   }
 

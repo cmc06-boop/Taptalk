@@ -272,7 +272,6 @@ class _HomeScreenState extends State<HomeScreen> {
         onRefresh: _refresh,
         color: theme.bgAccent,
         child: CustomScrollView(
-          cacheExtent: 1200,
           key: ValueKey('home_${lang.name}_${app.languageRevision}'),
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
