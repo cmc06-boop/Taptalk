@@ -716,6 +716,12 @@ abstract class CloudNotificationBackend {
     String? learnerProfileCode,
   });
 
+  /// Updates teacher name on class docs, enrollments, and join requests.
+  Future<void> updateTeacherNameReferencesOnCloud({
+    required String teacherFirebaseUid,
+    required String teacherName,
+  });
+
   /// Removes this learner from parent links, class enrollments, join requests,
   /// and their profile docs so other roles stop seeing the deleted account.
   Future<void> purgeLearnerCloudPresence(String learnerFirebaseUid);
@@ -978,6 +984,12 @@ class UnconfiguredCloudNotificationBackend implements CloudNotificationBackend {
     required String learnerFirebaseUid,
     required String learnerName,
     String? learnerProfileCode,
+  }) async {}
+
+  @override
+  Future<void> updateTeacherNameReferencesOnCloud({
+    required String teacherFirebaseUid,
+    required String teacherName,
   }) async {}
 
   @override

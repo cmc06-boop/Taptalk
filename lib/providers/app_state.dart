@@ -1727,6 +1727,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           );
           await _resyncLearnerEnrollmentsToCloud();
         }
+      } else if (_user!.isTeacher) {
+        final teacherFirebaseUid = await _resolveAccountFirebaseUid();
+        if (teacherFirebaseUid != null && teacherFirebaseUid.isNotEmpty) {
+          await _notificationSync.updateTeacherNameReferencesOnCloud(
+            teacherFirebaseUid: teacherFirebaseUid,
+            teacherName: _teacherNameForCloudSync(),
+          );
+        }
       }
       await _clearProfileCloudPending();
     } catch (e, st) {
@@ -4242,16 +4250,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       for (final link in links) {
         final uid = link.learnerFirebaseUid.trim();
         if (uid.isEmpty) continue;
-        final profile = await _notificationSync.getUserProfileFromCloud(uid);
-        final remoteName = profile?.fullName.trim() ?? '';
-        if (remoteName.isEmpty) continue;
-        var learner = await _repo.findUserByFirebaseUid(uid);
-        if (learner == null && link.learnerUserId > 0) {
-          learner = await _repo.findUserById(link.learnerUserId);
-        }
-        if (learner != null && remoteName != learner.fullName) {
-          await _repo.updateUserFullName(learner.id, remoteName);
-        }
+        await _applyCloudUserDisplayName(
+          firebaseUid: uid,
+          fallbackLocalUserId: link.learnerUserId,
+        );
       }
     } catch (e, st) {
       debugPrint('Pull parent-child links failed: $e\n$st');
@@ -4269,12 +4271,25 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       final learner = await _repo.findUserById(child.learnerId);
       final learnerFirebaseUid = learner?.firebaseUid;
       if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) continue;
+      var learnerName = child.fullName;
+      try {
+        final profile = await _notificationSync
+            .getUserProfileFromCloud(learnerFirebaseUid)
+            .timeout(const Duration(seconds: 8));
+        final cloudName = profile?.fullName.trim() ?? '';
+        if (cloudName.isNotEmpty &&
+            !AppRepository.isGenericAccountName(cloudName)) {
+          learnerName = cloudName;
+        }
+      } catch (e, st) {
+        debugPrint('Parent link name from profile failed: $e\n$st');
+      }
       await _notificationSync.syncParentChildLink(
         parentUserId: _user!.id,
         learnerUserId: child.learnerId,
         parentFirebaseUid: parentFirebaseUid,
         learnerFirebaseUid: learnerFirebaseUid,
-        learnerName: child.fullName,
+        learnerName: learnerName,
         learnerProfileCode: child.profileCode,
       );
     }
@@ -4666,6 +4681,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         teacherUserId: _user!.id,
         enrollments: filteredEnrollments,
       );
+      for (final enrollment in filteredEnrollments) {
+        await _applyCloudUserDisplayName(
+          firebaseUid: enrollment.learnerFirebaseUid,
+        );
+      }
 
       await _purgeDeletedTeacherClasses();
 
@@ -4728,33 +4748,61 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     RemoteTeacherClass? remoteClass,
     String? enrollmentTeacherName,
   }) async {
+    final uid = remoteClass?.teacherFirebaseUid.trim() ?? '';
+    if (uid.isNotEmpty && _notificationSync.isCloudAvailable) {
+      try {
+        final profile = await _notificationSync
+            .getUserProfileFromCloud(uid)
+            .timeout(const Duration(seconds: 8));
+        if (profile != null) {
+          final resolved = AppRepository.resolveLoginFullName(
+            profile: profile,
+            existingName: null,
+          );
+          if (resolved.isNotEmpty &&
+              !AppRepository.isGenericAccountName(resolved)) {
+            return resolved;
+          }
+        }
+      } catch (e, st) {
+        debugPrint('Resolve cloud teacher display name failed: $e\n$st');
+      }
+    }
+
     for (final candidate in [remoteClass?.teacherName, enrollmentTeacherName]) {
       final trimmed = candidate?.trim() ?? '';
       if (trimmed.isNotEmpty && !AppRepository.isGenericAccountName(trimmed)) {
         return trimmed;
       }
     }
+    return '';
+  }
 
-    final uid = remoteClass?.teacherFirebaseUid.trim() ?? '';
-    if (uid.isEmpty || !_notificationSync.isCloudAvailable) return '';
-
+  Future<void> _applyCloudUserDisplayName({
+    required String firebaseUid,
+    int? fallbackLocalUserId,
+  }) async {
+    final uid = firebaseUid.trim();
+    if (uid.isEmpty || !_notificationSync.isCloudAvailable) return;
     try {
       final profile = await _notificationSync
           .getUserProfileFromCloud(uid)
           .timeout(const Duration(seconds: 8));
-      if (profile == null) return '';
-      final resolved = AppRepository.resolveLoginFullName(
-        profile: profile,
-        existingName: null,
-      );
-      if (resolved.isNotEmpty &&
-          !AppRepository.isGenericAccountName(resolved)) {
-        return resolved;
+      final remoteName = profile?.fullName.trim() ?? '';
+      if (remoteName.isEmpty ||
+          AppRepository.isGenericAccountName(remoteName)) {
+        return;
+      }
+      var user = await _repo.findUserByFirebaseUid(uid);
+      if (user == null && fallbackLocalUserId != null && fallbackLocalUserId > 0) {
+        user = await _repo.findUserById(fallbackLocalUserId);
+      }
+      if (user != null && remoteName != user.fullName) {
+        await _repo.updateUserFullName(user.id, remoteName);
       }
     } catch (e, st) {
-      debugPrint('Resolve cloud teacher display name failed: $e\n$st');
+      debugPrint('Apply cloud display name failed: $e\n$st');
     }
-    return '';
   }
 
   Future<void> _applyCloudTeacherDisplayName({

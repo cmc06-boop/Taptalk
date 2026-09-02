@@ -864,39 +864,100 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     final name = learnerName.trim();
     if (name.isEmpty) return;
 
+    final payload = <String, Object?>{
+      'learnerName': name,
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    final code = learnerProfileCode?.trim();
+    if (code != null && code.isNotEmpty) {
+      payload['learnerProfileCode'] = AppRepository.normalizeProfileCode(code);
+    }
+
+    await _mergeWhere(
+      collection: linkCollectionName,
+      field: 'learnerFirebaseUid',
+      uid: uid,
+      payload: payload,
+    );
+    await _mergeWhere(
+      collection: enrollmentCollectionName,
+      field: 'learnerFirebaseUid',
+      uid: uid,
+      payload: {
+        'learnerName': name,
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+    );
+    await _mergeWhere(
+      collection: joinRequestCollectionName,
+      field: 'learnerFirebaseUid',
+      uid: uid,
+      payload: {
+        'learnerName': name,
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+    );
+    await _mergeWhere(
+      collection: learnerProfileCollectionName,
+      field: 'learnerFirebaseUid',
+      uid: uid,
+      payload: {
+        'learnerName': name,
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+    );
+  }
+
+  @override
+  Future<void> updateTeacherNameReferencesOnCloud({
+    required String teacherFirebaseUid,
+    required String teacherName,
+  }) async {
+    if (!isAvailable || teacherFirebaseUid.trim().isEmpty) return;
+    final uid = teacherFirebaseUid.trim();
+    final name = teacherName.trim();
+    if (name.isEmpty || AppRepository.isGenericAccountName(name)) return;
+
+    final payload = <String, Object?>{
+      'teacherName': name,
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    await _mergeWhere(
+      collection: teacherClassCollectionName,
+      field: 'teacherFirebaseUid',
+      uid: uid,
+      payload: payload,
+    );
+    await _mergeWhere(
+      collection: enrollmentCollectionName,
+      field: 'teacherFirebaseUid',
+      uid: uid,
+      payload: payload,
+    );
+    await _mergeWhere(
+      collection: joinRequestCollectionName,
+      field: 'teacherFirebaseUid',
+      uid: uid,
+      payload: payload,
+    );
+  }
+
+  Future<void> _mergeWhere({
+    required String collection,
+    required String field,
+    required String uid,
+    required Map<String, Object?> payload,
+  }) async {
     try {
-      final linkSnapshot = await FirebaseFirestore.instance
-          .collection(linkCollectionName)
-          .where('learnerFirebaseUid', isEqualTo: uid)
+      final snapshot = await FirebaseFirestore.instance
+          .collection(collection)
+          .where(field, isEqualTo: uid)
           .get();
-      for (final doc in linkSnapshot.docs) {
-        final payload = <String, Object?>{
-          'learnerName': name,
-          'updatedAt': FieldValue.serverTimestamp(),
-        };
-        final code = learnerProfileCode?.trim();
-        if (code != null && code.isNotEmpty) {
-          payload['learnerProfileCode'] =
-              AppRepository.normalizeProfileCode(code);
-        }
+      for (final doc in snapshot.docs) {
         await doc.reference.set(payload, SetOptions(merge: true));
       }
-
-      final enrollmentSnapshot = await FirebaseFirestore.instance
-          .collection(enrollmentCollectionName)
-          .where('learnerFirebaseUid', isEqualTo: uid)
-          .get();
-      for (final doc in enrollmentSnapshot.docs) {
-        await doc.reference.set(
-          {
-            'learnerName': name,
-            'updatedAt': FieldValue.serverTimestamp(),
-          },
-          SetOptions(merge: true),
-        );
-      }
     } catch (e, st) {
-      debugPrint('updateLearnerReferencesOnCloud failed: $e\n$st');
+      debugPrint('update $collection name refs failed: $e\n$st');
     }
   }
 

@@ -734,6 +734,17 @@ class NotificationSyncService {
     );
   }
 
+  Future<void> updateTeacherNameReferencesOnCloud({
+    required String teacherFirebaseUid,
+    required String teacherName,
+  }) async {
+    if (!_cloud.isAvailable || teacherFirebaseUid.trim().isEmpty) return;
+    await _cloud.updateTeacherNameReferencesOnCloud(
+      teacherFirebaseUid: teacherFirebaseUid,
+      teacherName: teacherName,
+    );
+  }
+
   Future<void> purgeLearnerCloudPresence(String learnerFirebaseUid) async {
     if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return;
     try {
