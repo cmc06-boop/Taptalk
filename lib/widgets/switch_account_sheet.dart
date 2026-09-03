@@ -424,26 +424,47 @@ abstract final class ManageAccountsSheet {
             color: theme.textMain.withValues(alpha: 0.75),
           ),
         ),
+        actionsAlignment: MainAxisAlignment.end,
+        actionsOverflowButtonSpacing: 0,
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogCtx, false),
-            child: Text(
-              AppStrings.cancel(lang),
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
-            ),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogCtx, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFC62828),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton(
+                  onPressed: () => Navigator.pop(dialogCtx, false),
+                  child: Text(
+                    AppStrings.cancel(lang),
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                  ),
+                ),
               ),
-            ),
-            child: Text(
-              AppStrings.removeFromThisDevice(lang),
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
-            ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(dialogCtx, true),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFC62828),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 10,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: Text(
+                    AppStrings.removeFromThisDevice(lang),
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                      height: 1.2,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -477,90 +498,89 @@ class _ManageAccountTile extends StatelessWidget {
     final initials = _accountInitials(account.displayName, account.email);
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: Ink(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.sm,
-          AppSpacing.sm,
-          AppSpacing.sm,
-          AppSpacing.xs,
-        ),
-        decoration: BoxDecoration(
-          color: isCurrent
-              ? theme.bgAccent.withValues(alpha: 0.1)
-              : theme.bgMid.withValues(alpha: 0.28),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isCurrent
-                ? theme.bgAccent.withValues(alpha: 0.35)
-                : const Color(0xFFE9EEF2),
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.sm,
           ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 20,
-                  backgroundColor: theme.bgAccent.withValues(alpha: 0.18),
-                  child: Text(
-                    initials,
-                    style: GoogleFonts.poppins(
-                      fontWeight: FontWeight.w700,
-                      color: theme.bgAccent,
-                      fontSize: 14,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        account.displayName.isNotEmpty
-                            ? account.displayName
-                            : account.email,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: theme.textMain,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        account.email,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.poppins(
-                          fontSize: 11,
-                          color: theme.textMain.withValues(alpha: 0.62),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (isCurrent)
-                  Padding(
-                    padding: const EdgeInsets.only(left: AppSpacing.xs),
-                    child: Icon(
-                      Icons.check_circle_rounded,
-                      color: theme.bgAccent,
-                      size: 20,
-                    ),
-                  ),
-              ],
+          decoration: BoxDecoration(
+            color: isCurrent
+                ? theme.bgAccent.withValues(alpha: 0.1)
+                : theme.bgMid.withValues(alpha: 0.28),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isCurrent
+                  ? theme.bgAccent.withValues(alpha: 0.35)
+                  : const Color(0xFFE9EEF2),
             ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 20,
+                    backgroundColor: theme.bgAccent.withValues(alpha: 0.18),
+                    child: Text(
+                      initials,
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w700,
+                        color: theme.bgAccent,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          account.displayName.isNotEmpty
+                              ? account.displayName
+                              : account.email,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: theme.textMain,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          account.email,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            color: theme.textMain.withValues(alpha: 0.62),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (isCurrent)
+                    Padding(
+                      padding: const EdgeInsets.only(left: AppSpacing.xs),
+                      child: Icon(
+                        Icons.check_circle_rounded,
+                        color: theme.bgAccent,
+                        size: 20,
+                      ),
+                    ),
+                ],
+              ),
+              TextButton(
                 onPressed: onRemove,
                 style: TextButton.styleFrom(
                   foregroundColor: const Color(0xFFC62828),
                   visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  alignment: Alignment.centerLeft,
                 ),
                 child: Text(
                   AppStrings.removeFromThisDevice(lang),
@@ -570,8 +590,8 @@ class _ManageAccountTile extends StatelessWidget {
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

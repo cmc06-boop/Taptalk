@@ -126,6 +126,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   String? _selectedSubcategoryKey;
   bool _drawerOpen = false;
   String? _loginPrefillEmail;
+  String? _pendingGoogleUid;
+  String? _pendingGoogleEmail;
+  String? _pendingGoogleDisplayName;
   List<SavedAccount> _savedAccounts = [];
   bool _routeChanging = false;
   DateTime? _lastSubcategoryBackAt;
@@ -2352,6 +2355,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     _user = user;
+    return _activateSignedInUser(offline: offline);
+  }
+
+  Future<String?> _activateSignedInUser({required bool offline}) async {
     if (_user == null) return AppStrings.loginFailed(_language);
 
     _resetAccountSession();
@@ -2676,41 +2683,167 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  Future<String?> signInWithGoogle({required String role}) async {
+  static const googleNeedsRole = 'google-needs-role';
+
+  Future<String?> signInWithGoogle({String? role}) async {
     try {
+      await FirebaseService.instance.initialize();
       final uid = await FirebaseService.instance.signInWithGoogle();
       if (uid == null) {
         return AppStrings.loginFailedTryAgain(_language);
       }
 
-      final existing = await _repo.findUserByFirebaseUid(uid);
+      var existing = await _repo.findUserByFirebaseUid(uid);
+      final googleEmail = AuthValidation.normalizeEmail(
+        FirebaseService.instance.currentUserEmail ?? '',
+      );
+      if (existing == null && googleEmail.isNotEmpty) {
+        existing = await _repo.findUserByEmail(googleEmail);
+        if (existing != null &&
+            (existing.firebaseUid == null || existing.firebaseUid!.isEmpty)) {
+          await _repo.linkFirebaseUid(existing.id, uid);
+        }
+      }
       if (existing != null) {
+        _clearPendingGoogleSignUp();
         return await loginWithPhone(uid, existing.email);
       }
 
-      final profileEmail = FirebaseService.instance.currentUserEmail;
-      if (profileEmail == null || profileEmail.trim().isEmpty) {
+      await _notificationSync.initialize();
+      final cloudProfile = await _notificationSync.getUserProfileFromCloud(uid);
+      final cloudRole = cloudProfile?.role.trim() ?? '';
+      final resolvedRole =
+          (cloudRole == 'learner' ||
+              cloudRole == 'parent' ||
+              cloudRole == 'teacher')
+          ? cloudRole
+          : role?.trim();
+
+      final profileEmail = googleEmail.isNotEmpty
+          ? googleEmail
+          : AuthValidation.normalizeEmail(
+              FirebaseService.instance.currentUserEmail ?? '',
+            );
+      if (profileEmail.isEmpty) {
         return AppStrings.loginFailedTryAgain(_language);
       }
-
       final profileName = FirebaseService.instance.currentUserDisplayName ??
           profileEmail.split('@').first;
-      final names = profileName.split(RegExp(r'\s+'));
-      final firstName = names.first.trim();
-      final lastName = names.length > 1 ? names.sublist(1).join(' ') : 'Google';
 
-      final user = await _repo.registerUser(
-        fullName: profileName.trim(),
-        firstName: firstName,
-        lastName: lastName,
+      if (resolvedRole == null || resolvedRole.isEmpty) {
+        _pendingGoogleUid = uid;
+        _pendingGoogleEmail = profileEmail;
+        _pendingGoogleDisplayName = profileName.trim();
+        return googleNeedsRole;
+      }
+
+      _clearPendingGoogleSignUp();
+      return await _completeGoogleNewAccount(
+        uid: uid,
         email: profileEmail,
-        password: FirebaseService.instance.temporaryPassword(),
-        role: role,
-        firebaseUid: uid,
+        profileName: profileName,
+        role: resolvedRole,
+        skipOnboarding: cloudRole == resolvedRole,
       );
+    } catch (e, st) {
+      debugPrint('Google sign in error: $e\n$st');
+      return AppStrings.signUpFailedTryAgain(_language);
+    }
+  }
 
-      _user = user;
-      _resetAccountSession();
+  Future<String?> completePendingGoogleSignUp(String role) async {
+    final uid = _pendingGoogleUid;
+    final email = _pendingGoogleEmail;
+    final profileName = _pendingGoogleDisplayName;
+    if (uid == null || email == null || email.isEmpty) {
+      return AppStrings.loginFailedTryAgain(_language);
+    }
+    _clearPendingGoogleSignUp();
+    try {
+      return await _completeGoogleNewAccount(
+        uid: uid,
+        email: email,
+        profileName: profileName ?? email.split('@').first,
+        role: role,
+        skipOnboarding: false,
+      );
+    } catch (e, st) {
+      debugPrint('Complete Google sign up error: $e\n$st');
+      return AppStrings.signUpFailedTryAgain(_language);
+    }
+  }
+
+  Future<void> cancelPendingGoogleSignUp() async {
+    _clearPendingGoogleSignUp();
+    if (_user != null) return;
+    try {
+      await FirebaseService.instance.signOut();
+    } catch (e, st) {
+      debugPrint('Cancel Google sign up sign-out failed: $e\n$st');
+    }
+  }
+
+  void _clearPendingGoogleSignUp() {
+    _pendingGoogleUid = null;
+    _pendingGoogleEmail = null;
+    _pendingGoogleDisplayName = null;
+  }
+
+  Future<String?> _completeGoogleNewAccount({
+    required String uid,
+    required String email,
+    required String profileName,
+    required String role,
+    required bool skipOnboarding,
+  }) async {
+    final names = profileName.trim().split(RegExp(r'\s+'));
+    final firstName = names.isNotEmpty && names.first.isNotEmpty
+        ? names.first.trim()
+        : profileName.trim();
+    final lastName = names.length > 1 ? names.sublist(1).join(' ') : 'Google';
+
+    final user = await _repo.registerUser(
+      fullName: profileName.trim(),
+      firstName: firstName,
+      lastName: lastName,
+      email: email,
+      password: FirebaseService.instance.temporaryPassword(),
+      role: role,
+      firebaseUid: uid,
+    );
+
+    _user = user;
+    _resetAccountSession();
+    _welcomeFirstName = firstName;
+    _profileLastName = lastName;
+    _hasStoredLastName = true;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('user_id', _user!.id);
+
+    if (skipOnboarding) {
+      return _activateSignedInUser(
+        offline: await NetworkStatus.isOffline(),
+      );
+    }
+
+    if (role == 'learner') {
+      _theme = TapTalkThemes.appDefault;
+      await _setLanguageOnboardingDone(_user!.id, false);
+      await _setCategoryOnboardingDone(_user!.id, false);
+      await _goToRouteReplacingStack(AppRoute.chooseLanguage);
+    } else if (role == 'parent' || role == 'teacher') {
+      _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
+      await _setLanguageOnboardingDone(_user!.id, false);
+      await _goToRouteReplacingStack(AppRoute.chooseLanguage);
+    } else {
+      await _goToRouteReplacingStack(AppRoute.login);
+      notifyListeners();
+      return AppStrings.parentTeacherComingSoon(_language);
+    }
+
+    notifyListeners();
+    try {
       await _notificationSync.initialize();
       await _syncUserProfileToCloud();
       await _loadLearnerData(cloudSyncInBackground: true);
@@ -2718,15 +2851,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       if (role == 'teacher') {
         await refreshTeacherClasses(cloudSyncInBackground: true);
       }
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('user_id', _user!.id);
-      await _recordCurrentAccount();
-      notifyListeners();
-      return null;
+      unawaited(_activateMonitoringSync());
     } catch (e, st) {
-      debugPrint('Google sign in error: $e\n$st');
-      return AppStrings.signUpFailedTryAgain(_language);
+      debugPrint('Post-Google register data load failed: $e\n$st');
     }
+    await _recordCurrentAccount();
+    notifyListeners();
+    return null;
   }
 
   Future<String?> _loginWithPhoneImpl(String uid, String phoneNumber) async {
@@ -3027,11 +3158,34 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> prepareSwitchToAccount(String email) async {
     final normalized = AuthValidation.normalizeEmail(email);
     if (normalized.isEmpty) return;
+    if (AuthValidation.normalizeEmail(_user?.email ?? '') == normalized) {
+      _drawerOpen = false;
+      notifyListeners();
+      return;
+    }
+
+    final local = await _repo.findUserByEmail(normalized);
+    if (local == null) {
+      _drawerOpen = false;
+      await _endActiveSession();
+      _loginPrefillEmail = normalized;
+      await _goToRouteReplacingStack(AppRoute.login);
+      notifyListeners();
+      return;
+    }
+
     _drawerOpen = false;
     await _endActiveSession();
-    _loginPrefillEmail = normalized;
-    await _goToRouteReplacingStack(AppRoute.login);
-    notifyListeners();
+    _user = local;
+    final err = await _activateSignedInUser(
+      offline: await NetworkStatus.isOffline(),
+    );
+    if (err != null) {
+      debugPrint('Switch account failed: $err');
+      _loginPrefillEmail = normalized;
+      await _goToRouteReplacingStack(AppRoute.login);
+      notifyListeners();
+    }
   }
 
   Future<void> prepareAddAccount() async {
