@@ -876,6 +876,31 @@ abstract final class AppStrings {
           ? 'Magdagdag ng account'
           : 'Add another account';
 
+  static String manageAccounts(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'I-manage ang mga account'
+          : 'Manage accounts';
+
+  static String manageAccountsSubtitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Alisin ang naka-save na account sa device na ito. Puwede ka pa ring mag-login ulit.'
+          : 'Remove a saved account from this device. You can sign in again anytime.';
+
+  static String removeFromThisDevice(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Alisin sa device na ito'
+          : 'Remove from this device';
+
+  static String removeAccountConfirmTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Alisin ang account na ito?'
+          : 'Remove this account?';
+
+  static String removeAccountConfirmMessage(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Mawawala lang ito sa device na ito. Hindi mabubura ang account, at puwede kang mag-login ulit.'
+          : 'It will only be removed from this device. Your account is not deleted, and you can sign in again later.';
+
   static String accountsSection(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Mga Account' : 'Accounts';
 

@@ -3007,6 +3007,19 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _savedAccounts = await _savedAccountsStore.load();
   }
 
+  Future<void> removeSavedAccountFromThisDevice(String email) async {
+    final normalized = AuthValidation.normalizeEmail(email);
+    if (normalized.isEmpty) return;
+    final currentEmail = AuthValidation.normalizeEmail(_user?.email ?? '');
+    await _savedAccountsStore.remove(normalized);
+    await refreshSavedAccounts();
+    if (normalized == currentEmail) {
+      await logout(keepSavedAccounts: true);
+      return;
+    }
+    notifyListeners();
+  }
+
   void clearLoginPrefill() {
     _loginPrefillEmail = null;
   }

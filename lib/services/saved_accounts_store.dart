@@ -52,6 +52,20 @@ class SavedAccountsStore {
     );
   }
 
+  Future<void> remove(String email) async {
+    final normalized = AuthValidation.normalizeEmail(email);
+    if (normalized.isEmpty) return;
+    final next = [
+      for (final account in await load())
+        if (account.email != normalized) account,
+    ];
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _prefsKey,
+      jsonEncode(next.map((a) => a.toJson()).toList()),
+    );
+  }
+
   Future<void> clear() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_prefsKey);
