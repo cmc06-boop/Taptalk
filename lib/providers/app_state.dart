@@ -259,6 +259,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
+    if (_route == AppRoute.chooseRole) {
+      await goBackFromGoogleRole();
+      return;
+    }
+
     if (_pageStack.length > 1) {
       await popRoute();
       return;
@@ -344,6 +349,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   bool get drawerOpen => _drawerOpen;
   String? get loginPrefillEmail => _loginPrefillEmail;
+  String? get pendingGoogleEmail => _pendingGoogleEmail;
   List<SavedAccount> get savedAccounts => List.unmodifiable(_savedAccounts);
   bool get isSpeaking => _isSpeaking;
   String get speakingText => _speakingText;
@@ -2751,6 +2757,16 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  Future<void> goBackFromGoogleRole() async {
+    await cancelPendingGoogleSignUp();
+    if (_pageStack.length > 1 && _pageStack.last == AppRoute.chooseRole) {
+      await popRoute();
+      return;
+    }
+    await _goToRouteReplacingStack(AppRoute.login);
+    notifyListeners();
+  }
+
   Future<String?> completePendingGoogleSignUp(String role) async {
     final uid = _pendingGoogleUid;
     final email = _pendingGoogleEmail;
@@ -3124,18 +3140,27 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> logout({bool keepSavedAccounts = true}) async {
+    final currentEmail = AuthValidation.normalizeEmail(_user?.email ?? '');
     await _endActiveSession();
     if (!keepSavedAccounts) {
       await _savedAccountsStore.clear();
       _savedAccounts = [];
+    } else if (currentEmail.isNotEmpty) {
+      await _savedAccountsStore.remove(currentEmail);
+      _savedAccounts = await _savedAccountsStore.load();
     }
-    await _goToRouteReplacingStack(AppRoute.welcome);
+    if (_savedAccounts.isNotEmpty) {
+      await _goToRouteReplacingStack(AppRoute.login);
+    } else {
+      await _goToRouteReplacingStack(AppRoute.welcome);
+    }
     _drawerOpen = false;
     notifyListeners();
   }
 
   Future<void> refreshSavedAccounts() async {
     _savedAccounts = await _savedAccountsStore.load();
+    notifyListeners();
   }
 
   Future<void> removeSavedAccountFromThisDevice(String email) async {
@@ -3155,33 +3180,40 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _loginPrefillEmail = null;
   }
 
-  Future<void> prepareSwitchToAccount(String email) async {
+  Future<String?> signInSavedAccount(String email) async {
     final normalized = AuthValidation.normalizeEmail(email);
-    if (normalized.isEmpty) return;
+    if (normalized.isEmpty) {
+      return AppStrings.loginFailedTryAgain(_language);
+    }
     if (AuthValidation.normalizeEmail(_user?.email ?? '') == normalized) {
       _drawerOpen = false;
       notifyListeners();
-      return;
+      return null;
     }
 
     final local = await _repo.findUserByEmail(normalized);
     if (local == null) {
-      _drawerOpen = false;
-      await _endActiveSession();
       _loginPrefillEmail = normalized;
-      await _goToRouteReplacingStack(AppRoute.login);
-      notifyListeners();
-      return;
+      return AppStrings.loginFailedTryAgain(_language);
     }
 
     _drawerOpen = false;
     await _endActiveSession();
     _user = local;
-    final err = await _activateSignedInUser(
+    return _activateSignedInUser(
       offline: await NetworkStatus.isOffline(),
     );
+  }
+
+  Future<void> prepareSwitchToAccount(String email) async {
+    final normalized = AuthValidation.normalizeEmail(email);
+    if (normalized.isEmpty) return;
+    final err = await signInSavedAccount(normalized);
     if (err != null) {
       debugPrint('Switch account failed: $err');
+      if (_user != null) {
+        await _endActiveSession();
+      }
       _loginPrefillEmail = normalized;
       await _goToRouteReplacingStack(AppRoute.login);
       notifyListeners();

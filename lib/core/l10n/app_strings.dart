@@ -863,8 +863,8 @@ abstract final class AppStrings {
 
   static String switchAccountSubtitle(AppLanguage lang) =>
       lang == AppLanguage.filipino
-          ? 'Pipiliin ang account at mag-login muli gamit ang password.'
-          : 'Choose an account and sign in again with your password.';
+          ? 'Pumili ng account na naka-save sa device na ito. Hindi na kailangan ang password.'
+          : 'Choose an account saved on this device. You will not need a password.';
 
   static String switchAccountEmpty(AppLanguage lang) =>
       lang == AppLanguage.filipino
@@ -1068,6 +1068,41 @@ abstract final class AppStrings {
   static String hasAccount(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'May account na?'
       : 'Already have an account?';
+
+  static String chooseRoleTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Piliin ang Iyong Role'
+          : 'Choose Your Role';
+
+  static String chooseRoleSub(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Bago magpatuloy, piliin kung paano mo gagamitin ang TapTalk.'
+          : 'Before you continue, choose how you will use TapTalk.';
+
+  static String chooseRoleLearnerSub(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Gamitin ang TapTalk para mag-communicate.'
+          : 'Use TapTalk to communicate.';
+
+  static String chooseRoleParentSub(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'I-monitor at suportahan ang iyong anak.'
+          : 'Monitor and support your child.';
+
+  static String chooseRoleTeacherSub(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Pamahalaan ang klase at mga mag-aaral.'
+          : 'Manage your class and learners.';
+
+  static String chooseRoleFooter(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Hindi na ito mababago pagkatapos gawin ang account.'
+          : 'This cannot be changed after your account is created.';
+
+  static String continueWithThisAccount(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+          ? 'Mga account sa device na ito'
+          : 'Accounts on this device';
 
   static String chooseLanguageTitle(AppLanguage lang) =>
       lang == AppLanguage.filipino

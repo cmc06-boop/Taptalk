@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/utils/auth_validation.dart';
+import '../data/models/saved_account.dart';
 import '../providers/app_state.dart';
 import '../services/firebase_service.dart';
 import '../widgets/offline_notice_banner.dart';
@@ -26,6 +27,15 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _busy = false;
   bool _obscurePassword = true;
   bool _appliedLoginPrefill = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<AppState>().refreshSavedAccounts();
+    });
+  }
 
   @override
   void didChangeDependencies() {
@@ -76,6 +86,38 @@ class _LoginScreenState extends State<LoginScreen> {
           context.read<AppState>().language,
         );
       });
+    }
+  }
+
+  Future<void> _continueWithGoogle(AppState app) async {
+    setState(() {
+      _error = null;
+      _busy = true;
+    });
+    final err = await app.signInWithGoogle();
+    if (!mounted) return;
+    if (err == AppState.googleNeedsRole) {
+      setState(() => _busy = false);
+      await app.setRoute(AppRoute.chooseRole);
+      return;
+    }
+    setState(() => _busy = false);
+    if (err != null) {
+      setState(() => _error = err);
+    }
+  }
+
+  Future<void> _continueSavedAccount(SavedAccount account) async {
+    setState(() {
+      _error = null;
+      _busy = true;
+    });
+    final err = await context.read<AppState>().signInSavedAccount(account.email);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (err != null) {
+      _email.text = account.email;
+      setState(() => _error = err);
     }
   }
 
@@ -157,6 +199,86 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _savedAccountTile(SavedAccount account) {
+    final name = account.displayName.isNotEmpty
+        ? account.displayName
+        : account.email;
+    final parts = name.trim().split(RegExp(r'\s+'));
+    final initials = parts.length >= 2 &&
+            parts.first.isNotEmpty &&
+            parts.last.isNotEmpty
+        ? '${parts.first[0]}${parts.last[0]}'.toUpperCase()
+        : (name.trim().isNotEmpty
+            ? name.trim()[0].toUpperCase()
+            : account.email[0].toUpperCase());
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _busy ? null : () => _continueSavedAccount(account),
+          borderRadius: BorderRadius.circular(12),
+          child: Ink(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEFF8F3),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFDCECE4)),
+            ),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: const Color(0xFFD9F0E4),
+                  child: Text(
+                    initials,
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      color: const Color(0xFF2F5E48),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFF2F5E48),
+                        ),
+                      ),
+                      Text(
+                        account.email,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                          fontSize: 11,
+                          color: const Color(0xFF5A6B63),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  color: Color(0xFF9BB0A6),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -249,6 +371,21 @@ class _LoginScreenState extends State<LoginScreen> {
                                 textAlign: TextAlign.center,
                                 style: const TextStyle(color: Color(0xFFC62828)),
                               ),
+                            ],
+                            if (app.savedAccounts.isNotEmpty) ...[
+                              SizedBox(height: sectionGap),
+                              Text(
+                                AppStrings.continueWithThisAccount(lang),
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFF5A6B63),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              for (final account in app.savedAccounts)
+                                _savedAccountTile(account),
                             ],
                             SizedBox(height: sectionGap),
                             _field(
@@ -371,20 +508,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   child: TextButton.icon(
                                     onPressed: _busy
                                         ? null
-                                        : () async {
-                                            setState(() {
-                                              _error = null;
-                                              _busy = true;
-                                            });
-                                            final err = await app.signInWithGoogle(
-                                              role: 'learner',
-                                            );
-                                            if (!mounted) return;
-                                            setState(() => _busy = false);
-                                            if (err != null) {
-                                              setState(() => _error = err);
-                                            }
-                                          },
+                                        : () => _continueWithGoogle(app),
                                     style: TextButton.styleFrom(
                                       foregroundColor: const Color(0xFF2F5E48),
                                       padding: const EdgeInsets.symmetric(

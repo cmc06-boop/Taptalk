@@ -8,6 +8,7 @@ import 'core/navigation/route_transitions.dart';
 import 'providers/app_state.dart';
 import 'screens/choose_category_screen.dart';
 import 'screens/choose_language_screen.dart';
+import 'screens/choose_role_screen.dart';
 import 'screens/choose_theme_screen.dart';
 import 'screens/favorites_screen.dart';
 import 'screens/history_screen.dart';
@@ -102,8 +103,9 @@ class TapTalkApp extends StatelessWidget {
       case AppRoute.forgotPassword:
         return const ForgotPasswordScreen();
       case AppRoute.register:
-      case AppRoute.chooseRole:
         return const RegisterScreen();
+      case AppRoute.chooseRole:
+        return const ChooseRoleScreen();
       case AppRoute.chooseLanguage:
         return const ChooseLanguageScreen();
       case AppRoute.chooseTheme:
