@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -17,7 +19,6 @@ class ChooseRoleScreen extends StatefulWidget {
 class _ChooseRoleScreenState extends State<ChooseRoleScreen> {
   static const _titleColor = Color(0xFF1E3A2C);
   static const _subColor = Color(0xFF4F6C5D);
-  static const _accent = Color(0xFF5BB88A);
 
   String _role = 'learner';
   bool _busy = false;
@@ -39,84 +40,60 @@ class _ChooseRoleScreenState extends State<ChooseRoleScreen> {
     }
   }
 
-  Future<void> _goBack(AppState app) async {
-    if (_busy) return;
-    await app.goBackFromGoogleRole();
-  }
-
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final lang = app.language;
-    final email = app.pendingGoogleEmail ?? '';
+    final theme = app.theme;
 
     return TapTalkShell(
       backgroundColor: Color.alphaBlend(
         const Color(0x22FFFFFF),
-        app.theme.bgLight,
+        theme.bgLight,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
             padding: EdgeInsets.fromLTRB(
-              AppSpacing.sm,
-              AppSpacing.md + MediaQuery.paddingOf(context).top,
               AppSpacing.lg,
-              AppSpacing.sm,
+              AppSpacing.lg + MediaQuery.paddingOf(context).top,
+              AppSpacing.lg,
+              AppSpacing.md,
             ),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                IconButton(
-                  onPressed: _busy ? null : () => _goBack(app),
-                  icon: const Icon(Icons.arrow_back_rounded, color: _titleColor),
-                ),
-                Expanded(
-                  child: Text(
-                    AppStrings.chooseRoleTitle(lang),
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.poppins(
-                      fontSize: 26,
-                      fontWeight: FontWeight.w700,
-                      color: _titleColor,
-                    ),
+                Text(
+                  AppStrings.chooseRoleTitle(lang),
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.poppins(
+                    fontSize: 30,
+                    fontWeight: FontWeight.w700,
+                    color: _titleColor,
                   ),
                 ),
-                const SizedBox(width: 48),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  AppStrings.chooseRoleSub(lang),
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w400,
+                    color: _subColor,
+                  ),
+                ),
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-            child: Text(
-              AppStrings.chooseRoleSub(lang),
-              textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(
-                fontSize: 13,
-                fontWeight: FontWeight.w400,
-                color: _subColor,
-              ),
-            ),
-          ),
-          if (email.isNotEmpty) ...[
-            const SizedBox(height: AppSpacing.sm),
+          if (_error != null)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: Text(
-                email,
-                textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: _accent,
-                ),
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                0,
+                AppSpacing.lg,
+                AppSpacing.sm,
               ),
-            ),
-          ],
-          if (_error != null) ...[
-            const SizedBox(height: AppSpacing.sm),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
               child: Text(
                 _error!,
                 textAlign: TextAlign.center,
@@ -126,8 +103,6 @@ class _ChooseRoleScreenState extends State<ChooseRoleScreen> {
                 ),
               ),
             ),
-          ],
-          const SizedBox(height: AppSpacing.lg),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
@@ -224,93 +199,103 @@ class _ChooseRoleScreenState extends State<ChooseRoleScreen> {
     required String title,
     required String subtitle,
   }) {
+    final theme = context.watch<AppState>().theme;
     final selected = _role == role;
+    final accent = theme.bgAccent;
+    final radius = BorderRadius.circular(18);
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: _busy ? null : () => setState(() => _role = role),
-        borderRadius: BorderRadius.circular(16),
-        splashColor: _accent.withValues(alpha: 0.12),
-        highlightColor: _accent.withValues(alpha: 0.08),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md,
-            vertical: AppSpacing.md,
-          ),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: selected
-                  ? _accent.withValues(alpha: 0.78)
-                  : const Color(0xFFDCE7E1),
-              width: selected ? 2 : 1,
-            ),
-            boxShadow: selected
-                ? [
-                    BoxShadow(
-                      color: _accent.withValues(alpha: 0.12),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
+        borderRadius: radius,
+        splashColor: accent.withValues(alpha: 0.10),
+        highlightColor: accent.withValues(alpha: 0.06),
+        child: ClipRRect(
+          borderRadius: radius,
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.md,
+              ),
+              decoration: BoxDecoration(
+                borderRadius: radius,
+                color: Color.alphaBlend(
+                  Colors.white.withValues(alpha: selected ? 0.52 : 0.38),
+                  theme.bgMid.withValues(alpha: selected ? 0.42 : 0.28),
+                ),
+                border: Border.all(
                   color: selected
-                      ? const Color(0xFFEAF8F1)
-                      : const Color(0xFFF5F5F5),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: selected
-                        ? _accent.withValues(alpha: 0.55)
-                        : const Color(0xFFE5E5E5),
+                      ? accent.withValues(alpha: 0.45)
+                      : Colors.white.withValues(alpha: 0.55),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: accent.withValues(alpha: selected ? 0.16 : 0.06),
+                    blurRadius: selected ? 16 : 10,
+                    offset: const Offset(0, 6),
                   ),
-                ),
-                child: Icon(
-                  icon,
-                  color: selected ? _accent : const Color(0xFF6B7C74),
-                ),
+                ],
               ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: GoogleFonts.poppins(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: _titleColor,
+              child: Row(
+                children: [
+                  Container(
+                    width: 46,
+                    height: 46,
+                    decoration: BoxDecoration(
+                      color: Color.alphaBlend(
+                        Colors.white.withValues(alpha: 0.42),
+                        accent.withValues(alpha: selected ? 0.28 : 0.14),
                       ),
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        height: 1.35,
-                        color: _subColor,
-                      ),
+                    child: Icon(
+                      icon,
+                      color: selected
+                          ? accent
+                          : theme.textMain.withValues(alpha: 0.62),
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: _titleColor,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle,
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            height: 1.35,
+                            color: _subColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    selected
+                        ? Icons.check_circle_rounded
+                        : Icons.circle_outlined,
+                    color: selected
+                        ? accent
+                        : theme.textMain.withValues(alpha: 0.28),
+                  ),
+                ],
               ),
-              Icon(
-                selected
-                    ? Icons.check_circle_rounded
-                    : Icons.circle_outlined,
-                color: selected ? _accent : const Color(0xFFD0D8D4),
-              ),
-            ],
+            ),
           ),
         ),
       ),
