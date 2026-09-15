@@ -215,12 +215,14 @@ class SourceDrawer extends StatelessWidget {
                             icon: Icons.switch_account_outlined,
                             label: AppStrings.switchAccount(lang),
                             onTap: () => SwitchAccountSheet.show(context),
+                            compact: true,
                           ),
                           _DrawerItem(
                             theme: theme,
                             icon: Icons.logout_rounded,
                             label: AppStrings.logout(lang),
                             onTap: app.logout,
+                            compact: true,
                           ),
                         ],
                       ),
@@ -242,6 +244,7 @@ class _DrawerItem extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.active = false,
+    this.compact = false,
   });
 
   final TapTalkThemeToken theme;
@@ -249,6 +252,7 @@ class _DrawerItem extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
   final bool active;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -263,7 +267,7 @@ class _DrawerItem extends StatelessWidget {
         : Colors.transparent;
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      padding: EdgeInsets.only(bottom: compact ? 0 : AppSpacing.sm),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -271,7 +275,7 @@ class _DrawerItem extends StatelessWidget {
             duration: AppSpacing.drawerAnimation,
             curve: Curves.easeOutCubic,
             width: 4,
-            height: 40,
+            height: compact ? 34 : 40,
             margin: const EdgeInsets.only(right: AppSpacing.sm),
             decoration: BoxDecoration(
               color: active ? accent : Colors.transparent,
@@ -289,9 +293,9 @@ class _DrawerItem extends StatelessWidget {
                 child: AnimatedContainer(
                   duration: AppSpacing.drawerAnimation,
                   curve: Curves.easeOutCubic,
-                  padding: const EdgeInsets.symmetric(
+                  padding: EdgeInsets.symmetric(
                     horizontal: AppSpacing.md,
-                    vertical: AppSpacing.md,
+                    vertical: compact ? AppSpacing.xs : AppSpacing.md,
                   ),
                   decoration: BoxDecoration(
                     color: rowHighlight,
