@@ -39,11 +39,13 @@ class FirebaseService {
   Future<T?> _withAuthTimeout<T>(
     Future<T?> Function() action, {
     String? label,
+    Duration? timeout,
   }) async {
+    final limit = timeout ?? _authTimeout;
     try {
-      return await action().timeout(_authTimeout);
+      return await action().timeout(limit);
     } on TimeoutException {
-      debugPrint('Firebase ${label ?? "auth"} timed out after $_authTimeout.');
+      debugPrint('Firebase ${label ?? "auth"} timed out after $limit.');
       return null;
     }
   }
@@ -410,10 +412,11 @@ class FirebaseService {
     _clearAuthError();
     final firebaseAuth = auth;
     if (firebaseAuth == null) return null;
-    final uid = await _withAuthTimeout<String?>(() async {
+    final normalizedEmail = email.trim().toLowerCase();
+    var uid = await _withAuthTimeout<String?>(() async {
       try {
         final credential = await firebaseAuth.createUserWithEmailAndPassword(
-          email: email.trim().toLowerCase(),
+          email: normalizedEmail,
           password: password,
         );
         return credential.user?.uid;
@@ -426,11 +429,72 @@ class FirebaseService {
         debugPrint('Firebase create account error: $e\n$st');
         return null;
       }
-    }, label: 'create-account');
+    }, label: 'create-account', timeout: const Duration(seconds: 25));
+
+    if (uid == null || uid.isEmpty) {
+      uid = await _recoverUidAfterCreate(
+        firebaseAuth: firebaseAuth,
+        email: normalizedEmail,
+        password: password,
+      );
+    }
+
     if (uid != null && uid.isNotEmpty) {
+      _clearAuthError();
       await _tryRegisterActiveSession();
     }
     return uid;
+  }
+
+  /// createUser can succeed in Firebase after a client timeout, leaving the
+  /// new Auth user in Console while this app still thinks sign-up failed.
+  Future<String?> _recoverUidAfterCreate({
+    required FirebaseAuth firebaseAuth,
+    required String email,
+    required String password,
+  }) async {
+    String? matchingUid() {
+      final user = firebaseAuth.currentUser;
+      final userEmail = user?.email?.trim().toLowerCase();
+      if (user != null && userEmail == email) return user.uid;
+      return null;
+    }
+
+    final immediate = matchingUid();
+    if (immediate != null) return immediate;
+
+    final createError = lastAuthErrorCode;
+    if (createError == 'weak-password' ||
+        createError == 'invalid-email' ||
+        createError == 'operation-not-allowed') {
+      return null;
+    }
+
+    if (createError != 'email-already-in-use') {
+      for (var i = 0; i < 8; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+        final polled = matchingUid();
+        if (polled != null) return polled;
+      }
+    }
+
+    if (createError != null &&
+        createError != 'unknown' &&
+        createError != 'email-already-in-use' &&
+        createError != 'network-request-failed') {
+      return matchingUid();
+    }
+
+    final signedIn = await signIn(email: email, password: password);
+    if (signedIn != null && signedIn.isNotEmpty) {
+      _clearAuthError();
+      return signedIn;
+    }
+
+    if (createError == 'email-already-in-use') {
+      _setAuthError('email-already-in-use');
+    }
+    return matchingUid();
   }
 
   /// Signs in existing Firebase users or creates one for legacy local accounts.

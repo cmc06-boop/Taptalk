@@ -2554,70 +2554,89 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       if (msg.contains('unique') || msg.contains('constraint')) {
         final existing = await _repo.findUserByEmail(normalizedEmail);
         if (existing == null) {
-          return AppStrings.emailInUse(_language);
+          final byUid = await _repo.findUserByFirebaseUid(firebaseUid);
+          if (byUid == null) {
+            return AppStrings.emailInUse(_language);
+          }
+          _user = byUid;
+        } else {
+          await _repo.deleteLocalAccountCompletely(existing.id);
+          _user = await _repo.registerUser(
+            fullName: fullName,
+            firstName: firstName,
+            lastName: lastName,
+            email: normalizedEmail,
+            password: password,
+            role: role,
+            firebaseUid: firebaseUid,
+          );
         }
-        await _repo.deleteLocalAccountCompletely(existing.id);
-        _user = await _repo.registerUser(
-          fullName: fullName,
-          firstName: firstName,
-          lastName: lastName,
-          email: normalizedEmail,
-          password: password,
-          role: role,
-          firebaseUid: firebaseUid,
-        );
       } else {
-        rethrow;
+        final existing = await _repo.findUserByEmail(normalizedEmail) ??
+            await _repo.findUserByFirebaseUid(firebaseUid);
+        if (existing == null) {
+          rethrow;
+        }
+        _user = existing;
+        if (existing.firebaseUid == null || existing.firebaseUid!.isEmpty) {
+          await _repo.linkFirebaseUid(existing.id, firebaseUid);
+        }
       }
     }
-
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('user_id', _user!.id);
-    _resetAccountSession();
-    _welcomeFirstName = firstName.trim();
-    _profileLastName = lastName.trim();
-    _hasStoredLastName = true;
-    if (role == 'learner') {
-      _theme = TapTalkThemes.appDefault;
-      await _setLanguageOnboardingDone(_user!.id, false);
-      await _setCategoryOnboardingDone(_user!.id, false);
-      await _goToRouteReplacingStack(AppRoute.chooseLanguage);
-    } else if (role == 'parent') {
-      _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
-      await _setLanguageOnboardingDone(_user!.id, false);
-      await _goToRouteReplacingStack(AppRoute.chooseLanguage);
-    } else if (role == 'teacher') {
-      _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
-      await _setLanguageOnboardingDone(_user!.id, false);
-      await _goToRouteReplacingStack(AppRoute.chooseLanguage);
-    } else {
-      await _goToRouteReplacingStack(AppRoute.login);
-    }
-
-    notifyListeners();
 
     try {
-      await _syncUserProfileToCloud();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('user_id', _user!.id);
+      _resetAccountSession();
+      _welcomeFirstName = firstName.trim();
+      _profileLastName = lastName.trim();
+      _hasStoredLastName = true;
       if (role == 'learner') {
-        await _loadLearnerData(cloudSyncInBackground: false);
-        await _ensureStarterData();
+        _theme = TapTalkThemes.appDefault;
+        await _setLanguageOnboardingDone(_user!.id, false);
+        await _setCategoryOnboardingDone(_user!.id, false);
+        await _goToRouteReplacingStack(AppRoute.chooseLanguage);
       } else if (role == 'parent') {
-        await _loadLearnerData(cloudSyncInBackground: true);
-        await _ensureStarterData();
-        await _loadLinkedChildren(syncCloudInBackground: true);
+        _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
+        await _setLanguageOnboardingDone(_user!.id, false);
+        await _goToRouteReplacingStack(AppRoute.chooseLanguage);
       } else if (role == 'teacher') {
-        await _loadLearnerData(cloudSyncInBackground: true);
-        await _ensureStarterData();
-        await refreshTeacherClasses(cloudSyncInBackground: true);
+        _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
+        await _setLanguageOnboardingDone(_user!.id, false);
+        await _goToRouteReplacingStack(AppRoute.chooseLanguage);
+      } else {
+        await _goToRouteReplacingStack(AppRoute.login);
       }
-      unawaited(_activateMonitoringSync());
-      notifyListeners();
-    } catch (e, st) {
-      debugPrint('Post-register data load failed (account is saved): $e\n$st');
-    }
 
-    await _recordCurrentAccount();
-    return null;
+      notifyListeners();
+
+      try {
+        await _syncUserProfileToCloud();
+        if (role == 'learner') {
+          await _loadLearnerData(cloudSyncInBackground: false);
+          await _ensureStarterData();
+        } else if (role == 'parent') {
+          await _loadLearnerData(cloudSyncInBackground: true);
+          await _ensureStarterData();
+          await _loadLinkedChildren(syncCloudInBackground: true);
+        } else if (role == 'teacher') {
+          await _loadLearnerData(cloudSyncInBackground: true);
+          await _ensureStarterData();
+          await refreshTeacherClasses(cloudSyncInBackground: true);
+        }
+        unawaited(_activateMonitoringSync());
+        notifyListeners();
+      } catch (e, st) {
+        debugPrint('Post-register data load failed (account is saved): $e\n$st');
+      }
+
+      await _recordCurrentAccount();
+      return null;
+    } catch (e, st) {
+      debugPrint('Post-register setup failed (account is saved): $e\n$st');
+      notifyListeners();
+      return null;
+    }
   }
 
   // ── Phone Auth ─────────────────────────────────────────────────────────────
