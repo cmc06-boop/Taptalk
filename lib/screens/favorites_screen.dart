@@ -145,7 +145,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
       maxLines: 1,
       textDirection: TextDirection.ltr,
     )..layout();
-    return painter.width.ceilToDouble().clamp(36.0, 200.0) + 2;
+    return painter.width.ceilToDouble().clamp(48.0, 200.0) + 2;
   }
 
   @override
@@ -226,7 +226,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                       ),
                       const SizedBox(height: AppSpacing.xs),
                       SizedBox(
-                        height: 64,
+                        height: 80,
                         child: ListView.separated(
                           scrollDirection: Axis.horizontal,
                           padding: EdgeInsets.zero,
@@ -297,28 +297,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                       ),
                     ),
                     const SizedBox(height: 20),
-                    if (favoriteItems.isEmpty)
-                      SizedBox(
-                        width: double.infinity,
-                        height: MediaQuery.sizeOf(context).height * 0.38,
-                        child: Center(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.xl,
-                            ),
-                            child: Text(
-                              AppStrings.emptyFavoritesDesign(lang),
-                              textAlign: TextAlign.center,
-                              style: GoogleFonts.poppins(
-                                fontSize: 14,
-                                color: theme.bgAccent.withValues(alpha: 0.85),
-                                height: 1.5,
-                              ),
-                            ),
-                          ),
-                        ),
-                      )
-                    else
+                    if (favoriteItems.isNotEmpty)
                       GridView.builder(
                         padding: EdgeInsets.zero,
                         shrinkWrap: true,
@@ -402,8 +381,8 @@ class _FavoritesCategoryItem extends StatelessWidget {
             AnimatedContainer(
               duration: const Duration(milliseconds: 180),
               curve: Curves.easeOut,
-              width: 36,
-              height: 36,
+              width: 48,
+              height: 48,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: active ? accent : accent.withValues(alpha: 0.07),

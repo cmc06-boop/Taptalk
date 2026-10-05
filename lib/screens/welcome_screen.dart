@@ -134,17 +134,6 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                             ),
                             SizedBox(height: textBlockGap),
                             Text(
-                              AppStrings.welcomeTagline(lang),
-                              textAlign: TextAlign.center,
-                              style: GoogleFonts.poppins(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                                color: _bodyText.withValues(alpha: 0.88),
-                                height: 1.45,
-                              ),
-                            ),
-                            SizedBox(height: compactHeight ? 4 : 6),
-                            Text(
                               AppStrings.hereWeGo(lang),
                               textAlign: TextAlign.center,
                               style: GoogleFonts.poppins(
@@ -174,31 +163,35 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                               ),
                             ),
                             SizedBox(height: compactHeight ? 10 : 14),
-                            Text.rich(
-                              textAlign: TextAlign.center,
-                              TextSpan(
-                                text: lang == AppLanguage.filipino
-                                    ? 'May account na? '
-                                    : 'Already have an account? ',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 14,
-                                  color: _bodyText,
-                                ),
-                                children: [
-                                  WidgetSpan(
-                                    child: GestureDetector(
-                                      onTap: () =>
-                                          app.setRoute(AppRoute.login),
-                                      child: Text(
-                                        AppStrings.loginTitle(lang),
-                                        style: GoogleFonts.poppins(
-                                          fontWeight: FontWeight.w700,
-                                          color: _brandAccent,
-                                        ),
+                            SizedBox(
+                              height: 48,
+                              width: double.infinity,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => app.setRoute(AppRoute.login),
+                                child: Center(
+                                  child: Text.rich(
+                                    textAlign: TextAlign.center,
+                                    TextSpan(
+                                      text: lang == AppLanguage.filipino
+                                          ? 'May account na? '
+                                          : 'Already have an account? ',
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 14,
+                                        color: _bodyText,
                                       ),
+                                      children: [
+                                        TextSpan(
+                                          text: AppStrings.loginTitle(lang),
+                                          style: GoogleFonts.poppins(
+                                            fontWeight: FontWeight.w700,
+                                            color: _brandAccent,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                ],
+                                ),
                               ),
                             ),
                             SizedBox(height: compactHeight ? 4 : AppSpacing.xs),

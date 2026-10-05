@@ -114,11 +114,11 @@ class _ChooseThemeScreenState extends State<ChooseThemeScreen> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(
+            padding: EdgeInsets.fromLTRB(
               AppSpacing.lg,
               AppSpacing.sm,
               AppSpacing.lg,
-              AppSpacing.xs,
+              AppSpacing.lg + MediaQuery.paddingOf(context).bottom,
             ),
             child: SizedBox(
               width: double.infinity,
@@ -145,23 +145,6 @@ class _ChooseThemeScreenState extends State<ChooseThemeScreen> {
                     color: Colors.white,
                   ),
                 ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              0,
-              AppSpacing.lg,
-              AppSpacing.lg + MediaQuery.paddingOf(context).bottom,
-            ),
-            child: Text(
-              AppStrings.chooseThemeFooter(lang),
-              textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(
-                fontSize: 11,
-                fontWeight: FontWeight.w400,
-                color: _subColor,
               ),
             ),
           ),

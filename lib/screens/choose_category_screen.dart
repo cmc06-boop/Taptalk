@@ -224,12 +224,12 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
                               backgroundColor: _selecting
                                   ? Colors.transparent
                                   : theme.bgAccent.withValues(alpha: 0.10),
-                              minimumSize: Size.zero,
+                              minimumSize: const Size(48, 48),
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 12,
                                 vertical: 6,
                               ),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              tapTargetSize: MaterialTapTargetSize.padded,
                             ),
                             child: Text(
                               _selecting ? AppStrings.cancel(lang) : 'Select',

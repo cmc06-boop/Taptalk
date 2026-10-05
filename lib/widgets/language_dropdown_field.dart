@@ -36,7 +36,7 @@ class LanguageDropdownField extends StatelessWidget {
     final triggerPadding = prominent
         ? const EdgeInsets.symmetric(
             horizontal: AppSpacing.md,
-            vertical: AppSpacing.sm + 2,
+            vertical: AppSpacing.sm + 4,
           )
         : const EdgeInsets.symmetric(
             horizontal: AppSpacing.sm + 4,

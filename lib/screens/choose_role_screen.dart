@@ -244,8 +244,8 @@ class _ChooseRoleScreenState extends State<ChooseRoleScreen> {
               child: Row(
                 children: [
                   Container(
-                    width: 46,
-                    height: 46,
+                    width: 48,
+                    height: 48,
                     decoration: BoxDecoration(
                       color: Color.alphaBlend(
                         Colors.white.withValues(alpha: 0.42),

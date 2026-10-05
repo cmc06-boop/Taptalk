@@ -283,40 +283,36 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     TextEditingController controller, {
     TextInputType? keyboard,
   }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600),
+    return TextField(
+      controller: controller,
+      keyboardType: keyboard,
+      decoration: InputDecoration(
+        hintText: label,
+        hintStyle: GoogleFonts.poppins(
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+          color: const Color(0xFF5A6B63),
         ),
-        const SizedBox(height: AppSpacing.xs),
-        TextField(
-          controller: controller,
-          keyboardType: keyboard,
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: const Color(0xFFEFF8F3),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFDCECE4)),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFDCECE4)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide(
-                color: const Color(0xFF5BB88A).withValues(alpha: 0.65),
-                width: 1.6,
-              ),
-            ),
+        filled: true,
+        fillColor: const Color(0xFFEFF8F3),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Color(0xFFDCECE4)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Color(0xFFDCECE4)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(
+            color: const Color(0xFF5BB88A).withValues(alpha: 0.65),
+            width: 1.6,
           ),
         ),
-      ],
+      ),
     );
   }
 }

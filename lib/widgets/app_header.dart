@@ -62,28 +62,32 @@ class AppHeader extends StatelessWidget {
                 icon: Icons.menu_rounded,
                 onTap: onMenu,
                 accent: theme.bgAccent,
+                size: 48,
               )
             else
-              const SizedBox(width: 36),
+              const SizedBox(width: 48),
             Expanded(
               child: Center(
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Flexible(
-                      child:
-                          titleWidget ??
-                          Text(
-                            title,
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.poppins(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                              color: theme.textMain,
+                      child: Semantics(
+                        header: true,
+                        child:
+                            titleWidget ??
+                            Text(
+                              title,
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.poppins(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: theme.textMain,
+                              ),
                             ),
-                          ),
+                      ),
                     ),
                     if (titleBadge != null) ...[
                       const SizedBox(width: 8),
@@ -150,9 +154,10 @@ class AppHeader extends StatelessWidget {
                 onTap: onProfile,
                 accent: theme.bgAccent,
                 filled: true,
+                size: 48,
               )
             else
-              const SizedBox(width: 36),
+              const SizedBox(width: 48),
           ],
         ),
       ),
@@ -197,12 +202,14 @@ class _CircleIconButton extends StatelessWidget {
     required this.accent,
     this.onTap,
     this.filled = false,
+    this.size = 36,
   });
 
   final IconData icon;
   final Color accent;
   final VoidCallback? onTap;
   final bool filled;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
@@ -215,8 +222,8 @@ class _CircleIconButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: SizedBox(
-          width: 36,
-          height: 36,
+          width: size,
+          height: size,
           child: Icon(icon, size: 22, color: filled ? Colors.white : accent),
         ),
       ),

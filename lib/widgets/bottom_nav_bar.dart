@@ -50,6 +50,7 @@ class TapTalkBottomNav extends StatelessWidget {
             child: _NavItem(
               icon: Icons.home_rounded,
               label: AppStrings.home(lang),
+              semanticLabel: '${AppStrings.home(lang)}, tab',
               active: current == AppRoute.chooseCategory,
               onTap: () => app.setRoute(AppRoute.chooseCategory),
               color: theme,
@@ -59,6 +60,7 @@ class TapTalkBottomNav extends StatelessWidget {
             child: _NavItem(
               icon: Icons.favorite_border_rounded,
               label: AppStrings.favorites(lang),
+              semanticLabel: '${AppStrings.favorites(lang)}, tab',
               active: current == AppRoute.favorites,
               onTap: () => app.setRoute(AppRoute.favorites),
               color: theme,
@@ -92,6 +94,7 @@ class TapTalkBottomNav extends StatelessWidget {
             child: _NavItem(
               icon: Icons.history_rounded,
               label: AppStrings.history(lang),
+              semanticLabel: '${AppStrings.history(lang)}, tab',
               active: current == AppRoute.history,
               onTap: () => app.setRoute(AppRoute.history),
               color: theme,
@@ -101,6 +104,7 @@ class TapTalkBottomNav extends StatelessWidget {
             child: _NavItem(
               icon: Icons.settings_outlined,
               label: AppStrings.settings(lang),
+              semanticLabel: '${AppStrings.settings(lang)}, tab',
               active: current == AppRoute.settings,
               onTap: () => app.setRoute(AppRoute.settings),
               color: theme,
@@ -116,6 +120,7 @@ class _NavItem extends StatelessWidget {
   const _NavItem({
     required this.icon,
     required this.label,
+    required this.semanticLabel,
     required this.active,
     required this.onTap,
     required this.color,
@@ -123,6 +128,7 @@ class _NavItem extends StatelessWidget {
 
   final IconData icon;
   final String label;
+  final String semanticLabel;
   final bool active;
   final VoidCallback onTap;
   final dynamic color;
@@ -130,34 +136,51 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = color;
-    return InkWell(
+    return Semantics(
+      button: true,
+      selected: active,
+      label: semanticLabel,
+      excludeSemantics: true,
       onTap: onTap,
-      borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: AppSpacing.xs),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 20,
-              color: active ? theme.bgAccent : theme.textMain.withValues(alpha: 0.68),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.xs,
+              vertical: AppSpacing.xs,
             ),
-            const SizedBox(height: 2),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                label,
-                maxLines: 1,
-                textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(
-                  fontSize: 10,
-                  fontWeight: active ? FontWeight.w800 : FontWeight.w600,
-                  color: active ? theme.bgAccent : theme.textMain.withValues(alpha: 0.68),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 20,
+                  color: active
+                      ? theme.bgAccent
+                      : theme.textMain.withValues(alpha: 0.68),
                 ),
-              ),
+                const SizedBox(height: 2),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                      color: active
+                          ? theme.bgAccent
+                          : theme.textMain.withValues(alpha: 0.68),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

@@ -8,7 +8,6 @@ import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/utils/auth_validation.dart';
 import '../providers/app_state.dart';
-import '../services/firebase_service.dart';
 import '../widgets/offline_notice_banner.dart';
 import '../widgets/password_strength_hint.dart';
 import '../widgets/taptalk_logo.dart';
@@ -90,6 +89,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final lang = app.language;
 
     setState(() => _attemptedSubmit = true);
+    final missing = _firstName.text.trim().isEmpty ||
+        _lastName.text.trim().isEmpty ||
+        _email.text.trim().isEmpty ||
+        _password.text.isEmpty ||
+        _confirmPassword.text.isEmpty;
+    if (missing) {
+      setState(() => _error = AppStrings.fillAllFields(lang));
+      _formKey.currentState!.validate();
+      return;
+    }
     if (!_formKey.currentState!.validate()) {
       setState(() => _error = null);
       return;
@@ -261,7 +270,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                     textInputAction: TextInputAction.next,
                                     validator: (value) {
                                       if (value == null || value.trim().isEmpty) {
-                                        return AppStrings.fillAllFields(lang);
+                                        return null;
                                       }
                                       if (!AuthValidation.isValidFullName(value)) {
                                         return AppStrings.invalidFullName(lang);
@@ -278,7 +287,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                     textInputAction: TextInputAction.next,
                                     validator: (value) {
                                       if (value == null || value.trim().isEmpty) {
-                                        return AppStrings.fillAllFields(lang);
+                                        return null;
                                       }
                                       if (!AuthValidation.isValidFullName(value)) {
                                         return AppStrings.invalidFullName(lang);
@@ -299,7 +308,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               autocorrect: false,
                               validator: (value) {
                                 if (value == null || value.trim().isEmpty) {
-                                  return AppStrings.fillAllFields(lang);
+                                  return null;
                                 }
                                 if (!AuthValidation.isValidEmail(value)) {
                                   return AppStrings.invalidEmail(lang);
@@ -329,7 +338,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   return null;
                                 }
                                 if (value == null || value.isEmpty) {
-                                  return AppStrings.fillAllFields(lang);
+                                  return null;
                                 }
                                 if (!AuthValidation.isStrongPassword(value)) {
                                   return AppStrings.passwordTooShort(lang);
@@ -357,7 +366,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   return null;
                                 }
                                 if (value == null || value.isEmpty) {
-                                  return AppStrings.fillAllFields(lang);
+                                  return null;
                                 }
                                 if (value != _password.text) {
                                   return AppStrings.passwordsDoNotMatch(lang);
@@ -440,7 +449,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             TextButton(
                               onPressed: () => app.setRoute(AppRoute.login),
                               style: TextButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                minimumSize: const Size(48, 48),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
                               ),
                               child: Text.rich(
                                 textAlign: TextAlign.center,
@@ -463,8 +476,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 ),
                               ),
                             ),
-                            if (FirebaseService.isGoogleAuthSupported)
-                              Align(
+                            Align(
                                 alignment: Alignment.center,
                                 child: TextButton.icon(
                                   onPressed: _busy
@@ -487,8 +499,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                       horizontal: 12,
                                       vertical: 6,
                                     ),
-                                    minimumSize: const Size(0, 36),
-                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    minimumSize: const Size(48, 48),
+                                    tapTargetSize: MaterialTapTargetSize.padded,
                                     backgroundColor: Colors.transparent,
                                     surfaceTintColor: Colors.transparent,
                                     overlayColor: const Color(0xFF5BB88A).withValues(alpha: 0.08),
@@ -541,7 +553,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         borderRadius: BorderRadius.circular(14),
         splashColor: const Color(0xFF5BB88A).withValues(alpha: 0.12),
         highlightColor: const Color(0xFF5BB88A).withValues(alpha: 0.08),
-        child: AnimatedContainer(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+          child: AnimatedContainer(
           duration: const Duration(milliseconds: 240),
           curve: Curves.easeOutCubic,
           height: height,
@@ -600,6 +614,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             ],
           ),
         ),
+        ),
       ),
     );
   }
@@ -640,53 +655,68 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600),
+    return TextFormField(
+      key: fieldKey,
+      controller: controller,
+      obscureText: obscure,
+      keyboardType: keyboard,
+      textInputAction: textInputAction,
+      autocorrect: autocorrect,
+      onChanged: onChanged,
+      onFieldSubmitted: onFieldSubmitted,
+      validator: validator,
+      decoration: InputDecoration(
+        hintText: label,
+        hintStyle: GoogleFonts.poppins(
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+          color: const Color(0xFF5A6B63),
         ),
-        const SizedBox(height: AppSpacing.xs),
-        TextFormField(
-          key: fieldKey,
-          controller: controller,
-          obscureText: obscure,
-          keyboardType: keyboard,
-          textInputAction: textInputAction,
-          autocorrect: autocorrect,
-          onChanged: onChanged,
-          onFieldSubmitted: onFieldSubmitted,
-          validator: validator,
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: const Color(0xFFEFF8F3),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            errorStyle: GoogleFonts.poppins(fontSize: 11),
-            suffixIcon: onToggleObscure == null
-                ? null
-                : IconButton(
-                    icon: Icon(
-                      obscure
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined,
-                      color: const Color(0xFF5A6B63),
-                      size: 19,
-                    ),
-                    onPressed: onToggleObscure,
-                    constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
+        filled: true,
+        fillColor: const Color(0xFFEFF8F3),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        errorStyle: GoogleFonts.poppins(fontSize: 11),
+        suffixIcon: onToggleObscure == null
+            ? null
+            : IconButton(
+                tooltip: obscure ? 'Unhide $label' : 'Hide $label',
+                icon: ExcludeSemantics(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        obscure
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                        color: const Color(0xFF5A6B63),
+                        size: 19,
+                      ),
+                      Text(
+                        obscure ? 'Unhide' : 'Hide',
+                        style: GoogleFonts.poppins(
+                          fontSize: 8,
+                          height: 1.1,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF5A6B63),
+                        ),
+                      ),
+                    ],
                   ),
-            border: outlineBorder(defaultBorderColor),
-            enabledBorder: outlineBorder(borderColor),
-            focusedBorder: outlineBorder(
-              focusedBorderColor,
-              width: focusedBorderWidth,
-            ),
-            errorBorder: outlineBorder(weakBorderColor),
-            focusedErrorBorder: outlineBorder(weakBorderColor, width: 1.6),
-          ),
+                ),
+                onPressed: onToggleObscure,
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+              ),
+        border: outlineBorder(defaultBorderColor),
+        enabledBorder: outlineBorder(borderColor),
+        focusedBorder: outlineBorder(
+          focusedBorderColor,
+          width: focusedBorderWidth,
         ),
-      ],
+        errorBorder: outlineBorder(weakBorderColor),
+        focusedErrorBorder: outlineBorder(weakBorderColor, width: 1.6),
+      ),
     );
   }
 }

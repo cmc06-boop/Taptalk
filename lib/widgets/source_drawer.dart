@@ -17,6 +17,7 @@ Widget _settingsDrawerItem({
     theme: theme,
     icon: Icons.settings_outlined,
     label: AppStrings.settings(lang),
+    semanticLabel: '${AppStrings.settings(lang)}, menu',
     active: app.route == AppRoute.settings,
     onTap: () => app.setRoute(AppRoute.settings),
   );
@@ -37,10 +38,14 @@ class SourceDrawer extends StatelessWidget {
       fit: StackFit.expand,
       children: [
         Positioned.fill(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => app.toggleDrawer(false),
-            child: Container(color: Colors.black.withValues(alpha: 0.18)),
+          child: BlockSemantics(
+            child: ExcludeSemantics(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => app.toggleDrawer(false),
+                child: Container(color: Colors.black.withValues(alpha: 0.18)),
+              ),
+            ),
           ),
         ),
         Align(
@@ -243,6 +248,7 @@ class _DrawerItem extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onTap,
+    this.semanticLabel,
     this.active = false,
     this.compact = false,
   });
@@ -250,6 +256,7 @@ class _DrawerItem extends StatelessWidget {
   final TapTalkThemeToken theme;
   final IconData icon;
   final String label;
+  final String? semanticLabel;
   final VoidCallback onTap;
   final bool active;
   final bool compact;
@@ -271,19 +278,27 @@ class _DrawerItem extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          AnimatedContainer(
-            duration: AppSpacing.drawerAnimation,
-            curve: Curves.easeOutCubic,
-            width: 4,
-            height: compact ? 34 : 40,
-            margin: const EdgeInsets.only(right: AppSpacing.sm),
-            decoration: BoxDecoration(
-              color: active ? accent : Colors.transparent,
-              borderRadius: BorderRadius.circular(4),
+          ExcludeSemantics(
+            child: AnimatedContainer(
+              duration: AppSpacing.drawerAnimation,
+              curve: Curves.easeOutCubic,
+              width: 4,
+              height: compact ? 34 : 40,
+              margin: const EdgeInsets.only(right: AppSpacing.sm),
+              decoration: BoxDecoration(
+                color: active ? accent : Colors.transparent,
+                borderRadius: BorderRadius.circular(4),
+              ),
             ),
           ),
           Expanded(
-            child: Material(
+            child: Semantics(
+              button: true,
+              selected: active,
+              label: semanticLabel ?? '$label, menu',
+              excludeSemantics: true,
+              onTap: onTap,
+              child: Material(
               color: Colors.transparent,
               borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
               clipBehavior: Clip.antiAlias,
@@ -344,6 +359,7 @@ class _DrawerItem extends StatelessWidget {
                   ),
                 ),
               ),
+            ),
             ),
           ),
         ],
