@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
-import '../core/utils/auth_validation.dart';
 import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/language_dropdown_field.dart';
@@ -106,87 +105,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(AppSpacing.md),
-              decoration: BoxDecoration(
-                color: theme.bgMid.withValues(alpha: 0.55),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          AppStrings.accountsSection(lang),
-                          style: GoogleFonts.poppins(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                            color: theme.textMain,
-                          ),
-                        ),
-                      ),
-                      Material(
-                        color: theme.textMain.withValues(alpha: 0.06),
-                        borderRadius: BorderRadius.circular(8),
-                        child: InkWell(
-                          onTap: app.logout,
-                          borderRadius: BorderRadius.circular(8),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 5,
-                            ),
-                            child: Text(
-                              AppStrings.logout(lang),
-                              style: GoogleFonts.poppins(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: theme.textMain.withValues(alpha: 0.72),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (app.user != null) ...[
-                    const SizedBox(height: AppSpacing.sm),
-                    Text(
-                      AppStrings.currentAccount(lang),
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: theme.textMain.withValues(alpha: 0.62),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      app.user!.fullName,
-                      style: GoogleFonts.poppins(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: theme.textMain,
-                      ),
-                    ),
-                    Text(
-                      '${AppStrings.accountRoleLabel(lang, app.user!.role)} · ${AuthValidation.normalizeEmail(app.user!.email)}',
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        color: theme.textMain.withValues(alpha: 0.68),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: AppSpacing.lg),
           _SettingsAccordion(
             key: const ValueKey('settings_accordion_help'),
             title: AppStrings.helpSupport(lang),
@@ -231,6 +149,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onSelect: app.setTheme,
             ),
           ),
+          const SizedBox(height: AppSpacing.lg),
+          Center(
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: app.logout,
+                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                    vertical: AppSpacing.xs,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: theme.bgMid.withValues(alpha: 0.55),
+                          borderRadius: BorderRadius.circular(
+                            AppSpacing.radiusSm,
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.logout_rounded,
+                          color: theme.textMain.withValues(alpha: 0.78),
+                          size: 19,
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Text(
+                        AppStrings.logout(lang),
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: theme.textMain.withValues(alpha: 0.78),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -238,10 +203,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 }
 
 class _ThemePickerGrid extends StatelessWidget {
-  const _ThemePickerGrid({
-    required this.selectedKey,
-    required this.onSelect,
-  });
+  const _ThemePickerGrid({required this.selectedKey, required this.onSelect});
 
   final String selectedKey;
   final ValueChanged<String> onSelect;
@@ -406,8 +368,8 @@ class _SettingsAccordion extends StatelessWidget {
                 Container(
                   width: double.infinity,
                   color: _expandedBodyColor(theme),
-                  padding: expandedPadding ??
-                      const EdgeInsets.all(AppSpacing.md),
+                  padding:
+                      expandedPadding ?? const EdgeInsets.all(AppSpacing.md),
                   child: child,
                 ),
             ],
