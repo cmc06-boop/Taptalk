@@ -46,6 +46,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
   ChildUsagePeriod _period = ChildUsagePeriod.today;
   DateTime _selectedMonth = DateTime(DateTime.now().year, DateTime.now().month);
   List<PhraseUsageStat> _stats = [];
+  Map<String, int> _warningLevels = const {};
   List<CategoryModel> _childCategories = [];
   ChildSessionSummary _sessionSummary = ChildSessionSummary.empty;
   VocabularyGrowthPanelData _vocabularyPanel = VocabularyGrowthPanelData.empty;
@@ -215,12 +216,24 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
         debugPrint('Monitoring vocabulary growth load failed: $e\n$st');
       }
 
+      Map<String, int> warningLevels = const {};
+      if (_period == ChildUsagePeriod.today) {
+        try {
+          warningLevels = await app.getNegativePhraseWarningLevels(
+            learnerUserId: learnerId,
+          );
+        } catch (e, st) {
+          debugPrint('Monitoring warning levels load failed: $e\n$st');
+        }
+      }
+
       if (!mounted) return;
       setState(() {
         _trackingSince = trackingSince;
         _stats = _isParentMonitoring
             ? _mergeDuplicatePhraseStats(rawStats)
             : rawStats;
+        _warningLevels = warningLevels;
         _sessionSummary = sessionSummary;
         _childCategories = childCategories;
         _vocabularyPanel = vocabularyPanel;
@@ -863,6 +876,7 @@ class _ChildMonitoringScreenState extends State<ChildMonitoringScreen> {
                       theme: theme,
                       lang: lang,
                       reloadNonce: _reloadNonce,
+                      warningLevels: _warningLevels,
                       labelForCategory: (key) => _categoryLabel(app, key),
                       labelForPhrase: (stat) => app.localizedPhrase(
                         stat.text,

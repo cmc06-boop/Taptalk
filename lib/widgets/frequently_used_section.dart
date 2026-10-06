@@ -7,6 +7,7 @@ import '../core/constants/app_spacing.dart';
 import '../core/constants/monitoring_constants.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
+import '../core/utils/negative_phrases.dart';
 import '../data/models/phrase_usage_stat.dart';
 import '../data/repositories/app_repository.dart';
 
@@ -20,6 +21,7 @@ class FrequentlyUsedSection extends StatefulWidget {
     required this.labelForPhrase,
     required this.reloadNonce,
     this.allowedCategoryKeys,
+    this.warningLevels = const {},
   });
 
   final List<PhraseUsageStat> stats;
@@ -29,6 +31,7 @@ class FrequentlyUsedSection extends StatefulWidget {
   final String Function(PhraseUsageStat stat) labelForPhrase;
   final int reloadNonce;
   final Set<String>? allowedCategoryKeys;
+  final Map<String, int> warningLevels;
 
   static const previewPhraseCount = 5;
   static const minUsageCount = MonitoringConstants.frequentlyUsedMinCount;
@@ -113,6 +116,16 @@ class _FrequentlyUsedSectionState extends State<FrequentlyUsedSection> {
     return true;
   }
 
+  String? _levelLabelFor(PhraseUsageStat stat) {
+    if (stat.count < MonitoringConstants.negativeUsageWarningCount) {
+      return null;
+    }
+    final key = NegativePhrases.normalizeText(stat.text);
+    final level = widget.warningLevels[key];
+    if (level == null || level < 1) return null;
+    return AppStrings.negativeUsageWarningLevelTitle(widget.lang, level);
+  }
+
   void _syncSelectedCategory() {
     final grouped = _groupByCategory(_personalStats);
     final keys = _sortedCategoryKeys(grouped);
@@ -143,6 +156,7 @@ class _FrequentlyUsedSectionState extends State<FrequentlyUsedSection> {
         lang: widget.lang,
         labelForCategory: widget.labelForCategory,
         labelForPhrase: widget.labelForPhrase,
+        warningLevels: widget.warningLevels,
       ),
     );
     if (!mounted || picked == null) return;
@@ -250,6 +264,7 @@ class _FrequentlyUsedSectionState extends State<FrequentlyUsedSection> {
               lang: lang,
               phrase: widget.labelForPhrase(stat),
               count: stat.count,
+              levelLabel: _levelLabelFor(stat),
             ),
         ],
       ],
@@ -266,6 +281,7 @@ class _AllFrequentlyUsedSheet extends StatefulWidget {
     required this.lang,
     required this.labelForCategory,
     required this.labelForPhrase,
+    required this.warningLevels,
   });
 
   final Map<String, List<PhraseUsageStat>> grouped;
@@ -275,6 +291,7 @@ class _AllFrequentlyUsedSheet extends StatefulWidget {
   final AppLanguage lang;
   final String Function(String categoryKey) labelForCategory;
   final String Function(PhraseUsageStat stat) labelForPhrase;
+  final Map<String, int> warningLevels;
 
   @override
   State<_AllFrequentlyUsedSheet> createState() =>
@@ -295,6 +312,16 @@ class _AllFrequentlyUsedSheetState extends State<_AllFrequentlyUsedSheet> {
 
   List<PhraseUsageStat> get _selectedItems =>
       widget.grouped[_selectedCategoryKey] ?? const [];
+
+  String? _levelLabelFor(PhraseUsageStat stat) {
+    if (stat.count < MonitoringConstants.negativeUsageWarningCount) {
+      return null;
+    }
+    final key = NegativePhrases.normalizeText(stat.text);
+    final level = widget.warningLevels[key];
+    if (level == null || level < 1) return null;
+    return AppStrings.negativeUsageWarningLevelTitle(widget.lang, level);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -410,6 +437,7 @@ class _AllFrequentlyUsedSheetState extends State<_AllFrequentlyUsedSheet> {
                               lang: lang,
                               phrase: widget.labelForPhrase(stat),
                               count: stat.count,
+                              levelLabel: _levelLabelFor(stat),
                             ),
                       ],
                     ),
@@ -430,6 +458,7 @@ class _PhraseStatCard extends StatelessWidget {
     required this.lang,
     required this.phrase,
     required this.count,
+    this.levelLabel,
   });
 
   static const _cardRadius = 14.0;
@@ -438,6 +467,7 @@ class _PhraseStatCard extends StatelessWidget {
   final AppLanguage lang;
   final String phrase;
   final int count;
+  final String? levelLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -463,14 +493,31 @@ class _PhraseStatCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Expanded(
-            child: Text(
-              phrase,
-              style: GoogleFonts.poppins(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: theme.textMain,
-                height: 1.3,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  phrase,
+                  style: GoogleFonts.poppins(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: theme.textMain,
+                    height: 1.3,
+                  ),
+                ),
+                if (levelLabel != null && levelLabel!.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    levelLabel!,
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: theme.textMain.withValues(alpha: 0.55),
+                      height: 1.2,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
           const SizedBox(width: AppSpacing.sm),

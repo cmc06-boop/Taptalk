@@ -5,6 +5,9 @@ abstract final class MonitoringConstants {
   /// Teacher warning when a negative phrase is used this many times today.
   static const int negativeUsageWarningCount = 10;
 
+  /// Highest consecutive-day warning level (Level 1–3).
+  static const int maxNegativeWarningLevel = 3;
+
   /// Stored on teacher-inbox rows so they are not mixed with parent alerts.
   static const String negativeUsageAlertType = 'negativeUsageWarning';
 

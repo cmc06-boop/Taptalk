@@ -289,7 +289,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
               theme: theme,
               title: AppStrings.recentAlerts(lang),
               actionLabel: AppStrings.viewAll(lang),
-              onAction: () => app.setRoute(AppRoute.teacherAlertHistory),
+              onAction: () => app.setRoute(AppRoute.notifications),
             ),
             if (_loadingFeed)
               const Padding(
@@ -317,7 +317,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                     studentName: alert.childName.trim(),
                     timeLabel: AppStrings.timeAgo(alert.createdAt, lang),
                     description: AppStrings.alertTypeLabel(lang, alert.alertType),
-                    onTap: () => app.setRoute(AppRoute.teacherAlertHistory),
+                    onTap: () => app.setRoute(AppRoute.notifications),
                   ),
                 ),
               ),

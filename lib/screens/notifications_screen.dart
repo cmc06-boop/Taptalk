@@ -20,16 +20,102 @@ class NotificationsScreen extends StatefulWidget {
 }
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
+  List<ParentNotification> _teacherAlertRecords = const [];
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<AppState>().refreshNotifications();
+      _refresh();
     });
   }
 
   Future<void> _refresh() async {
-    await context.read<AppState>().refreshNotifications();
+    final app = context.read<AppState>();
+    await app.refreshNotifications();
+    if (!mounted) return;
+    final teacherRecords = await _loadTeacherAlertRecords(app);
+    if (!mounted) return;
+    setState(() => _teacherAlertRecords = teacherRecords);
+  }
+
+  Future<List<ParentNotification>> _loadTeacherAlertRecords(AppState app) async {
+    if (app.user?.isTeacher != true) return const [];
+    final lang = app.language;
+    final teacherId = app.user!.id;
+    final alerts = await app.getTeacherAlertHistory();
+    return [
+      for (final alert in alerts)
+        ParentNotification(
+          id: alert.id,
+          parentUserId: teacherId,
+          childName: alert.childName,
+          alertType: alert.alertType,
+          title: alert.childName.trim().isEmpty
+              ? AppStrings.alertTypeLabel(lang, alert.alertType)
+              : alert.childName.trim(),
+          body: [
+            AppStrings.alertTypeLabel(lang, alert.alertType),
+            if (alert.className.trim().isNotEmpty) alert.className.trim(),
+          ].join(' · '),
+          createdAt: alert.createdAt,
+          isRead: true,
+        ),
+    ];
+  }
+
+  List<ParentNotification> _mergedItems(List<ParentNotification> inbox) {
+    if (_teacherAlertRecords.isEmpty) return inbox;
+    final byId = <int, ParentNotification>{
+      for (final item in inbox) item.id: item,
+    };
+    for (final item in _teacherAlertRecords) {
+      byId.putIfAbsent(item.id, () => item);
+    }
+    final merged = byId.values.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return merged;
+  }
+
+  static String _displayTitle(String title) {
+    return title
+        .replaceFirst(
+          RegExp(r'^Level\s+[123]\s*[–\-]\s*', caseSensitive: false),
+          '',
+        )
+        .trim();
+  }
+
+  static String _displayBody(String body) {
+    var text = body.trim().split(RegExp(r'\n\s*\n')).first.trim();
+    text = text.replaceAll(
+      RegExp(
+        r'\s*(This phrase has reached the daily attention threshold\.?'
+        r'|This phrase reached the attention threshold[^\n]*'
+        r'|Naabot ng pariralang ito ang arawang attention threshold\.?'
+        r'|Naabot ulit ng pariralang ito[^\n]*'
+        r'|Naabot ng pariralang ito ang attention threshold sa loob[^\n]*)',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    return text.trim();
+  }
+
+  static bool _isUsageWarningNotification(ParentNotification notification) {
+    final title = _displayTitle(notification.title).toLowerCase();
+    if (title == 'needs attention' ||
+        title == 'persistent pattern' ||
+        title == 'needs review' ||
+        title == 'warning' ||
+        title == 'babala') {
+      return true;
+    }
+    final body = notification.body.toLowerCase();
+    return body.contains('times today') ||
+        body.contains('beses ngayon') ||
+        body.contains('has used') ||
+        body.contains('ay nagamit ng');
   }
 
   static String _sectionLabel(DateTime date, AppLanguage lang) {
@@ -83,6 +169,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             notification: notification,
             theme: theme,
             lang: lang,
+            title: _displayTitle(notification.title),
+            body: _displayBody(notification.body),
+            showTypeLabel: !_isUsageWarningNotification(notification),
             timeLabel: _formatTime(notification.createdAt, lang),
             icon: _iconFor(notification.alertType),
             onClose: () => Navigator.of(dialogContext).pop(),
@@ -111,7 +200,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final app = context.watch<AppState>();
     final theme = app.theme;
     final lang = app.language;
-    final items = app.notifications;
+    final items = _mergedItems(app.notifications);
     final grouped = _groupBySection(items, lang);
     final sectionKeys = grouped.keys.toList();
 
@@ -126,22 +215,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              0,
-              AppSpacing.lg,
-              AppSpacing.sm,
-            ),
-            child: Text(
-              AppStrings.notificationsSubtitle(lang),
-              style: GoogleFonts.poppins(
-                fontSize: 12,
-                color: theme.textMain.withValues(alpha: 0.65),
-                height: 1.35,
-              ),
-            ),
-          ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _refresh,
@@ -248,23 +321,27 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                   notification: notification,
                                   theme: theme,
                                   lang: lang,
+                                  title: _displayTitle(notification.title),
+                                  body: _displayBody(notification.body),
                                   timeLabel: _formatTime(
                                     notification.createdAt,
                                     lang,
                                   ),
                                   icon: _iconFor(notification.alertType),
-                                  onTap: () async {
-                                    await app.markNotificationRead(
-                                      notification.id,
-                                    );
-                                    if (!context.mounted) return;
-                                    await _showNotificationDetail(
-                                      context,
-                                      notification: notification,
-                                      theme: theme,
-                                      lang: lang,
-                                    );
-                                  },
+                                  onTap: app.user?.isTeacher == true
+                                      ? null
+                                      : () async {
+                                          await app.markNotificationRead(
+                                            notification.id,
+                                          );
+                                          if (!context.mounted) return;
+                                          await _showNotificationDetail(
+                                            context,
+                                            notification: notification,
+                                            theme: theme,
+                                            lang: lang,
+                                          );
+                                        },
                                 ),
                               ),
                           ],
@@ -284,17 +361,21 @@ class _NotificationTile extends StatelessWidget {
     required this.notification,
     required this.theme,
     required this.lang,
+    required this.title,
+    required this.body,
     required this.timeLabel,
     required this.icon,
-    required this.onTap,
+    this.onTap,
   });
 
   final ParentNotification notification;
   final TapTalkThemeToken theme;
   final AppLanguage lang;
+  final String title;
+  final String body;
   final String timeLabel;
   final IconData icon;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -322,7 +403,10 @@ class _NotificationTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         child: Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(AppSpacing.md),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
           decoration: BoxDecoration(
             color: cardFill,
             borderRadius: BorderRadius.circular(14),
@@ -347,15 +431,15 @@ class _NotificationTile extends StatelessWidget {
                 clipBehavior: Clip.none,
                 children: [
                   Container(
-                    width: 44,
-                    height: 44,
+                    width: 38,
+                    height: 38,
                     decoration: BoxDecoration(
                       color: alertBg,
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
                       icon,
-                      size: 22,
+                      size: 19,
                       color: alertColor,
                     ),
                   ),
@@ -381,22 +465,63 @@ class _NotificationTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
                           child: Text(
-                            notification.title,
-                            maxLines: 2,
+                            title,
+                            maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.poppins(
-                              fontSize: 14,
+                              fontSize: 13,
                               fontWeight:
                                   unread ? FontWeight.w700 : FontWeight.w600,
                               color: theme.textMain,
-                              height: 1.25,
+                              height: 1.2,
                             ),
                           ),
                         ),
+                        if (unread) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: accent.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              AppStrings.newAlertBadge(lang),
+                              style: GoogleFonts.poppins(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: accent,
+                                height: 1,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFE8E8),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              AppStrings.urgentLabel(lang),
+                              style: GoogleFonts.poppins(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: const Color(0xFFC62828),
+                                height: 1,
+                              ),
+                            ),
+                          ),
+                        ],
                         const SizedBox(width: AppSpacing.sm),
                         Text(
                           timeLabel,
@@ -413,64 +538,22 @@ class _NotificationTile extends StatelessWidget {
                         ),
                       ],
                     ),
-                    if (unread) ...[
-                      const SizedBox(height: 4),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: accent.withValues(alpha: 0.14),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              AppStrings.newAlertBadge(lang),
-                              style: GoogleFonts.poppins(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w700,
-                                color: accent,
-                              ),
-                            ),
+                    const SizedBox(height: 4),
+                    SizedBox(
+                      height: 30,
+                      child: Text(
+                        body,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight:
+                              unread ? FontWeight.w500 : FontWeight.w400,
+                          color: theme.textMain.withValues(
+                            alpha: unread ? 0.82 : 0.62,
                           ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFFFE8E8),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              AppStrings.urgentLabel(lang),
-                              style: GoogleFonts.poppins(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w700,
-                                color: const Color(0xFFC62828),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                    const SizedBox(height: 6),
-                    Text(
-                      notification.body,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        fontSize: 13,
-                        fontWeight:
-                            unread ? FontWeight.w500 : FontWeight.w400,
-                        color: theme.textMain.withValues(
-                          alpha: unread ? 0.82 : 0.62,
+                          height: 1.25,
                         ),
-                        height: 1.35,
                       ),
                     ),
                   ],
@@ -489,6 +572,9 @@ class _NotificationDetailPopup extends StatelessWidget {
     required this.notification,
     required this.theme,
     required this.lang,
+    required this.title,
+    required this.body,
+    required this.showTypeLabel,
     required this.timeLabel,
     required this.icon,
     required this.onClose,
@@ -497,6 +583,9 @@ class _NotificationDetailPopup extends StatelessWidget {
   final ParentNotification notification;
   final TapTalkThemeToken theme;
   final AppLanguage lang;
+  final String title;
+  final String body;
+  final bool showTypeLabel;
   final String timeLabel;
   final IconData icon;
   final VoidCallback onClose;
@@ -558,7 +647,7 @@ class _NotificationDetailPopup extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                notification.title,
+                                title,
                                 maxLines: 3,
                                 overflow: TextOverflow.ellipsis,
                                 style: GoogleFonts.poppins(
@@ -596,21 +685,24 @@ class _NotificationDetailPopup extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.lg,
-                    ),
-                    child: Text(
-                      AppStrings.alertTypeLabel(lang, notification.alertType),
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: iconColor,
+                  if (showTypeLabel) ...[
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.lg,
+                      ),
+                      child: Text(
+                        AppStrings.alertTypeLabel(lang, notification.alertType),
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: iconColor,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: AppSpacing.md),
+                    const SizedBox(height: AppSpacing.md),
+                  ] else
+                    const SizedBox(height: AppSpacing.md),
                   Flexible(
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.fromLTRB(
@@ -620,7 +712,7 @@ class _NotificationDetailPopup extends StatelessWidget {
                         AppSpacing.md,
                       ),
                       child: Text(
-                        notification.body,
+                        body,
                         style: GoogleFonts.poppins(
                           fontSize: 14,
                           fontWeight: FontWeight.w500,

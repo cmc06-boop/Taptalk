@@ -1499,6 +1499,40 @@ abstract final class AppStrings {
   static String negativeUsageWarningTitle(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Babala' : 'Warning';
 
+  static String negativeUsageWarningLevelTitle(AppLanguage lang, int level) {
+    switch (level) {
+      case 2:
+        return lang == AppLanguage.filipino
+            ? 'Persistent Pattern'
+            : 'Persistent Pattern';
+      case 3:
+        return lang == AppLanguage.filipino
+            ? 'Needs Review'
+            : 'Needs Review';
+      default:
+        return lang == AppLanguage.filipino
+            ? 'Needs Attention'
+            : 'Needs Attention';
+    }
+  }
+
+  static String negativeUsageWarningLevelDetail(AppLanguage lang, int level) {
+    switch (level) {
+      case 2:
+        return lang == AppLanguage.filipino
+            ? 'Naabot ulit ng pariralang ito ang attention threshold kinabukasan.'
+            : 'This phrase reached the attention threshold again on the following day.';
+      case 3:
+        return lang == AppLanguage.filipino
+            ? 'Naabot ng pariralang ito ang attention threshold sa loob ng tatlong magkakasunod na araw.'
+            : 'This phrase reached the attention threshold for three consecutive days.';
+      default:
+        return lang == AppLanguage.filipino
+            ? 'Naabot ng pariralang ito ang arawang attention threshold.'
+            : 'This phrase has reached the daily attention threshold.';
+    }
+  }
+
   static String negativeUsageWarningBody(
     AppLanguage lang,
     String childName,
@@ -1508,6 +1542,16 @@ abstract final class AppStrings {
     return lang == AppLanguage.filipino
         ? 'Si $childName ay nagamit ng “$phrase” nang $count beses ngayon. Pakitingnan po.'
         : '$childName has used “$phrase” $count times today. Please check in.';
+  }
+
+  static String negativeUsageWarningNotificationBody(
+    AppLanguage lang,
+    String childName,
+    String phrase,
+    int count,
+    int level,
+  ) {
+    return negativeUsageWarningBody(lang, childName, phrase, count);
   }
 
   static String frequentlyUsed(AppLanguage lang) =>

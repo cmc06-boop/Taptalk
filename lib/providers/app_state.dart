@@ -78,7 +78,6 @@ enum AppRoute {
   teacherDashboard,
   teacherMyClasses,
   teacherMonitoring,
-  teacherAlertHistory,
   teacherRecentLessons,
   teacherJoinRequests,
   phoneOtp,
@@ -4537,6 +4536,79 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _notifications = await _repo.getParentNotifications(_user!.id);
   }
 
+  int _normalizedPhraseCount(List<PhraseUsageStat> stats, String phraseKey) {
+    var total = 0;
+    for (final stat in stats) {
+      if (NegativePhrases.normalizeText(stat.text) == phraseKey) {
+        total += stat.count;
+      }
+    }
+    return total;
+  }
+
+  int _negativeWarningLevelForCounts({
+    required int todayCount,
+    required int yesterdayCount,
+    required int twoDaysAgoCount,
+  }) {
+    if (todayCount < MonitoringConstants.negativeUsageWarningCount) return 0;
+    if (yesterdayCount < MonitoringConstants.negativeUsageWarningCount) {
+      return 1;
+    }
+    if (twoDaysAgoCount < MonitoringConstants.negativeUsageWarningCount) {
+      return 2;
+    }
+    return MonitoringConstants.maxNegativeWarningLevel;
+  }
+
+  Future<Map<String, int>> getNegativePhraseWarningLevels({
+    required int learnerUserId,
+  }) async {
+    final range = _dateRangeForPeriod(ChildUsagePeriod.today);
+    final dayStart = range.$1;
+    final yesterdayStart = dayStart.subtract(const Duration(days: 1));
+    final twoDaysAgoStart = dayStart.subtract(const Duration(days: 2));
+    final todayStats = await _repo.getPhraseUsageStats(
+      learnerUserId: learnerUserId,
+      rangeStart: range.$1,
+      rangeEnd: range.$2,
+    );
+    final yesterdayStats = await _repo.getPhraseUsageStats(
+      learnerUserId: learnerUserId,
+      rangeStart: yesterdayStart,
+      rangeEnd: dayStart,
+    );
+    final twoDaysAgoStats = await _repo.getPhraseUsageStats(
+      learnerUserId: learnerUserId,
+      rangeStart: twoDaysAgoStart,
+      rangeEnd: yesterdayStart,
+    );
+
+    final levels = <String, int>{};
+    final phraseKeys = <String>{};
+    for (final stat in todayStats) {
+      if (!NegativePhrases.isNegative(
+        text: stat.text,
+        categoryKey: stat.categoryKey,
+      )) {
+        continue;
+      }
+      final phraseKey = NegativePhrases.normalizeText(stat.text);
+      if (phraseKey.isEmpty) continue;
+      phraseKeys.add(phraseKey);
+    }
+    for (final phraseKey in phraseKeys) {
+      final todayCount = _normalizedPhraseCount(todayStats, phraseKey);
+      final level = _negativeWarningLevelForCounts(
+        todayCount: todayCount,
+        yesterdayCount: _normalizedPhraseCount(yesterdayStats, phraseKey),
+        twoDaysAgoCount: _normalizedPhraseCount(twoDaysAgoStats, phraseKey),
+      );
+      if (level > 0) levels[phraseKey] = level;
+    }
+    return levels;
+  }
+
   Future<void> _evaluateTeacherNegativeUsageWarnings() async {
     final inFlight = _negativeUsageEvalInFlight;
     if (inFlight != null) {
@@ -4585,18 +4657,29 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
       final range = _dateRangeForPeriod(ChildUsagePeriod.today);
       final dayStart = range.$1;
+      final yesterdayStart = dayStart.subtract(const Duration(days: 1));
+      final twoDaysAgoStart = dayStart.subtract(const Duration(days: 2));
       final created = <TeacherNegativeUsageWarning>[];
 
       for (final watcher in watchers) {
-        final stats = await _repo.getPhraseUsageStats(
+        final todayStats = await _repo.getPhraseUsageStats(
           learnerUserId: watcher.learnerId,
           rangeStart: range.$1,
           rangeEnd: range.$2,
         );
-        for (final stat in stats) {
-          if (stat.count < MonitoringConstants.negativeUsageWarningCount) {
-            continue;
-          }
+        final yesterdayStats = await _repo.getPhraseUsageStats(
+          learnerUserId: watcher.learnerId,
+          rangeStart: yesterdayStart,
+          rangeEnd: dayStart,
+        );
+        final twoDaysAgoStats = await _repo.getPhraseUsageStats(
+          learnerUserId: watcher.learnerId,
+          rangeStart: twoDaysAgoStart,
+          rangeEnd: yesterdayStart,
+        );
+
+        final phraseTotals = <String, ({int count, String display})>{};
+        for (final stat in todayStats) {
           if (!NegativePhrases.isNegative(
             text: stat.text,
             categoryKey: stat.categoryKey,
@@ -4605,6 +4688,20 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           }
           final phraseKey = NegativePhrases.normalizeText(stat.text);
           if (phraseKey.isEmpty) continue;
+          final display = localizedPhrase(stat.text, stat.categoryKey);
+          final existing = phraseTotals[phraseKey];
+          phraseTotals[phraseKey] = (
+            count: (existing?.count ?? 0) + stat.count,
+            display: existing?.display ?? display,
+          );
+        }
+
+        for (final entry in phraseTotals.entries) {
+          final phraseKey = entry.key;
+          final todayCount = entry.value.count;
+          if (todayCount < MonitoringConstants.negativeUsageWarningCount) {
+            continue;
+          }
           final alreadyWarned =
               await _repo.hasTeacherNegativeUsageWarningToday(
             teacherUserId: recipientUserId,
@@ -4614,25 +4711,41 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           );
           if (alreadyWarned) continue;
 
+          final level = _negativeWarningLevelForCounts(
+            todayCount: todayCount,
+            yesterdayCount: _normalizedPhraseCount(
+              yesterdayStats,
+              phraseKey,
+            ),
+            twoDaysAgoCount: _normalizedPhraseCount(
+              twoDaysAgoStats,
+              phraseKey,
+            ),
+          );
+          final childName = watcher.fullName.trim().isEmpty
+              ? AppStrings.defaultLearnerName(_language)
+              : watcher.fullName.trim();
           final warning = TeacherNegativeUsageWarning(
-            childName: watcher.fullName.trim().isEmpty
-                ? AppStrings.defaultLearnerName(_language)
-                : watcher.fullName.trim(),
-            phraseText: localizedPhrase(stat.text, stat.categoryKey),
-            count: stat.count,
+            childName: childName,
+            phraseText: entry.value.display,
+            count: todayCount,
+            level: level,
+            title: AppStrings.negativeUsageWarningLevelTitle(_language, level),
+            body: AppStrings.negativeUsageWarningNotificationBody(
+              _language,
+              childName,
+              entry.value.display,
+              todayCount,
+              level,
+            ),
           );
           await _repo.insertTeacherNegativeUsageWarning(
             teacherUserId: recipientUserId,
             learnerUserId: watcher.learnerId,
             childName: warning.childName,
             phraseKey: phraseKey,
-            title: AppStrings.negativeUsageWarningTitle(_language),
-            body: AppStrings.negativeUsageWarningBody(
-              _language,
-              warning.childName,
-              warning.phraseText,
-              warning.count,
-            ),
+            title: warning.title,
+            body: warning.body,
             createdAt: DateTime.now(),
           );
           created.add(warning);
