@@ -39,7 +39,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     setState(() => _teacherAlertRecords = teacherRecords);
   }
 
-  Future<List<ParentNotification>> _loadTeacherAlertRecords(AppState app) async {
+  Future<List<ParentNotification>> _loadTeacherAlertRecords(
+    AppState app,
+  ) async {
     if (app.user?.isTeacher != true) return const [];
     final lang = app.language;
     final teacherId = app.user!.id;
@@ -54,10 +56,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           title: alert.childName.trim().isEmpty
               ? AppStrings.alertTypeLabel(lang, alert.alertType)
               : alert.childName.trim(),
-          body: [
-            AppStrings.alertTypeLabel(lang, alert.alertType),
-            if (alert.className.trim().isNotEmpty) alert.className.trim(),
-          ].join(' · '),
+          body: AppStrings.alertTypeLabel(lang, alert.alertType),
           createdAt: alert.createdAt,
           isRead: true,
         ),
@@ -237,8 +236,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                     textAlign: TextAlign.center,
                                     style: GoogleFonts.poppins(
                                       fontSize: 14,
-                                      color: theme.textMain
-                                          .withValues(alpha: 0.7),
+                                      color: theme.textMain.withValues(
+                                        alpha: 0.7,
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -275,7 +275,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                     style: GoogleFonts.poppins(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w700,
-                                      color: theme.textMain.withValues(alpha: 0.55),
+                                      color: theme.textMain.withValues(
+                                        alpha: 0.55,
+                                      ),
                                       letterSpacing: 0.2,
                                     ),
                                   ),
@@ -435,13 +437,9 @@ class _NotificationTile extends StatelessWidget {
                     height: 38,
                     decoration: BoxDecoration(
                       color: alertBg,
-                      shape: BoxShape.circle,
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(
-                      icon,
-                      size: 19,
-                      color: alertColor,
-                    ),
+                    child: Icon(icon, size: 19, color: alertColor),
                   ),
                   if (unread)
                     Positioned(
@@ -473,8 +471,9 @@ class _NotificationTile extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.poppins(
                               fontSize: 13,
-                              fontWeight:
-                                  unread ? FontWeight.w700 : FontWeight.w600,
+                              fontWeight: unread
+                                  ? FontWeight.w700
+                                  : FontWeight.w600,
                               color: theme.textMain,
                               height: 1.2,
                             ),
@@ -547,8 +546,9 @@ class _NotificationTile extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.poppins(
                           fontSize: 12,
-                          fontWeight:
-                              unread ? FontWeight.w500 : FontWeight.w400,
+                          fontWeight: unread
+                              ? FontWeight.w500
+                              : FontWeight.w400,
                           color: theme.textMain.withValues(
                             alpha: unread ? 0.82 : 0.62,
                           ),
@@ -757,4 +757,3 @@ class _NotificationDetailPopup extends StatelessWidget {
     );
   }
 }
-
