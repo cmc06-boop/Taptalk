@@ -9,7 +9,6 @@ import '../core/utils/auth_validation.dart';
 import '../providers/app_state.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/language_dropdown_field.dart';
-import '../widgets/switch_account_sheet.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -183,27 +182,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                   ],
-                  const SizedBox(height: AppSpacing.md),
-                  OutlinedButton.icon(
-                    onPressed: () => SwitchAccountSheet.show(context),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: theme.bgAccent,
-                      side: BorderSide(
-                        color: theme.bgAccent.withValues(alpha: 0.45),
-                      ),
-                      padding: const EdgeInsets.symmetric(
-                        vertical: AppSpacing.sm,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    icon: const Icon(Icons.switch_account_outlined, size: 20),
-                    label: Text(
-                      AppStrings.switchAccount(lang),
-                      style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
-                    ),
-                  ),
                 ],
               ),
             ),

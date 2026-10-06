@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 
 import '../core/l10n/app_strings.dart';
+import '../core/utils/negative_phrases.dart';
 import '../core/utils/auth_validation.dart';
 import '../core/utils/phrase_image_storage.dart';
 import '../core/utils/phrase_video_speak_sync.dart';
@@ -23,6 +24,7 @@ import '../data/models/child_session_summary.dart';
 import '../data/models/vocabulary_growth_summary.dart';
 import '../core/constants/tts_speed_options.dart';
 import '../core/theme/theme_tokens.dart';
+import '../widgets/negative_usage_warning_dialog.dart';
 import '../data/database/database_helper.dart';
 import '../data/default_builtin_content.dart';
 import '../data/models/favorite_model.dart';
@@ -32,6 +34,7 @@ import '../data/models/class_join_request.dart';
 import '../data/models/linked_child_model.dart';
 import '../data/models/password_reset_outcome.dart';
 import '../data/models/parent_notification.dart';
+import '../data/models/teacher_negative_usage_warning.dart';
 import '../data/models/teacher_recent_alert.dart';
 import '../data/models/teacher_recent_lesson.dart';
 import '../data/models/phrase_model.dart';
@@ -177,6 +180,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   final Set<String> _deletedClassCodes = {};
   int _teacherAlertsRevision = 0;
   int _liveDataRevision = 0;
+  Future<void>? _negativeUsageEvalInFlight;
+  bool _negativeUsageDialogShowing = false;
+  final List<TeacherNegativeUsageWarning> _pendingNegativeUsageWarnings = [];
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   StreamSubscription<User?>? _firebaseAuthRestoreSubscription;
   StreamSubscription<User?>? _firebaseAccountInvalidationSubscription;
@@ -832,10 +838,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         await _syncTeacherAlertsFromCloud();
         await _startTeacherMonitoringSync();
         await _startTeacherAlertSync();
+        await _loadNotifications();
       }
       if (_user!.isParent) {
         await _startParentChildLinkSync();
       }
+      unawaited(_evaluateTeacherNegativeUsageWarnings());
       unawaited(_prefetchMonitoredLearnerCachesWithRetry());
       unawaited(_reconcileClassContentLiveSync());
     }
@@ -1520,6 +1528,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _deletedClassCodes.clear();
     _deletedClassCloudPurgeAttempted = false;
     _teacherClassCloudSyncInFlight = false;
+    _negativeUsageEvalInFlight = null;
+    _negativeUsageDialogShowing = false;
+    _pendingNegativeUsageWarnings.clear();
   }
 
   Future<void> _loadLearnerData({bool cloudSyncInBackground = false}) async {
@@ -2067,6 +2078,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         route != AppRoute.favorites &&
         _user != null) {
       unawaited(_refreshPersonalBoard());
+    }
+    if (_user != null && (_user!.isTeacher || _user!.isParent)) {
+      unawaited(_evaluateTeacherNegativeUsageWarnings());
     }
   }
 
@@ -3787,7 +3801,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         await _syncTeacherAlertsFromCloud();
         await _startTeacherMonitoringSync();
         await _startTeacherAlertSync();
+        await _loadNotifications();
       }
+      unawaited(_evaluateTeacherNegativeUsageWarnings());
       await _prefetchMonitoredLearnerCachesWithRetry();
       await _reconcileClassContentLiveSync();
     }
@@ -4514,11 +4530,170 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _loadNotifications() async {
-    if (_user == null || !_user!.isParent) {
+    if (_user == null || (!_user!.isParent && !_user!.isTeacher)) {
       _notifications = [];
       return;
     }
     _notifications = await _repo.getParentNotifications(_user!.id);
+  }
+
+  Future<void> _evaluateTeacherNegativeUsageWarnings() async {
+    final inFlight = _negativeUsageEvalInFlight;
+    if (inFlight != null) {
+      await inFlight;
+      return;
+    }
+    final started = _runTeacherNegativeUsageEvaluation();
+    _negativeUsageEvalInFlight = started;
+    try {
+      await started;
+    } finally {
+      if (identical(_negativeUsageEvalInFlight, started)) {
+        _negativeUsageEvalInFlight = null;
+      }
+    }
+  }
+
+  Future<void> _runTeacherNegativeUsageEvaluation() async {
+    if (_user == null || (!_user!.isTeacher && !_user!.isParent)) return;
+    try {
+      final recipientUserId = _user!.id;
+      final watchers = <({int learnerId, String fullName})>[];
+      if (_user!.isTeacher) {
+        final students = await _repo.getTeacherClassStudents(recipientUserId);
+        final seen = <int>{};
+        for (final student in students) {
+          if (!seen.add(student.learnerId)) continue;
+          watchers.add((
+            learnerId: student.learnerId,
+            fullName: student.fullName,
+          ));
+        }
+      } else {
+        var children = _linkedChildren;
+        if (children.isEmpty) {
+          children = await _repo.getLinkedChildren(recipientUserId);
+        }
+        for (final child in children) {
+          watchers.add((
+            learnerId: child.learnerId,
+            fullName: child.fullName,
+          ));
+        }
+      }
+      if (watchers.isEmpty && _pendingNegativeUsageWarnings.isEmpty) return;
+
+      final range = _dateRangeForPeriod(ChildUsagePeriod.today);
+      final dayStart = range.$1;
+      final created = <TeacherNegativeUsageWarning>[];
+
+      for (final watcher in watchers) {
+        final stats = await _repo.getPhraseUsageStats(
+          learnerUserId: watcher.learnerId,
+          rangeStart: range.$1,
+          rangeEnd: range.$2,
+        );
+        for (final stat in stats) {
+          if (stat.count < MonitoringConstants.negativeUsageWarningCount) {
+            continue;
+          }
+          if (!NegativePhrases.isNegative(
+            text: stat.text,
+            categoryKey: stat.categoryKey,
+          )) {
+            continue;
+          }
+          final phraseKey = NegativePhrases.normalizeText(stat.text);
+          if (phraseKey.isEmpty) continue;
+          final alreadyWarned =
+              await _repo.hasTeacherNegativeUsageWarningToday(
+            teacherUserId: recipientUserId,
+            learnerUserId: watcher.learnerId,
+            phraseKey: phraseKey,
+            dayStart: dayStart,
+          );
+          if (alreadyWarned) continue;
+
+          final warning = TeacherNegativeUsageWarning(
+            childName: watcher.fullName.trim().isEmpty
+                ? AppStrings.defaultLearnerName(_language)
+                : watcher.fullName.trim(),
+            phraseText: localizedPhrase(stat.text, stat.categoryKey),
+            count: stat.count,
+          );
+          await _repo.insertTeacherNegativeUsageWarning(
+            teacherUserId: recipientUserId,
+            learnerUserId: watcher.learnerId,
+            childName: warning.childName,
+            phraseKey: phraseKey,
+            title: AppStrings.negativeUsageWarningTitle(_language),
+            body: AppStrings.negativeUsageWarningBody(
+              _language,
+              warning.childName,
+              warning.phraseText,
+              warning.count,
+            ),
+            createdAt: DateTime.now(),
+          );
+          created.add(warning);
+        }
+      }
+
+      if (created.isNotEmpty) {
+        await _loadNotifications();
+        notifyListeners();
+      }
+      if (created.isNotEmpty || _pendingNegativeUsageWarnings.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          unawaited(
+            _presentNegativeUsageWarnings([
+              ...created,
+            ]),
+          );
+        });
+      }
+    } catch (e, st) {
+      debugPrint('Negative-usage warning eval failed: $e\n$st');
+    }
+  }
+
+  Future<void> _presentNegativeUsageWarnings(
+    List<TeacherNegativeUsageWarning> warnings,
+  ) async {
+    if (warnings.isNotEmpty) {
+      _pendingNegativeUsageWarnings.addAll(warnings);
+    }
+    if (_pendingNegativeUsageWarnings.isEmpty) return;
+    if (_user == null || (!_user!.isTeacher && !_user!.isParent)) {
+      _pendingNegativeUsageWarnings.clear();
+      return;
+    }
+    if (_negativeUsageDialogShowing) return;
+
+    final nav = navigatorKey.currentState;
+    final context = nav?.overlay?.context ?? nav?.context;
+    if (context == null || !context.mounted) return;
+
+    final toShow = List<TeacherNegativeUsageWarning>.from(
+      _pendingNegativeUsageWarnings,
+    );
+    _pendingNegativeUsageWarnings.clear();
+    _negativeUsageDialogShowing = true;
+    try {
+      await showNegativeUsageWarningDialog(
+        context,
+        warnings: toShow,
+        lang: _language,
+      );
+    } finally {
+      _negativeUsageDialogShowing = false;
+      if (_pendingNegativeUsageWarnings.isNotEmpty &&
+          (_user?.isTeacher == true || _user?.isParent == true)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          unawaited(_presentNegativeUsageWarnings(const []));
+        });
+      }
+    }
   }
 
   Future<void> _startParentNotificationSync() async {
@@ -4729,7 +4904,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> markAllNotificationsRead() async {
-    if (_user == null || !_user!.isParent) return;
+    if (_user == null || (!_user!.isParent && !_user!.isTeacher)) return;
     final remoteIds = await _repo.unreadNotificationRemoteIds(_user!.id);
     await _repo.markAllNotificationsRead(_user!.id);
     if (remoteIds.isNotEmpty) {
@@ -7061,6 +7236,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
     if (full) {
       _bumpChildMonitoringRevision(learnerUserId);
+    }
+    if (_user?.isTeacher == true || _user?.isParent == true) {
+      unawaited(_evaluateTeacherNegativeUsageWarnings());
     }
   }
 

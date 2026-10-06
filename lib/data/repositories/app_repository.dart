@@ -4488,6 +4488,55 @@ class AppRepository {
     return rows.map(_notificationFromRow).toList();
   }
 
+  Future<bool> hasTeacherNegativeUsageWarningToday({
+    required int teacherUserId,
+    required int learnerUserId,
+    required String phraseKey,
+    required DateTime dayStart,
+  }) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'parent_notifications',
+      columns: ['id'],
+      where:
+          'parent_user_id = ? AND learner_user_id = ? AND alert_type = ? '
+          'AND class_name = ? AND created_at >= ?',
+      whereArgs: [
+        teacherUserId,
+        learnerUserId,
+        MonitoringConstants.negativeUsageAlertType,
+        phraseKey,
+        dayStart.millisecondsSinceEpoch,
+      ],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
+  Future<int> insertTeacherNegativeUsageWarning({
+    required int teacherUserId,
+    required int learnerUserId,
+    required String childName,
+    required String phraseKey,
+    required String title,
+    required String body,
+    required DateTime createdAt,
+  }) async {
+    final db = await _dbHelper.database;
+    return db.insert('parent_notifications', {
+      'parent_user_id': teacherUserId,
+      'learner_user_id': learnerUserId,
+      'teacher_user_id': teacherUserId,
+      'child_name': childName,
+      'alert_type': MonitoringConstants.negativeUsageAlertType,
+      'class_name': phraseKey,
+      'title': title,
+      'body': body,
+      'created_at': createdAt.millisecondsSinceEpoch,
+      'is_read': 0,
+    });
+  }
+
   Future<List<TeacherRecentAlert>> getRecentAlertsForTeacher({
     required int teacherUserId,
     int limit = 4,
@@ -4516,8 +4565,11 @@ class AppRepository {
           (pn.class_id IS NOT NULL AND tc.id = pn.class_id)
           OR (pn.class_id IS NULL AND tc.id = ce.class_id)
         )
-      WHERE pn.teacher_user_id = ?
-         OR (pn.teacher_user_id IS NULL AND tc.teacher_user_id = ?)
+      WHERE (
+        pn.teacher_user_id = ?
+        OR (pn.teacher_user_id IS NULL AND tc.teacher_user_id = ?)
+      )
+      AND pn.alert_type != ?
       GROUP BY
         pn.learner_user_id,
         pn.alert_type,
@@ -4528,7 +4580,12 @@ class AppRepository {
       ORDER BY pn.created_at DESC
       LIMIT ?
     ''',
-      [teacherUserId, teacherUserId, limit],
+      [
+        teacherUserId,
+        teacherUserId,
+        MonitoringConstants.negativeUsageAlertType,
+        limit,
+      ],
     );
     return rows
         .map(

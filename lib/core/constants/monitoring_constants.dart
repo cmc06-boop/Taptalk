@@ -2,6 +2,12 @@ abstract final class MonitoringConstants {
   /// Phrases must be used at least this many times to appear as "frequently used".
   static const int frequentlyUsedMinCount = 5;
 
+  /// Teacher warning when a negative phrase is used this many times today.
+  static const int negativeUsageWarningCount = 10;
+
+  /// Stored on teacher-inbox rows so they are not mixed with parent alerts.
+  static const String negativeUsageAlertType = 'negativeUsageWarning';
+
   /// Gap between phrase taps before a new usage session starts.
   static const Duration sessionGap = Duration(minutes: 15);
 

@@ -70,7 +70,7 @@ class LearnerScaffold extends StatelessWidget {
                 trailingAction: headerTrailing,
                 showProfile: !isParent && !isTeacher,
                 showAlerts: isTeacher,
-                showNotifications: isParent,
+                showNotifications: isParent || isTeacher,
                 notificationBadgeCount: app.unreadNotificationCount,
                 bottomSpacing: headerBottomSpacing,
                 contentHeight: headerContentHeight,

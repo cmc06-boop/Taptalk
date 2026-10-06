@@ -1496,6 +1496,20 @@ abstract final class AppStrings {
   static String lastUsedAt(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Huling ginamit' : 'Last used';
 
+  static String negativeUsageWarningTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Babala' : 'Warning';
+
+  static String negativeUsageWarningBody(
+    AppLanguage lang,
+    String childName,
+    String phrase,
+    int count,
+  ) {
+    return lang == AppLanguage.filipino
+        ? 'Si $childName ay nagamit ng “$phrase” nang $count beses ngayon. Pakitingnan po.'
+        : '$childName has used “$phrase” $count times today. Please check in.';
+  }
+
   static String frequentlyUsed(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Madalas gamitin' : 'Frequently used';
 

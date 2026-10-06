@@ -119,7 +119,7 @@ class TapTalkApp extends StatelessWidget {
       case AppRoute.history:
         return const HistoryScreen();
       case AppRoute.settings:
-        return const SettingsScreen(key: ValueKey('settings_screen'));
+        return const SettingsScreen();
       case AppRoute.profile:
         return const ProfileScreen();
       case AppRoute.myChild:

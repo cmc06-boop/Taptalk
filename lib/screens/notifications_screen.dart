@@ -398,18 +398,16 @@ class _NotificationTile extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: AppSpacing.sm),
-                        Flexible(
-                          child: Text(
-                            timeLabel,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.end,
-                            style: GoogleFonts.poppins(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                              color: theme.textMain.withValues(
-                                alpha: unread ? 0.72 : 0.48,
-                              ),
+                        Text(
+                          timeLabel,
+                          maxLines: 1,
+                          softWrap: false,
+                          textAlign: TextAlign.end,
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                            color: theme.textMain.withValues(
+                              alpha: unread ? 0.72 : 0.48,
                             ),
                           ),
                         ),
