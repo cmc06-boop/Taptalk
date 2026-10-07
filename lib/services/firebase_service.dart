@@ -24,7 +24,7 @@ class FirebaseService {
   bool _appCheckSkipLogged = false;
   String? _lastAuthErrorCode;
 
-  static const _authTimeout = Duration(seconds: 12);
+  static const _authTimeout = Duration(seconds: 30);
   static const _initTimeout = Duration(seconds: 10);
 
   bool get isAvailable => _initialized;

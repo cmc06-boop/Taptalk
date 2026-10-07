@@ -41,7 +41,13 @@ async function rateLimit(uid, action, max = 10) {
 
 // All authority changes are server transactions. Clients cannot write owners,
 // device credentials, grants, approvals, or session IDs through Firestore.
-exports.caregiverSecurity = onCall({enforceAppCheck: true, region: 'us-central1'}, async request => {
+exports.caregiverSecurity = onCall(
+  {
+    enforceAppCheck: true,
+    region: 'us-central1',
+    invoker: 'public',
+  },
+  async request => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
   const uid = request.auth.uid;
   await activeAccount(uid);
