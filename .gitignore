@@ -50,3 +50,8 @@ app.*.map.json
 /android/app/libs/*.aar
 /android/app/src/main/assets/model-en/
 /android/app/src/main/assets/model-tl/
+
+# Local Cloud Functions configuration and secrets
+/functions/.env*
+/functions/.secret.local
+/functions/service-account*.json

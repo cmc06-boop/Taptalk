@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import 'cloud_notification_backend.dart';
 import 'firebase_service.dart';
+import 'caregiver_security_service.dart';
 import '../data/repositories/app_repository.dart';
 
 /// Firestore-backed notifications for cross-device parent alerts.
@@ -36,7 +39,9 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   Future<String?> publishTeacherAlert(TeacherAlertCloudEvent event) async {
     if (!isAvailable) return null;
     if (event.parentFirebaseUid.trim().isEmpty) {
-      debugPrint('Skipping cloud alert: parent has no Firebase account linked.');
+      debugPrint(
+        'Skipping cloud alert: parent has no Firebase account linked.',
+      );
       return null;
     }
 
@@ -59,31 +64,8 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     String? learnerName,
     String? learnerProfileCode,
   }) async {
-    if (!isAvailable ||
-        parentFirebaseUid.trim().isEmpty ||
-        learnerFirebaseUid.trim().isEmpty) {
-      return;
-    }
-    final docId = '${parentFirebaseUid.trim()}_${learnerFirebaseUid.trim()}';
-    final payload = <String, Object?>{
-      'parentUserId': parentUserId,
-      'learnerUserId': learnerUserId,
-      'parentFirebaseUid': parentFirebaseUid.trim(),
-      'learnerFirebaseUid': learnerFirebaseUid.trim(),
-      'linkedAt': FieldValue.serverTimestamp(),
-    };
-    final name = learnerName?.trim();
-    if (name != null && name.isNotEmpty) {
-      payload['learnerName'] = name;
-    }
-    final code = learnerProfileCode?.trim();
-    if (code != null && code.isNotEmpty) {
-      payload['learnerProfileCode'] = code;
-    }
-    await FirebaseFirestore.instance
-        .collection(linkCollectionName)
-        .doc(docId)
-        .set(payload, SetOptions(merge: true));
+    // Only the verified QR callable creates relationships. Background sync
+    // must never recreate a revoked authorization.
   }
 
   @override
@@ -96,11 +78,9 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
         learnerFirebaseUid.trim().isEmpty) {
       return;
     }
-    final docId = '${parentFirebaseUid.trim()}_${learnerFirebaseUid.trim()}';
-    await FirebaseFirestore.instance
-        .collection(linkCollectionName)
-        .doc(docId)
-        .delete();
+    await CaregiverSecurityService.instance.call('unlink', {
+      'learnerUid': learnerFirebaseUid.trim(),
+    });
   }
 
   @override
@@ -122,22 +102,11 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
 
   @override
   Future<void> upsertClassEnrollment(ClassEnrollmentCloudEvent event) async {
-    if (!isAvailable ||
-        event.classCode.trim().isEmpty ||
-        event.learnerFirebaseUid.trim().isEmpty) {
-      return;
-    }
-    final classCode =
-        AppRepository.normalizeClassCode(event.classCode);
-    final learnerUid = event.learnerFirebaseUid.trim();
-    final docId = '${classCode}_$learnerUid';
-    final payload = event.toFirestoreMap()
-      ..['classCode'] = classCode
-      ..['enrolledAt'] = Timestamp.fromDate(event.enrolledAt.toUtc());
-    await FirebaseFirestore.instance
-        .collection(enrollmentCollectionName)
-        .doc(docId)
-        .set(payload);
+    if (!isAvailable) return;
+    await CaregiverSecurityService.instance.call('enroll', {
+      'classCode': AppRepository.normalizeClassCode(event.classCode),
+      'learnerFirebaseUid': event.learnerFirebaseUid.trim(),
+    });
   }
 
   @override
@@ -145,17 +114,11 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     required String classCode,
     required String learnerFirebaseUid,
   }) async {
-    if (!isAvailable ||
-        classCode.trim().isEmpty ||
-        learnerFirebaseUid.trim().isEmpty) {
-      return;
-    }
-    final normalized = AppRepository.normalizeClassCode(classCode);
-    final docId = '${normalized}_${learnerFirebaseUid.trim()}';
-    await FirebaseFirestore.instance
-        .collection(enrollmentCollectionName)
-        .doc(docId)
-        .delete();
+    if (!isAvailable) return;
+    await CaregiverSecurityService.instance.call('unenroll', {
+      'classCode': AppRepository.normalizeClassCode(classCode),
+      'learnerFirebaseUid': learnerFirebaseUid.trim(),
+    });
   }
 
   @override
@@ -227,7 +190,7 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       return requests;
     }
 
-    if (uid.isNotEmpty && codes.isEmpty) {
+    if (uid.isNotEmpty) {
       try {
         final snapshot = await FirebaseFirestore.instance
             .collection(joinRequestCollectionName)
@@ -241,15 +204,7 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       }
     }
 
-    try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection(joinRequestCollectionName)
-          .get();
-      return parseDocs(snapshot.docs);
-    } catch (e, st) {
-      debugPrint('getClassJoinRequestsForTeacher fallback failed: $e\n$st');
-      return const [];
-    }
+    return const [];
   }
 
   @override
@@ -386,17 +341,20 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
         .where('learnerFirebaseUid', isEqualTo: learnerFirebaseUid.trim())
         .snapshots()
         .map((snapshot) {
-      final activities = <RemoteLearnerActivity>[];
-      final seen = <String>{};
-      void absorb(DocumentSnapshot<Map<String, dynamic>> doc) {
-        final activity = _activityFromDocument(doc);
-        if (activity == null) return;
-        final key = AppRepository.remoteActivitySyncKey(
-          createdAt: activity.createdAt, phraseText: activity.phraseText,
-          categoryKey: activity.categoryKey, eventId: activity.eventId);
-        if (!seen.add(key)) return;
-        activities.add(activity);
-      }
+          final activities = <RemoteLearnerActivity>[];
+          final seen = <String>{};
+          void absorb(DocumentSnapshot<Map<String, dynamic>> doc) {
+            final activity = _activityFromDocument(doc);
+            if (activity == null) return;
+            final key = AppRepository.remoteActivitySyncKey(
+              createdAt: activity.createdAt,
+              phraseText: activity.phraseText,
+              categoryKey: activity.categoryKey,
+              eventId: activity.eventId,
+            );
+            if (!seen.add(key)) return;
+            activities.add(activity);
+          }
 
       for (final doc in snapshot.docs) {
         absorb(doc);
@@ -439,14 +397,11 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     await FirebaseFirestore.instance
         .collection(teacherClassCollectionName)
         .doc(docId)
-        .set(
-          {
-            'classCode': docId,
-            'className': className,
-            'teacherFirebaseUid': teacherUid,
-          },
-          SetOptions(merge: true),
-        )
+        .set({
+          'classCode': docId,
+          'className': className,
+          'teacherFirebaseUid': teacherUid,
+        }, SetOptions(merge: true))
         .timeout(const Duration(seconds: 8));
     final payload = <String, Object?>{
       'classCode': docId,
@@ -592,125 +547,19 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
   @override
   Future<void> removeTeacherClass({required String classCode}) async {
     if (!isAvailable || classCode.trim().isEmpty) return;
-    final docId = AppRepository.normalizeClassCode(classCode);
-    final docRef = FirebaseFirestore.instance
-        .collection(teacherClassCollectionName)
-        .doc(docId);
-    final authUid = await _liveAuthUid();
-    if (authUid == null) return;
-    try {
-      final doc = await docRef.get();
-      if (doc.exists) {
-        final owner = (doc.data()?['teacherFirebaseUid'] as String?)?.trim() ?? '';
-        if (owner != authUid) {
-          await docRef.set(
-            {
-              'teacherFirebaseUid': authUid,
-              'classCode': docId,
-              'className': (doc.data()?['className'] as String?) ?? 'Class',
-            },
-            SetOptions(merge: true),
-          );
-        }
-      }
-      await docRef.delete();
-    } catch (e, st) {
-      debugPrint('removeTeacherClass failed: $e\n$st');
-    }
-    await removeClassEnrollmentsForClass(classCode: classCode);
-    final codesToMatch = {
-      docId,
-      classCode.trim(),
-      classCode.trim().toUpperCase(),
-    };
-    Future<void> deleteJoinDocs(
-      Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-    ) async {
-      for (final doc in docs) {
-        try {
-          if (authUid.isNotEmpty) {
-            await doc.reference.set(
-              {'teacherFirebaseUid': authUid},
-              SetOptions(merge: true),
-            );
-          }
-          await doc.reference.delete();
-        } catch (e, st) {
-          debugPrint('remove join request ${doc.id} failed: $e\n$st');
-        }
-      }
-    }
-
-    try {
-      for (final code in codesToMatch) {
-        if (code.isEmpty) continue;
-        final snapshot = await FirebaseFirestore.instance
-            .collection(joinRequestCollectionName)
-            .where('classCode', isEqualTo: code)
-            .get();
-        await deleteJoinDocs(snapshot.docs);
-      }
-    } catch (e, st) {
-      debugPrint('remove join requests for class failed: $e\n$st');
-    }
+    await CaregiverSecurityService.instance.call('deleteClass', {
+      'classCode': AppRepository.normalizeClassCode(classCode),
+    });
   }
 
   @override
-  Future<void> removeClassEnrollmentsForClass({required String classCode}) async {
+  Future<void> removeClassEnrollmentsForClass({
+    required String classCode,
+  }) async {
     if (!isAvailable || classCode.trim().isEmpty) return;
-    final normalized = AppRepository.normalizeClassCode(classCode);
-    final codesToMatch = {
-      normalized,
-      classCode.trim(),
-      classCode.trim().toUpperCase(),
-    };
-    final authUid = FirebaseService.instance.currentUid?.trim() ?? '';
-    Future<void> deleteDocs(
-      Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-    ) async {
-      for (final doc in docs) {
-        try {
-          if (authUid.isNotEmpty) {
-            await doc.reference.set(
-              {'teacherFirebaseUid': authUid},
-              SetOptions(merge: true),
-            );
-          }
-          await doc.reference.delete();
-        } catch (e, st) {
-          debugPrint('remove enrollment ${doc.id} failed: $e\n$st');
-        }
-      }
-    }
-
-    try {
-      for (final code in codesToMatch) {
-        if (code.isEmpty) continue;
-        final snapshot = await FirebaseFirestore.instance
-            .collection(enrollmentCollectionName)
-            .where('classCode', isEqualTo: code)
-            .get();
-        await deleteDocs(snapshot.docs);
-      }
-    } catch (e, st) {
-      debugPrint('removeClassEnrollmentsForClass query failed: $e\n$st');
-      try {
-        final snapshot = await FirebaseFirestore.instance
-            .collection(enrollmentCollectionName)
-            .get();
-        await deleteDocs(
-          snapshot.docs.where((doc) {
-            final code = AppRepository.normalizeClassCode(
-              (doc.data()['classCode'] as String?) ?? '',
-            );
-            return codesToMatch.contains(code) ||
-                codesToMatch.contains((doc.data()['classCode'] as String?) ?? '');
-          }),
-        );
-      } catch (e2, st2) {
-        debugPrint('removeClassEnrollmentsForClass fallback failed: $e2\n$st2');
-      }
-    }
+    await CaregiverSecurityService.instance.call('clearClassEnrollments', {
+      'classCode': AppRepository.normalizeClassCode(classCode),
+    });
   }
 
   @override
@@ -891,28 +740,19 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       collection: enrollmentCollectionName,
       field: 'learnerFirebaseUid',
       uid: uid,
-      payload: {
-        'learnerName': name,
-        'updatedAt': FieldValue.serverTimestamp(),
-      },
+      payload: {'learnerName': name, 'updatedAt': FieldValue.serverTimestamp()},
     );
     await _mergeWhere(
       collection: joinRequestCollectionName,
       field: 'learnerFirebaseUid',
       uid: uid,
-      payload: {
-        'learnerName': name,
-        'updatedAt': FieldValue.serverTimestamp(),
-      },
+      payload: {'learnerName': name, 'updatedAt': FieldValue.serverTimestamp()},
     );
     await _mergeWhere(
       collection: learnerProfileCollectionName,
       field: 'learnerFirebaseUid',
       uid: uid,
-      payload: {
-        'learnerName': name,
-        'updatedAt': FieldValue.serverTimestamp(),
-      },
+      payload: {'learnerName': name, 'updatedAt': FieldValue.serverTimestamp()},
     );
   }
 
@@ -975,10 +815,7 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     if (!isAvailable || uid.isEmpty) return;
     final db = FirebaseFirestore.instance;
 
-    Future<void> deleteWhere(
-      String collection,
-      String field,
-    ) async {
+    Future<void> deleteWhere(String collection, String field) async {
       try {
         final snapshot = await db
             .collection(collection)
@@ -1096,14 +933,11 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     await FirebaseFirestore.instance
         .collection(learnerProfileCollectionName)
         .doc(learnerFirebaseUid.trim())
-        .set(
-          {
-            'learnerFirebaseUid': learnerFirebaseUid.trim(),
-            'categories': categories.map((c) => c.toFirestoreMap()).toList(),
-            'categoriesUpdatedAt': FieldValue.serverTimestamp(),
-          },
-          SetOptions(merge: true),
-        );
+        .set({
+          'learnerFirebaseUid': learnerFirebaseUid.trim(),
+          'categories': categories.map((c) => c.toFirestoreMap()).toList(),
+          'categoriesUpdatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
   }
 
   @override
@@ -1121,9 +955,9 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       if (raw is! List) return const [];
       return raw
           .whereType<Map>()
-          .map((e) => RemoteLearnerCategory.fromMap(
-                Map<String, dynamic>.from(e),
-              ))
+          .map(
+            (e) => RemoteLearnerCategory.fromMap(Map<String, dynamic>.from(e)),
+          )
           .where((c) => c.key.trim().isNotEmpty)
           .toList();
     } catch (e, st) {
@@ -1141,14 +975,11 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     await FirebaseFirestore.instance
         .collection(learnerProfileCollectionName)
         .doc(learnerFirebaseUid.trim())
-        .set(
-          {
-            'learnerFirebaseUid': learnerFirebaseUid.trim(),
-            'customPhrases': phrases.map((p) => p.toFirestoreMap()).toList(),
-            'customPhrasesUpdatedAt': FieldValue.serverTimestamp(),
-          },
-          SetOptions(merge: true),
-        );
+        .set({
+          'learnerFirebaseUid': learnerFirebaseUid.trim(),
+          'customPhrases': phrases.map((p) => p.toFirestoreMap()).toList(),
+          'customPhrasesUpdatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
   }
 
   @override
@@ -1167,9 +998,8 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       return raw
           .whereType<Map>()
           .map(
-            (e) => RemoteLearnerCustomPhrase.fromMap(
-              Map<String, dynamic>.from(e),
-            ),
+            (e) =>
+                RemoteLearnerCustomPhrase.fromMap(Map<String, dynamic>.from(e)),
           )
           .where((p) => p.phraseText.trim().isNotEmpty)
           .toList();
@@ -1188,14 +1018,11 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     await FirebaseFirestore.instance
         .collection(learnerProfileCollectionName)
         .doc(learnerFirebaseUid.trim())
-        .set(
-          {
-            'learnerFirebaseUid': learnerFirebaseUid.trim(),
-            'favorites': favorites.map((f) => f.toFirestoreMap()).toList(),
-            'favoritesUpdatedAt': FieldValue.serverTimestamp(),
-          },
-          SetOptions(merge: true),
-        );
+        .set({
+          'learnerFirebaseUid': learnerFirebaseUid.trim(),
+          'favorites': favorites.map((f) => f.toFirestoreMap()).toList(),
+          'favoritesUpdatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
   }
 
   @override
@@ -1214,9 +1041,7 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       return raw
           .whereType<Map>()
           .map(
-            (e) => RemoteLearnerFavorite.fromMap(
-              Map<String, dynamic>.from(e),
-            ),
+            (e) => RemoteLearnerFavorite.fromMap(Map<String, dynamic>.from(e)),
           )
           .where((f) => f.phraseText.trim().isNotEmpty)
           .toList();
@@ -1235,14 +1060,11 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     await FirebaseFirestore.instance
         .collection(learnerProfileCollectionName)
         .doc(learnerFirebaseUid.trim())
-        .set(
-          {
-            'learnerFirebaseUid': learnerFirebaseUid.trim(),
-            'speakHistory': history.map((h) => h.toFirestoreMap()).toList(),
-            'speakHistoryUpdatedAt': FieldValue.serverTimestamp(),
-          },
-          SetOptions(merge: true),
-        );
+        .set({
+          'learnerFirebaseUid': learnerFirebaseUid.trim(),
+          'speakHistory': history.map((h) => h.toFirestoreMap()).toList(),
+          'speakHistoryUpdatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
   }
 
   @override
@@ -1261,9 +1083,8 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       return raw
           .whereType<Map>()
           .map(
-            (e) => RemoteLearnerSpeakHistory.fromMap(
-              Map<String, dynamic>.from(e),
-            ),
+            (e) =>
+                RemoteLearnerSpeakHistory.fromMap(Map<String, dynamic>.from(e)),
           )
           .where((h) => h.phraseText.trim().isNotEmpty)
           .toList();
@@ -1282,8 +1103,8 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       final doc = await FirebaseFirestore.instance
           .collection(learnerProfileCollectionName)
           .doc(learnerFirebaseUid.trim())
-          .get();
-      if (!doc.exists) return const [];
+          .get(const GetOptions(source: Source.server));
+      if (!doc.exists || doc.data()?['emergencyContactsNeedReview'] == true) return const [];
       final contacts = doc.data()?['emergencyContacts'];
       if (contacts is! List) return const [];
       return AppRepository.normalizeEmergencyContacts(
@@ -1446,7 +1267,9 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
         .collection(teacherClassCollectionName)
         .where('teacherFirebaseUid', isEqualTo: teacherFirebaseUid.trim())
         .snapshots()
-        .map((snapshot) => snapshot.docs.map(_teacherClassFromDocument).toList());
+        .map(
+          (snapshot) => snapshot.docs.map(_teacherClassFromDocument).toList(),
+        );
   }
 
   @override
@@ -1457,18 +1280,77 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     if (!isAvailable || parentFirebaseUid.trim().isEmpty) {
       return const Stream.empty();
     }
+    final children = <String, List<RemoteParentNotification>>{};
+    final subscriptions =
+        <String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>{};
+    StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? linksSubscription;
+    var cancelled = false;
+    late final StreamController<List<RemoteParentNotification>> controller;
+    void emit() {
+      if (cancelled) return;
+      final items = children.values.expand((items) => items).toList()
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      controller.add(items);
+    }
 
-    return FirebaseFirestore.instance
-        .collection(collectionName)
-        .where('parentFirebaseUid', isEqualTo: parentFirebaseUid)
-        .snapshots()
-        .map((snapshot) {
-      final items = snapshot.docs
-          .map((doc) => _fromDocument(doc, parentUserId))
-          .toList();
-      items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-      return items;
-    });
+    controller = StreamController<List<RemoteParentNotification>>(
+      onListen: () {
+        linksSubscription = FirebaseFirestore.instance
+            .collection(linkCollectionName)
+            .where('parentFirebaseUid', isEqualTo: parentFirebaseUid.trim())
+            .snapshots()
+            .listen(
+              (snapshot) {
+                if (cancelled) return;
+                final authorized = snapshot.docs
+                    .map((doc) => doc.data()['learnerFirebaseUid'] as String)
+                    .toSet();
+                for (final uid in subscriptions.keys.toList()) {
+                  if (!authorized.contains(uid)) {
+                    unawaited(subscriptions.remove(uid)!.cancel());
+                    children.remove(uid);
+                  }
+                }
+                for (final uid in authorized) {
+                  if (subscriptions.containsKey(uid)) continue;
+                  children[uid] = [];
+                  subscriptions[uid] = FirebaseFirestore.instance
+                      .collection(collectionName)
+                      .where(
+                        'parentFirebaseUid',
+                        isEqualTo: parentFirebaseUid.trim(),
+                      )
+                      .where('learnerFirebaseUid', isEqualTo: uid)
+                      .snapshots()
+                      .listen(
+                        (notifications) {
+                          if (cancelled || !children.containsKey(uid)) return;
+                          children[uid] = notifications.docs
+                              .map((doc) => _fromDocument(doc, parentUserId))
+                              .toList();
+                          emit();
+                        },
+                        onError: (Object error, StackTrace stack) {
+                          if (!cancelled) controller.addError(error, stack);
+                        },
+                      );
+                }
+                emit();
+              },
+              onError: (Object error, StackTrace stack) {
+                if (!cancelled) controller.addError(error, stack);
+              },
+            );
+      },
+      onCancel: () async {
+        cancelled = true;
+        await linksSubscription?.cancel();
+        await Future.wait(
+          subscriptions.values.map((subscription) => subscription.cancel()),
+        );
+      },
+    );
+    return controller.stream;
   }
 
   RemoteParentNotification _fromDocument(
@@ -1478,6 +1360,7 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     final data = doc.data();
     return RemoteParentNotification(
       remoteId: doc.id,
+      learnerFirebaseUid: data['learnerFirebaseUid'] as String?,
       parentUserId: parentUserId,
       learnerUserId: data['learnerUserId'] as int?,
       childName: (data['childName'] as String?) ?? '',
@@ -1562,13 +1445,10 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       await FirebaseFirestore.instance
           .collection(userProfileCollectionName)
           .doc(uid)
-          .set(
-        {
-          'deletedTeacherClassCodes': FieldValue.arrayUnion([code]),
-          'updatedAt': FieldValue.serverTimestamp(),
-        },
-        SetOptions(merge: true),
-      );
+          .set({
+            'deletedTeacherClassCodes': FieldValue.arrayUnion([code]),
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
     } catch (e, st) {
       debugPrint('addTeacherDeletedClassCode failed: $e\n$st');
     }

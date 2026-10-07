@@ -55,6 +55,7 @@ import '../services/firebase_service.dart';
 import '../services/firestore_notification_backend.dart';
 import '../services/notification_sync_service.dart';
 import '../services/device_sms_service.dart';
+import '../services/caregiver_security_service.dart';
 import '../services/negative_usage_sms_service.dart';
 import '../services/network_status.dart';
 import '../services/saved_accounts_store.dart';
@@ -113,10 +114,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   AppScreenBuilder? _screenBuilder;
   final TtsService tts = TtsService();
   final DeviceSmsService _deviceSms = DeviceSmsService();
-  late final NegativeUsageSmsService _negativeUsageSms = NegativeUsageSmsService(
-    repository: _repo,
-    sms: _deviceSms,
-  );
+  late final NegativeUsageSmsService _negativeUsageSms =
+      NegativeUsageSmsService(repository: _repo, sms: _deviceSms);
   late final NotificationSyncService _notificationSync =
       NotificationSyncService(
         repository: _repo,
@@ -768,7 +767,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           final sessionOk = await FirebaseService.instance
               .validateCurrentSessionForThisDevice();
           if (!sessionOk) {
-            debugPrint('Session invalidated during app restore: forcing logout.');
+            debugPrint(
+              'Session invalidated during app restore: forcing logout.',
+            );
             await _endActiveSession();
             _resetNavigationStack(AppRoute.welcome);
             notifyListeners();
@@ -1842,7 +1843,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _restoreUserProfileFromCloud() async {
-    if (_user == null) return;
+    final account = _user;
+    if (account == null) return;
     if (await NetworkStatus.isOffline()) return;
     if (await _isProfileCloudPending()) {
       await _flushPendingProfileToCloud();
@@ -1875,11 +1877,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         profile: profile,
         cloudSource: cloudSnapshot,
       );
+      if (_user?.id != account.id || FirebaseService.instance.currentUid != uid) return;
       final updated = await _repo.applyRemoteUserProfile(
-        userId: _user!.id,
+        userId: account.id,
         profile: profile,
       );
-      if (updated != null) {
+      if (updated != null && _user?.id == account.id && FirebaseService.instance.currentUid == uid) {
         _user = updated;
         final settings = await _repo.getUserSettings(_user!.id);
         _welcomeFirstName = AppRepository.welcomeFirstNameFrom(
@@ -1939,24 +1942,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _restoreAccountFromCloud() async {
-    if (_user == null) return;
-    if (await NetworkStatus.isOffline()) return;
-    await FirebaseService.instance.initialize();
-    final isWindows =
-        !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
-    final authUid = await FirebaseService.instance.waitForAuthUid(
-      timeout: isWindows
-          ? const Duration(seconds: 20)
-          : const Duration(seconds: 12),
-    );
-    if (authUid == null || authUid.isEmpty) {
-      debugPrint('Account cloud restore skipped: Firebase auth not ready');
-      return;
-    }
-    if (_user!.firebaseUid == null || _user!.firebaseUid!.isEmpty) {
-      await _repo.linkFirebaseUid(_user!.id, authUid);
-      _user = _user!.copyWith(firebaseUid: authUid);
-    }
+    if (_user == null || await NetworkStatus.isOffline()) return;
+    // Never bind an offline/local account to another account's restored Auth.
+    final uid = await _resolveAccountFirebaseUid();
+    if (uid == null) return;
     await _restoreUserProfileFromCloud();
     await _pullPersonalBoardFromCloud();
     await _refreshPersonalBoard();
@@ -2647,7 +2636,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         unawaited(_activateMonitoringSync());
         notifyListeners();
       } catch (e, st) {
-        debugPrint('Post-register data load failed (account is saved): $e\n$st');
+        debugPrint(
+          'Post-register data load failed (account is saved): $e\n$st',
+        );
       }
 
       await _recordCurrentAccount();
@@ -2877,9 +2868,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await prefs.setInt('user_id', _user!.id);
 
     if (skipOnboarding) {
-      return _activateSignedInUser(
-        offline: await NetworkStatus.isOffline(),
-      );
+      return _activateSignedInUser(offline: await NetworkStatus.isOffline());
     }
 
     if (role == 'learner') {
@@ -3238,10 +3227,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
     _drawerOpen = false;
     await _endActiveSession();
+    if (local.isParent || local.isTeacher) {
+      // Saved account metadata is not authentication for protected monitoring.
+      _loginPrefillEmail = normalized;
+      await _goToRouteReplacingStack(AppRoute.login);
+      notifyListeners();
+      return null;
+    }
     _user = local;
-    return _activateSignedInUser(
-      offline: await NetworkStatus.isOffline(),
-    );
+    return _activateSignedInUser(offline: await NetworkStatus.isOffline());
   }
 
   Future<void> prepareSwitchToAccount(String email) async {
@@ -3612,27 +3606,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<String?> _learnerFirebaseUidForSync() async {
     if (_user == null || !_user!.isLearner) return null;
-    final stored = _user!.firebaseUid?.trim();
-    if (stored != null && stored.isNotEmpty) return stored;
-
-    final uid = FirebaseService.instance.currentUid;
-    if (uid != null && uid.isNotEmpty) {
-      await _repo.linkFirebaseUid(_user!.id, uid);
-      _user = _user!.copyWith(firebaseUid: uid);
-      return uid;
-    }
-    if (!FirebaseService.instance.isAvailable) return null;
-    final restored = await FirebaseService.instance.waitForAuthUid(
-      timeout: !kIsWeb && defaultTargetPlatform == TargetPlatform.windows
-          ? const Duration(seconds: 20)
-          : const Duration(seconds: 8),
-    );
-    if (restored != null && restored.isNotEmpty) {
-      await _repo.linkFirebaseUid(_user!.id, restored);
-      _user = _user!.copyWith(firebaseUid: restored);
-      return restored;
-    }
-    return null;
+    return _resolveAccountFirebaseUid();
   }
 
   Future<void> _pushHistoryItemToCloud({
@@ -4344,7 +4318,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
     await _repo.removeHistory(item.id);
 
-    if (!CloudScope.syncMonitoring || !_notificationSync.isCloudAvailable) return;
+    if (!CloudScope.syncMonitoring || !_notificationSync.isCloudAvailable) {
+      return;
+    }
     final uid = await _personalBoardCloudUid();
     if (uid == null || uid.isEmpty) return;
     final local = await _repo.getHistoryForCloudSync(_user!.id);
@@ -4410,31 +4386,42 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Firebase UID for the signed-in account, waiting for auth restore when needed.
   Future<String?> _resolveAccountFirebaseUid() async {
-    if (_user == null) return null;
+    final account = _user;
+    if (account == null) return null;
     await FirebaseService.instance.initialize();
     await _notificationSync.initialize();
-
     var authUid = FirebaseService.instance.currentUid;
     authUid ??= await FirebaseService.instance.waitForAuthUid(
       timeout: !kIsWeb && defaultTargetPlatform == TargetPlatform.windows
           ? const Duration(seconds: 20)
           : const Duration(seconds: 8),
     );
-    if (authUid == null || authUid.isEmpty) return null;
-
-    final storedUid = _user!.firebaseUid?.trim();
-    if (storedUid != null && storedUid.isNotEmpty && storedUid != authUid) {
-      debugPrint(
-        'Firebase UID changed (db=$storedUid, auth=$authUid); relinking for cloud sync.',
-      );
-      await _repo.linkFirebaseUid(_user!.id, authUid);
-      _user = _user!.copyWith(firebaseUid: authUid);
+    if (authUid == null || authUid.isEmpty || _user?.id != account.id) {
+      return null;
     }
-
-    if (storedUid == null || storedUid.isEmpty) {
-      await _repo.linkFirebaseUid(_user!.id, authUid);
-      _user = _user!.copyWith(firebaseUid: authUid);
+    final storedUid = account.firebaseUid?.trim() ?? '';
+    if (storedUid.isNotEmpty) {
+      if (storedUid != authUid) {
+        debugPrint(
+          'Cloud Auth does not match the local account; access denied.',
+        );
+        return null;
+      }
+      return authUid;
     }
+    final authEmail = AuthValidation.normalizeEmail(
+      FirebaseService.instance.currentUserEmail ?? '',
+    );
+    if (authEmail.isEmpty ||
+        authEmail != AuthValidation.normalizeEmail(account.email)) {
+      return null;
+    }
+    await _repo.linkFirebaseUid(account.id, authUid);
+    if (_user?.id != account.id ||
+        FirebaseService.instance.currentUid != authUid) {
+      return null;
+    }
+    _user = account.copyWith(firebaseUid: authUid);
     return authUid;
   }
 
@@ -4508,47 +4495,23 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _syncLinkedChildrenToCloud() async {
-    if (_user == null || !_user!.isParent) return;
-    final parentFirebaseUid = await _resolveParentFirebaseUid();
-    if (parentFirebaseUid == null) return;
-    // Always read SQLite — in-memory _linkedChildren can be stale during unlink.
-    final children = await _repo.getLinkedChildren(_user!.id);
-    if (children.isEmpty) return;
-    for (final child in children) {
-      final learner = await _repo.findUserById(child.learnerId);
-      final learnerFirebaseUid = learner?.firebaseUid;
-      if (learnerFirebaseUid == null || learnerFirebaseUid.isEmpty) continue;
-      var learnerName = child.fullName;
-      try {
-        final profile = await _notificationSync
-            .getUserProfileFromCloud(learnerFirebaseUid)
-            .timeout(const Duration(seconds: 8));
-        final cloudName = profile?.fullName.trim() ?? '';
-        if (cloudName.isNotEmpty &&
-            !AppRepository.isGenericAccountName(cloudName)) {
-          learnerName = cloudName;
-        }
-      } catch (e, st) {
-        debugPrint('Parent link name from profile failed: $e\n$st');
-      }
-      await _notificationSync.syncParentChildLink(
-        parentUserId: _user!.id,
-        learnerUserId: child.learnerId,
-        parentFirebaseUid: parentFirebaseUid,
-        learnerFirebaseUid: learnerFirebaseUid,
-        learnerName: learnerName,
-        learnerProfileCode: child.profileCode,
-      );
-    }
-  }
+  // Server-owned links: cached SQLite links never recreate authorization.
+  Future<void> _syncLinkedChildrenToCloud() async {}
 
   Future<void> _loadNotifications() async {
     if (_user == null || (!_user!.isParent && !_user!.isTeacher)) {
       _notifications = [];
       return;
     }
-    _notifications = await _repo.getParentNotifications(_user!.id);
+    final items = await _repo.getParentNotifications(_user!.id);
+    final authorizedIds = _linkedChildren
+        .map((child) => child.learnerId)
+        .toSet();
+    _notifications = _user!.isParent
+        ? items
+              .where((item) => authorizedIds.contains(item.learnerUserId))
+              .toList()
+        : items;
   }
 
   Future<Map<String, int>> getNegativePhraseWarningLevels({
@@ -4786,7 +4749,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           localContacts: localContacts,
           learnerFirebaseUid: learnerUid,
         )
-        .timeout(const Duration(seconds: 8), onTimeout: () => localContacts);
+        .timeout(const Duration(seconds: 8), onTimeout: () => const <String>[]);
     return _negativeUsageSms.send(
       teacherUserId: teacherUserId,
       learnerUserId: learnerUserId,
@@ -5047,7 +5010,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> markAllNotificationsRead() async {
     if (_user == null || (!_user!.isParent && !_user!.isTeacher)) return;
-    final remoteIds = await _repo.unreadNotificationRemoteIds(_user!.id);
+    final remoteIds = <String>[];
+    for (final item in _notifications.where((item) => !item.isRead)) {
+      final remoteId = await _repo.notificationRemoteId(item.id);
+      if (remoteId != null && remoteId.isNotEmpty) remoteIds.add(remoteId);
+    }
     await _repo.markAllNotificationsRead(_user!.id);
     if (remoteIds.isNotEmpty) {
       unawaited(_notificationSync.markAllRemoteNotificationsRead(remoteIds));
@@ -5405,130 +5372,90 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  Future<void> applyVerifiedCaregiverLinks(List<dynamic> links) async {
+    final parent = _user;
+    if (parent == null || !parent.isParent) return;
+    final parentUid = FirebaseService.instance.currentUid;
+    if (parentUid == null ||
+        (parent.firebaseUid?.isNotEmpty == true &&
+            parent.firebaseUid != parentUid)) {
+      throw StateError('Signed-in parent changed.');
+    }
+    final remote = links
+        .map(
+          (raw) => RemoteParentChildLink(
+            parentFirebaseUid: parentUid,
+            learnerFirebaseUid: raw['learnerFirebaseUid'] as String,
+            parentUserId: parent.id,
+            learnerUserId: 0,
+            learnerName: raw['learnerName'] as String,
+            learnerProfileCode: raw['learnerProfileCode'] as String,
+          ),
+        )
+        .toList();
+    await _repo.mergeRemoteParentChildLinks(
+      parentUserId: parent.id,
+      links: remote,
+    );
+    await _repo.pruneStaleParentChildLinks(
+      parentUserId: parent.id,
+      remoteLearnerFirebaseUids: remote
+          .map((link) => link.learnerFirebaseUid)
+          .toSet(),
+    );
+    if (_user?.id != parent.id) throw StateError('Signed-in parent changed.');
+    _linkedChildren = await _repo.getLinkedChildren(parent.id);
+    if (!_linkedChildren.any((child) => child.learnerId == _selectedChildId)) {
+      _selectedChildId = _linkedChildren.isEmpty
+          ? null
+          : _linkedChildren.first.learnerId;
+    }
+    await _loadNotifications();
+    notifyListeners();
+  }
+
+  Future<String?> linkedLearnerFirebaseUid(int learnerId) async {
+    if (_user?.isParent != true ||
+        !_linkedChildren.any((child) => child.learnerId == learnerId)) {
+      return null;
+    }
+    return _repo.getFirebaseUidForUser(learnerId);
+  }
+
   Future<String?> linkChildByProfileCode(String code) async {
     if (_user == null || !_user!.isParent) {
       return AppStrings.notSignedIn(_language);
     }
+    final parentId = _user!.id;
     final normalized = AppRepository.normalizeProfileCode(code);
     if (!AppRepository.isValidProfileCodeFormat(normalized)) {
       return AppStrings.invalidProfileCode(_language);
     }
-
-    await FirebaseService.instance.initialize();
-    await _notificationSync.initialize();
-
-    RemoteLearnerProfile? remoteProfile;
-    var learner = await _repo.findLearnerByProfileCode(normalized);
-    if (learner == null &&
-        CloudScope.syncMonitoring &&
-        _notificationSync.isCloudAvailable) {
-      if (!await _ensureCloudAuthSession()) {
-        return AppStrings.loginNeedsInternet(_language);
-      }
-      try {
-        remoteProfile = await _notificationSync
-            .findLearnerProfileByCodeFromCloud(normalized)
-            .timeout(const Duration(seconds: 12));
-        if (remoteProfile != null) {
-          learner = await _repo.ensureLearnerFromRemoteProfile(remoteProfile);
-        }
-      } catch (e, st) {
-        debugPrint('Cloud profile code lookup failed: $e\n$st');
-      }
-    }
-    if (learner == null) {
-      return AppStrings.childNotFound(_language);
-    }
-    if (learner.id == _user!.id) {
-      return AppStrings.cannotLinkSelf(_language);
-    }
-    if (await _repo.isChildLinked(_user!.id, learner.id)) {
-      return AppStrings.childAlreadyLinked(_language);
-    }
-
-    await _repo.linkParentToChild(_user!.id, learner.id);
-
-    _linkedChildren = await _repo.getLinkedChildren(_user!.id);
-    _selectedChildId = learner.id;
-    _bumpLiveDataRevision();
-    notifyListeners();
-
-    if (CloudScope.syncMonitoring && _notificationSync.isCloudAvailable) {
-      unawaited(
-        _syncNewParentChildLinkToCloud(
-          learnerUserId: learner.id,
-          learnerName: learner.fullName,
-          remoteProfile: remoteProfile,
-          initialLearnerFirebaseUid: remoteProfile?.learnerFirebaseUid.trim() ??
-              learner.firebaseUid?.trim(),
+    try {
+      // No local lookup or optimistic authorization before server verification.
+      final result = await CaregiverSecurityService.instance.call('link', {
+        'profileCode': normalized,
+      });
+      if (_user?.id != parentId) return AppStrings.notSignedIn(_language);
+      final learner = await _repo.ensureLearnerFromRemoteProfile(
+        RemoteLearnerProfile(
+          learnerFirebaseUid: result['learnerFirebaseUid'] as String,
+          learnerName: result['learnerName'] as String,
+          profileCode: result['profileCode'] as String,
+          learnerUserId: 0,
         ),
       );
-    } else {
-      unawaited(refreshChildMonitoringData(learner.id));
-    }
-
-    return null;
-  }
-
-  Future<void> _syncNewParentChildLinkToCloud({
-    required int learnerUserId,
-    required String learnerName,
-    RemoteLearnerProfile? remoteProfile,
-    String? initialLearnerFirebaseUid,
-  }) async {
-    if (_user == null || !_user!.isParent) return;
-    final parentUserId = _user!.id;
-
-    try {
-      if (!await _ensureCloudAuthSession()) {
-        throw StateError('Cloud auth session missing');
-      }
-
-      var learnerFirebaseUid = initialLearnerFirebaseUid?.trim() ?? '';
-      if (learnerFirebaseUid.isEmpty) {
-        final resolved = await _resolveLearnerFirebaseUid(learnerUserId);
-        learnerFirebaseUid = resolved?.trim() ?? '';
-      }
-      if (learnerFirebaseUid.isEmpty) {
-        throw StateError('Learner Firebase UID missing');
-      }
-
-      final existingUid = await _repo.getFirebaseUidForUser(learnerUserId);
-      if (existingUid?.trim() != learnerFirebaseUid) {
-        await _repo.linkFirebaseUid(learnerUserId, learnerFirebaseUid);
-      }
-
-      final parentFirebaseUid = await _resolveParentFirebaseUid();
-      if (parentFirebaseUid == null || parentFirebaseUid.isEmpty) {
-        throw StateError('Parent Firebase UID missing');
-      }
-
-      final remoteCode = remoteProfile?.profileCode.trim() ?? '';
-      final profileCode = remoteCode.isNotEmpty
-          ? remoteCode
-          : await _repo.ensureLearnerProfileCode(learnerUserId);
-
-      await _notificationSync.syncParentChildLink(
-        parentUserId: parentUserId,
-        learnerUserId: learnerUserId,
-        parentFirebaseUid: parentFirebaseUid,
-        learnerFirebaseUid: learnerFirebaseUid,
-        learnerName: learnerName,
-        learnerProfileCode: profileCode,
-      );
-      unawaited(refreshChildMonitoringData(learnerUserId));
-    } catch (e, st) {
-      debugPrint('Cloud parent-child link sync failed: $e\n$st');
-      await _repo.unlinkParentChild(parentUserId, learnerUserId);
-      if (_user?.id != parentUserId) return;
-      _linkedChildren = await _repo.getLinkedChildren(parentUserId);
-      if (_selectedChildId == learnerUserId) {
-        _selectedChildId = _linkedChildren.isEmpty
-            ? null
-            : _linkedChildren.first.learnerId;
-      }
+      await _repo.linkParentToChild(parentId, learner.id);
+      _linkedChildren = await _repo.getLinkedChildren(parentId);
+      _selectedChildId = learner.id;
       _bumpLiveDataRevision();
       notifyListeners();
+      if (result['alreadyLinked'] == true) {
+        return AppStrings.childAlreadyLinked(_language);
+      }
+      return null;
+    } catch (_) {
+      return 'Unable to link. Connect to the internet and verify caregiver authorization, and verify your account email.';
     }
   }
 
@@ -5643,7 +5570,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _mergeDeletedClassCodesFromCloud(String teacherFirebaseUid) async {
+  Future<void> _mergeDeletedClassCodesFromCloud(
+    String teacherFirebaseUid,
+  ) async {
     if (_user == null || !_user!.isTeacher) return;
     if (!_notificationSync.isCloudAvailable) return;
     try {
@@ -5735,10 +5664,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (result.error == 'empty') {
       return AppStrings.enterClassName(_language);
     }
-    unawaited(_pushTeacherClassToCloud(
-      classCode: result.code,
-      className: result.name,
-    ));
+    unawaited(
+      _pushTeacherClassToCloud(classCode: result.code, className: result.name),
+    );
     await _loadTeacherClasses();
     await _refreshTeacherClassCounts();
     notifyListeners();
@@ -6424,7 +6352,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
             localContacts: localContacts,
             learnerFirebaseUid: learnerFirebaseUid,
           )
-        : localContacts;
+        : const <String>[];
     contacts = AppRepository.normalizeEmergencyContacts(contacts);
     debugPrint(
       'Teacher alert SMS: ${contacts.length} emergency contact(s) for '
@@ -7632,11 +7560,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final full = '$first $last'.trim();
     if (full.isEmpty) return AppStrings.fillAllFields(_language);
     await _repo.updateUserFullName(_user!.id, full);
-    await _repo.updateUserSettings(
-      _user!.id,
-      firstName: first,
-      lastName: last,
-    );
+    await _repo.updateUserSettings(_user!.id, firstName: first, lastName: last);
     _user = _user!.copyWith(fullName: full);
     _welcomeFirstName = first;
     _profileLastName = last;
@@ -7652,6 +7576,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await _repo.updateEmergencyContacts(_user!.id, cleaned);
     _emergencyContacts = cleaned;
     notifyListeners();
+    if (_user!.isLearner) {
+      try {
+        if (await NetworkStatus.isOffline()) throw StateError('Online review required');
+        await CaregiverSecurityService.instance.call('reviewEmergencyContacts', {'contacts': cleaned});
+      } catch (_) {
+        return 'Contacts saved on this phone. Connect to the internet and save the reviewed contacts again to enable teacher SMS.';
+      }
+    }
     await _enqueueProfileCloudSync();
     return null;
   }

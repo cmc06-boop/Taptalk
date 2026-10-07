@@ -2,9 +2,43 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    function self(uid) { return signedIn() && request.auth.uid == uid; }
+    function teacherOwner(uid) {
+      return firestore.get(/databases/(default)/documents/user_profiles/$(uid)).data.role == 'teacher';
+    }
+    function parentOf(uid) {
+      return 'trustedSession' in request.auth.token
+        && firestore.get(/databases/(default)/documents/caregiver_security/$(request.auth.uid)).data.sessionId != null
+        && firestore.get(/databases/(default)/documents/caregiver_security/$(request.auth.uid)).data.sessionId == request.auth.token.trustedSession
+        && firestore.get(/databases/(default)/documents/learner_caregivers/$(uid)).data.active == true
+        && firestore.get(/databases/(default)/documents/learner_caregivers/$(uid)).data.parentUid == request.auth.uid;
+    }
+    function privateMediaAccess(uid) {
+      // Storage permits at most two distinct Firestore document reads. Select
+      // the caller's authorization route before reading its authority records.
+      return 'trustedSession' in request.auth.token
+        ? parentOf(uid)
+        : firestore.exists(/databases/(default)/documents/teacher_learner_access/$(request.auth.uid + '_' + uid));
+    }
+    function sharedLessonMedia(uid) {
+      return resource.metadata.get('audience', 'private') == 'lesson'
+        && teacherOwner(uid);
+    }
+    function validUpload(uid) {
+      return request.resource.size <= 20 * 1024 * 1024
+        && request.resource.contentType.matches('(image|video)/.*')
+        && (request.resource.metadata.get('audience', 'private') == 'private'
+          || (request.resource.metadata.get('audience', 'private') == 'lesson'
+            && teacherOwner(uid)));
+    }
     match /phrase_images/{userId}/{fileName} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow read: if self(userId)
+        || (signedIn() && (resource.metadata.get('audience', 'private') == 'lesson'
+          ? sharedLessonMedia(userId)
+          : privateMediaAccess(userId)));
+      allow create, update: if self(userId) && validUpload(userId);
+      allow delete: if self(userId);
     }
   }
 }

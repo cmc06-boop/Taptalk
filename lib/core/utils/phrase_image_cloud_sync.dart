@@ -20,7 +20,7 @@ bool _storageUnavailableThisSession = false;
 
 /// Uploads local phrase media for cross-device sync.
 /// Prefers Firebase Storage; if Storage is blocked (e.g. Spark plan 402),
-/// falls back to chunked Firestore docs that any signed-in student can read.
+/// falls back to chunked Firestore docs with the same owner authorization.
 Future<String?> resolveImagePathForCloudSync(
   String? imagePath,
   String ownerFirebaseUid,
@@ -28,6 +28,11 @@ Future<String?> resolveImagePathForCloudSync(
   if (imagePath == null || imagePath.trim().isEmpty) return null;
   final trimmed = imagePath.trim();
   final lower = trimmed.toLowerCase();
+  final authenticatedRef = authenticatedPhraseMediaReference(trimmed);
+  if (authenticatedRef != null) return authenticatedRef;
+  if (lower.startsWith('gs://')) {
+    return null;
+  }
   if (lower.startsWith('http://') ||
       lower.startsWith('https://') ||
       lower.startsWith('assets/') ||
@@ -47,8 +52,7 @@ Future<String?> resolveImagePathForCloudSync(
   final safeExt = ext.isEmpty || ext.length > 8
       ? (isPhraseVideoPath(trimmed) ? '.mp4' : '.jpg')
       : ext;
-  final isVideo =
-      isPhraseVideoPath(trimmed) || safeExt.toLowerCase() == '.mp4';
+  final isVideo = isPhraseVideoPath(trimmed) || safeExt.toLowerCase() == '.mp4';
   final contentType = isVideo
       ? 'video/mp4'
       : switch (safeExt.toLowerCase()) {
@@ -67,13 +71,29 @@ Future<String?> resolveImagePathForCloudSync(
           .child('phrase_images')
           .child(uid)
           .child(objectName);
-      await ref.putFile(file).timeout(const Duration(seconds: 12));
-      final url =
-          await ref.getDownloadURL().timeout(const Duration(seconds: 8));
-      if (url.trim().isNotEmpty) {
-        await _seedLocalMediaForRemote(remoteRef: url, localPath: trimmed);
-        return url;
-      }
+      // Teacher lesson media is shared; learner uploads stay private. The
+      // Storage rules independently verify the owner's role for shared reads.
+      final profile = await FirebaseFirestore.instance
+          .collection('user_profiles')
+          .doc(uid)
+          .get()
+          .timeout(const Duration(seconds: 8));
+      final audience = profile.data()?['role'] == 'teacher'
+          ? 'lesson'
+          : 'private';
+      await ref
+          .putFile(
+            file,
+            SettableMetadata(
+              contentType: contentType,
+              customMetadata: {'audience': audience},
+            ),
+          )
+          .timeout(const Duration(seconds: 12));
+      // Do not mint a bearer URL: each new device download must pass rules.
+      final cloudRef = 'gs://${ref.bucket}/${ref.fullPath}';
+      await _seedLocalMediaForRemote(remoteRef: cloudRef, localPath: trimmed);
+      return cloudRef;
     } catch (e) {
       _storageUnavailableThisSession = true;
       debugPrint(
@@ -138,20 +158,24 @@ Future<String?> _uploadPhraseMediaToFirestore({
     final docId = '${ownerFirebaseUid}_${digest.substring(0, 32)}';
     final mediaRef = '$phraseMediaScheme$docId$ext';
     final firestore = FirebaseFirestore.instance;
-    final existing =
-        await firestore.collection(phraseMediaCollectionName).doc(docId).get();
+    final existing = await firestore
+        .collection(phraseMediaCollectionName)
+        .doc(docId)
+        .get();
     if (existing.exists) {
-      await _seedLocalMediaForRemote(
-        remoteRef: mediaRef,
-        localPath: file.path,
-      );
+      await _seedLocalMediaForRemote(remoteRef: mediaRef, localPath: file.path);
       return mediaRef;
     }
 
-    final chunkCount =
-        math.max(1, (bytes.length / _firestoreChunkBytes).ceil());
+    final chunkCount = math.max(
+      1,
+      (bytes.length / _firestoreChunkBytes).ceil(),
+    );
     final writes = <Future<void>>[
       firestore.collection(phraseMediaCollectionName).doc(docId).set({
+        'ownerFirebaseUid': ownerFirebaseUid,
+        // Retained for existing clients; this legacy field is the media owner,
+        // including when that owner is a learner rather than a teacher.
         'teacherFirebaseUid': ownerFirebaseUid,
         'contentType': contentType,
         'ext': ext,
@@ -167,6 +191,7 @@ Future<String?> _uploadPhraseMediaToFirestore({
       final chunk = bytes.sublist(start, end);
       writes.add(
         firestore.collection(phraseMediaCollectionName).doc('${docId}_$i').set({
+          'ownerFirebaseUid': ownerFirebaseUid,
           'teacherFirebaseUid': ownerFirebaseUid,
           'parentId': docId,
           'index': i,

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:crypto/crypto.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:path/path.dart' as p;
@@ -14,6 +15,53 @@ import '../../services/firebase_service.dart';
 
 const String phraseMediaCollectionName = 'phrase_media_cloud';
 const String phraseMediaScheme = 'taptalk-fs-media://';
+const int maxPhraseMediaDownloadBytes = 20 * 1024 * 1024;
+
+/// A Storage reference carries no download token; the SDK authenticates reads.
+bool isFirebaseStoragePhraseMediaPath(String? imagePath) {
+  final uri = Uri.tryParse(imagePath?.trim() ?? '');
+  return uri != null &&
+      uri.scheme == 'gs' &&
+      uri.host.isNotEmpty &&
+      uri.userInfo.isEmpty &&
+      !uri.hasPort &&
+      !uri.hasQuery &&
+      !uri.hasFragment &&
+      uri.pathSegments.isNotEmpty &&
+      uri.pathSegments.every(
+        (part) => part.isNotEmpty && part != '.' && part != '..',
+      );
+}
+
+/// Converts legacy Firebase bearer URLs into references that require Auth.
+/// External image URLs remain unchanged and use the regular HTTP cache.
+String? authenticatedPhraseMediaReference(String? imagePath) {
+  final value = imagePath?.trim() ?? '';
+  if (isFirebaseStoragePhraseMediaPath(value)) return value;
+  final uri = Uri.tryParse(value);
+  if (uri == null ||
+      uri.scheme != 'https' ||
+      uri.host != 'firebasestorage.googleapis.com' ||
+      uri.userInfo.isNotEmpty ||
+      uri.hasPort) {
+    return null;
+  }
+  final parts = uri.pathSegments;
+  if (parts.length != 5 ||
+      parts[0] != 'v0' ||
+      parts[1] != 'b' ||
+      parts[2].isEmpty ||
+      parts[3] != 'o' ||
+      parts[4].isEmpty) {
+    return null;
+  }
+  final ref = Uri(
+    scheme: 'gs',
+    host: parts[2],
+    path: '/${parts[4]}',
+  ).toString();
+  return isFirebaseStoragePhraseMediaPath(ref) ? ref : null;
+}
 
 bool isFirestorePhraseMediaPath(String? imagePath) {
   final trimmed = imagePath?.trim() ?? '';
@@ -32,11 +80,7 @@ bool isPhraseVideoPath(String? path) {
   if (path == null || path.trim().isEmpty) return false;
   final lower = path.trim().toLowerCase();
   final uri = Uri.tryParse(lower);
-  final candidates = <String>[
-    lower,
-    uri?.path ?? '',
-    uri?.host ?? '',
-  ];
+  final candidates = <String>[lower, uri?.path ?? '', uri?.host ?? ''];
   for (final value in candidates) {
     if (value.endsWith('.mp4') ||
         value.endsWith('.webm') ||
@@ -53,6 +97,14 @@ Future<String?> persistPhraseImageIfNeeded(String? sourcePath) async {
   if (sourcePath == null || sourcePath.isEmpty) return null;
 
   final lower = sourcePath.toLowerCase();
+  final authenticatedRef = authenticatedPhraseMediaReference(sourcePath);
+  if (authenticatedRef != null) {
+    await cachePhraseImageLocally(authenticatedRef);
+    return authenticatedRef;
+  }
+  if (lower.startsWith('gs://')) {
+    return null;
+  }
   if (lower.startsWith('assets/')) {
     if (isPhraseVideoPath(sourcePath)) {
       return ensureLocalPhraseMediaPath(sourcePath);
@@ -165,13 +217,15 @@ bool isRemotePhraseImagePath(String? imagePath) {
   return lower.startsWith('http://') ||
       lower.startsWith('https://') ||
       lower.startsWith('data:') ||
+      lower.startsWith('gs://') ||
       isFirestorePhraseMediaPath(imagePath);
 }
 
 /// Returns a path that can be shown immediately without downloading.
 String? existingPhraseImagePath(String? imagePath) {
   if (imagePath == null || imagePath.trim().isEmpty) return null;
-  final trimmed = imagePath.trim();
+  final trimmed =
+      authenticatedPhraseMediaReference(imagePath) ?? imagePath.trim();
   final lower = trimmed.toLowerCase();
   if (lower.startsWith('assets/')) {
     if (isPhraseVideoPath(trimmed)) {
@@ -205,7 +259,8 @@ String? cachedPhraseImagePathSync(String? imagePath) {
 /// when online, and materializes asset videos/images into app documents.
 Future<String?> cachePhraseImageLocally(String? imagePath) async {
   if (imagePath == null || imagePath.trim().isEmpty) return null;
-  final trimmed = imagePath.trim();
+  final trimmed =
+      authenticatedPhraseMediaReference(imagePath) ?? imagePath.trim();
   final lower = trimmed.toLowerCase();
 
   if (kIsWeb) return trimmed;
@@ -237,6 +292,10 @@ Future<String?> cachePhraseImageLocally(String? imagePath) async {
     return _downloadFirestoreMediaToCache(trimmed, cacheFile);
   }
 
+  if (lower.startsWith('gs://')) {
+    return _downloadStorageMediaToCache(trimmed, cacheFile);
+  }
+
   return _downloadUrlToCache(trimmed, cacheFile);
 }
 
@@ -249,7 +308,36 @@ Future<String?> ensureLocalPhraseMediaPath(String? imagePath) async {
 
 /// Keeps cloud URLs in the database when offline, but prefers local cache when available.
 Future<String?> resolveStoredPhraseImagePath(String? imagePath) async {
+  final authenticatedRef = authenticatedPhraseMediaReference(imagePath);
+  if (authenticatedRef != null) {
+    await cachePhraseImageLocally(authenticatedRef);
+    return authenticatedRef;
+  }
   return ensureLocalPhraseMediaPath(imagePath);
+}
+
+Future<String?> _downloadStorageMediaToCache(String ref, File cacheFile) async {
+  if (!isFirebaseStoragePhraseMediaPath(ref)) return null;
+  try {
+    await FirebaseService.instance.initialize();
+    if (!FirebaseService.instance.isAvailable) return null;
+    final bytes = await FirebaseStorage.instance
+        .refFromURL(ref)
+        .getData(maxPhraseMediaDownloadBytes)
+        .timeout(const Duration(seconds: 20));
+    if (bytes == null ||
+        bytes.isEmpty ||
+        bytes.length > maxPhraseMediaDownloadBytes) {
+      return null;
+    }
+    await cacheFile.parent.create(recursive: true);
+    await cacheFile.writeAsBytes(bytes, flush: true);
+    return cacheFile.path;
+  } catch (e, st) {
+    // Authorization errors never fall back to a public URL or a local path.
+    debugPrint('Authenticated phrase media download failed: $e\n$st');
+    return null;
+  }
 }
 
 Future<String?> _materializeAssetToCache(String assetPath) async {
@@ -290,7 +378,10 @@ Future<String?> _writeDataUrlToCache(String dataUrl, File cacheFile) async {
   }
 }
 
-Future<String?> _downloadFirestoreMediaToCache(String ref, File cacheFile) async {
+Future<String?> _downloadFirestoreMediaToCache(
+  String ref,
+  File cacheFile,
+) async {
   final docId = firestorePhraseMediaDocId(ref);
   if (docId == null || docId.isEmpty) return null;
 
@@ -299,8 +390,10 @@ Future<String?> _downloadFirestoreMediaToCache(String ref, File cacheFile) async
 
   try {
     final firestore = FirebaseFirestore.instance;
-    final meta =
-        await firestore.collection(phraseMediaCollectionName).doc(docId).get();
+    final meta = await firestore
+        .collection(phraseMediaCollectionName)
+        .doc(docId)
+        .get();
     if (!meta.exists) return null;
     final data = meta.data() ?? {};
     final chunkCount = data['chunkCount'] as int? ?? 0;
@@ -379,8 +472,9 @@ Future<String?> _downloadUrlToCache(String url, File cacheFile) async {
 }
 
 File _cacheFileForSource(String source) {
-  final digest = sha256.convert(utf8.encode(source)).toString();
-  final ext = _extensionForSource(source);
+  final cacheKey = authenticatedPhraseMediaReference(source) ?? source;
+  final digest = sha256.convert(utf8.encode(cacheKey)).toString();
+  final ext = _extensionForSource(cacheKey);
   final name = '${digest.substring(0, 24)}$ext';
   return File(p.join(_cacheDirectoryPathSync(), name));
 }

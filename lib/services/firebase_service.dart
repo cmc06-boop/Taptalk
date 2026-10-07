@@ -2,17 +2,16 @@ import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:math';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:uuid/uuid.dart';
 
 import '../data/models/firebase_password_reset_result.dart';
 import '../firebase_options.dart';
+import 'caregiver_security_service.dart';
 
 /// Initializes Firebase Auth used for cross-device notification delivery.
 class FirebaseService {
@@ -66,31 +65,14 @@ class FirebaseService {
 
   String? get currentUserDisplayName => auth?.currentUser?.displayName;
 
-  static const String _userSecurityCollectionName = 'user_security';
+  // Password authentication never replaces caregiver device authority.
+  // The server-backed parent gate validates that separate relationship.
+  Future<bool> validateCurrentSessionForThisDevice({String? uid}) async =>
+      hasActiveAuthSession && (uid == null || uid == currentUid);
 
-  Future<String> _sessionFingerprint() async {
-    final prefs = await SharedPreferences.getInstance();
-    final id = prefs.getString('device_session_fingerprint');
-    if (id != null && id.isNotEmpty) return id;
-    final generated = const Uuid().v4();
-    await prefs.setString('device_session_fingerprint', generated);
-    return generated;
-  }
+  Future<void> registerActiveSessionForCurrentUser() async {}
 
-  Future<String> _localSessionId() async {
-    final prefs = await SharedPreferences.getInstance();
-    final sessionId = prefs.getString('active_session_id');
-    if (sessionId != null && sessionId.isNotEmpty) return sessionId;
-    final generated = const Uuid().v4();
-    await prefs.setString('active_session_id', generated);
-    return generated;
-  }
-
-  Future<void> _persistSessionState(String uid, String sessionId) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('active_session_id', sessionId);
-    await prefs.setString('active_session_uid', uid);
-  }
+  Future<void> _tryRegisterActiveSession() async {}
 
   Future<void> _clearSessionState() async {
     final prefs = await SharedPreferences.getInstance();
@@ -98,145 +80,8 @@ class FirebaseService {
     await prefs.remove('active_session_uid');
   }
 
-  Future<void> _markSessionMismatch(String uid, String localSessionId) async {
-    final db = FirebaseFirestore.instance;
-    final ref = db.collection(_userSecurityCollectionName).doc(uid);
-    final previous = (await ref.get()).data();
-    final previousDevice = (previous?['currentDeviceId'] as String?)?.trim() ?? '';
-    final previousSession = (previous?['currentSessionId'] as String?)?.trim() ?? '';
-
-    await ref.set({
-      'uid': uid,
-      'currentSessionId': localSessionId,
-      'currentDeviceId': await _sessionFingerprint(),
-      'previousSessionId': previousSession,
-      'previousDeviceId': previousDevice,
-      'deviceChangeAt': FieldValue.serverTimestamp(),
-      'lastSeenAt': FieldValue.serverTimestamp(),
-      'lastMismatchAt': FieldValue.serverTimestamp(),
-      'mismatchCount': FieldValue.increment(1),
-      'fraudRisk': 'session_mismatch',
-      'suspiciousLogin': true,
-    }, SetOptions(merge: true));
-  }
-
-  Future<bool> validateCurrentSessionForThisDevice({String? uid}) async {
-    if (!_initialized) return true;
-    final firebaseAuth = auth;
-    final currentUid = uid ?? firebaseAuth?.currentUser?.uid;
-    if (currentUid == null || currentUid.isEmpty) return true;
-
-    final prefs = await SharedPreferences.getInstance();
-    final localSessionId = prefs.getString('active_session_id');
-    final deviceId = await _sessionFingerprint();
-    final ref = FirebaseFirestore.instance
-        .collection(_userSecurityCollectionName)
-        .doc(currentUid);
-    final snapshot = await ref.get();
-    final data = snapshot.data();
-    final serverSessionId = (data?['currentSessionId'] as String?)?.trim() ?? '';
-    final serverDeviceId = (data?['currentDeviceId'] as String?)?.trim() ?? '';
-
-    if (serverSessionId.isEmpty) {
-      final newSessionId = await _localSessionId();
-      await ref.set({
-        'uid': currentUid,
-        'currentSessionId': newSessionId,
-        'currentDeviceId': deviceId,
-        'lastSeenAt': FieldValue.serverTimestamp(),
-        'createdAt': FieldValue.serverTimestamp(),
-        'fraudRisk': 'none',
-      }, SetOptions(merge: true));
-      await _persistSessionState(currentUid, newSessionId);
-      return true;
-    }
-
-    if (localSessionId == null || localSessionId.isEmpty) {
-      final generated = await _localSessionId();
-      await _persistSessionState(currentUid, generated);
-      if (serverSessionId != generated) {
-        await _markSessionMismatch(currentUid, generated);
-        return false;
-      }
-    }
-
-    if (serverSessionId != localSessionId) {
-      await _markSessionMismatch(currentUid, localSessionId ?? await _localSessionId());
-      return false;
-    }
-
-    if (serverDeviceId.isNotEmpty && serverDeviceId != deviceId) {
-      await ref.set({
-        'uid': currentUid,
-        'currentDeviceId': deviceId,
-        'lastDeviceMismatchAt': FieldValue.serverTimestamp(),
-        'fraudRisk': 'device_change',
-      }, SetOptions(merge: true));
-      return false;
-    }
-
-    await ref.set({
-      'uid': currentUid,
-      'currentSessionId': serverSessionId,
-      'currentDeviceId': deviceId,
-      'lastSeenAt': FieldValue.serverTimestamp(),
-      'fraudRisk': 'none',
-    }, SetOptions(merge: true));
-
-    return true;
-  }
-
-  Future<void> registerActiveSessionForCurrentUser() async {
-    if (!_initialized) return;
-    final uid = auth?.currentUser?.uid;
-    if (uid == null || uid.isEmpty) return;
-
-    final sessionId = const Uuid().v4();
-    final deviceId = await _sessionFingerprint();
-    final ref = FirebaseFirestore.instance
-        .collection(_userSecurityCollectionName)
-        .doc(uid);
-
-    final previous = (await ref.get()).data();
-    await ref.set({
-      'uid': uid,
-      'currentSessionId': sessionId,
-      'currentDeviceId': deviceId,
-      'previousSessionId': (previous?['currentSessionId'] as String?)?.trim() ?? '',
-      'previousDeviceId': (previous?['currentDeviceId'] as String?)?.trim() ?? '',
-      'lastSeenAt': FieldValue.serverTimestamp(),
-      'createdAt': FieldValue.serverTimestamp(),
-      'fraudRisk': 'none',
-    }, SetOptions(merge: true));
-
-    await _persistSessionState(uid, sessionId);
-  }
-
-  Future<void> _tryRegisterActiveSession() async {
-    try {
-      await registerActiveSessionForCurrentUser()
-          .timeout(const Duration(seconds: 8));
-    } catch (e, st) {
-      debugPrint('Session register after auth failed: $e\n$st');
-    }
-  }
-
   Future<void> invalidateCurrentUserSession({String? reason}) async {
-    if (!_initialized) return;
-    final uid = auth?.currentUser?.uid;
-    if (uid == null || uid.isEmpty) return;
-    final ref = FirebaseFirestore.instance
-        .collection(_userSecurityCollectionName)
-        .doc(uid);
-    await ref.set({
-      'uid': uid,
-      'currentSessionId': '',
-      'currentDeviceId': '',
-      'lastSeenAt': FieldValue.serverTimestamp(),
-      'revokedAt': FieldValue.serverTimestamp(),
-      'revokedReason': reason ?? 'manual',
-      'fraudRisk': reason == null ? 'none' : 'forced_revoke',
-    }, SetOptions(merge: true));
+    await CaregiverSecurityService.instance.endSession();
     await _clearSessionState();
   }
 
@@ -510,6 +355,7 @@ class FirebaseService {
   Future<void> signOut() async {
     if (!_initialized) return;
     try {
+      await CaregiverSecurityService.instance.endSession();
       await auth?.signOut();
     } finally {
       await _clearSessionState();

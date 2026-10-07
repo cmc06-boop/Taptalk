@@ -5,6 +5,7 @@ class TeacherAlertCloudEvent {
     required this.parentUserId,
     required this.parentFirebaseUid,
     required this.learnerUserId,
+    required this.learnerFirebaseUid,
     required this.childName,
     required this.teacherUserId,
     required this.teacherFirebaseUid,
@@ -21,6 +22,7 @@ class TeacherAlertCloudEvent {
   final int parentUserId;
   final String parentFirebaseUid;
   final int learnerUserId;
+  final String learnerFirebaseUid;
   final String childName;
   final int teacherUserId;
   final String teacherFirebaseUid;
@@ -36,6 +38,7 @@ class TeacherAlertCloudEvent {
         'localNotificationId': localNotificationId,
         'parentUserId': parentUserId,
         'learnerUserId': learnerUserId,
+        'learnerFirebaseUid': learnerFirebaseUid,
         'childName': childName,
         'teacherUserId': teacherUserId,
         'teacherFirebaseUid': teacherFirebaseUid,
@@ -555,6 +558,7 @@ class TeacherClassCloudEvent {
 class RemoteParentNotification {
   const RemoteParentNotification({
     required this.remoteId,
+    this.learnerFirebaseUid,
     required this.parentUserId,
     required this.learnerUserId,
     required this.childName,
@@ -566,6 +570,7 @@ class RemoteParentNotification {
   });
 
   final String remoteId;
+  final String? learnerFirebaseUid;
   final int parentUserId;
   final int? learnerUserId;
   final String childName;

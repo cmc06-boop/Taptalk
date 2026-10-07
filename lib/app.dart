@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import 'core/navigation/route_transitions.dart';
 import 'providers/app_state.dart';
+import 'widgets/caregiver_security_gate.dart';
 import 'screens/choose_category_screen.dart';
 import 'screens/choose_language_screen.dart';
 import 'screens/choose_role_screen.dart';
@@ -70,12 +71,17 @@ class TapTalkApp extends StatelessWidget {
               return PopScope(
                 canPop: false,
                 onPopInvokedWithResult: (didPop, _) {
-                  if (didPop) return;
+                  if (didPop || app.user?.isParent == true) return;
                   unawaited(app.handleSystemBack());
                 },
                 child: ColoredBox(
                   color: theme.bgLight,
-                  child: child ?? const SizedBox.shrink(),
+                  child: app.user?.isParent == true
+                      ? CaregiverSecurityGate(
+                          key: ValueKey(app.user!.id),
+                          child: child ?? const SizedBox.shrink(),
+                        )
+                      : child ?? const SizedBox.shrink(),
                 ),
               );
             },
@@ -94,6 +100,10 @@ class TapTalkApp extends StatelessWidget {
   }
 
   static Widget buildScreen(AppRoute route) {
+    return CaregiverSecurityRoute(child: _buildScreen(route));
+  }
+
+  static Widget _buildScreen(AppRoute route) {
     switch (route) {
       case AppRoute.welcome:
         return const WelcomeScreen();

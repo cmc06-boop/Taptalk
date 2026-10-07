@@ -577,13 +577,6 @@ class AppRepository {
 
       UserModel? learner = await findUserByFirebaseUid(learnerUid);
 
-      if (learner == null && link.learnerUserId > 0) {
-        final local = await findUserById(link.learnerUserId);
-        if (local != null && local.isLearner) {
-          learner = local;
-        }
-      }
-
       if (learner == null && link.learnerProfileCode.trim().isNotEmpty) {
         final byCode = await findLearnerByProfileCode(link.learnerProfileCode);
         if (byCode != null && await isChildLinked(parentUserId, byCode.id)) {
@@ -625,7 +618,7 @@ class AppRepository {
     for (final child in children) {
       final learner = await findUserById(child.learnerId);
       final uid = learner?.firebaseUid?.trim() ?? '';
-      if (uid.isNotEmpty && !remoteLearnerFirebaseUids.contains(uid)) {
+      if (uid.isEmpty || !remoteLearnerFirebaseUids.contains(uid)) {
         await unlinkParentChild(parentUserId, child.learnerId);
       }
     }
@@ -888,7 +881,9 @@ class AppRepository {
       final localFirst = (settings['first_name'] as String?)?.trim() ?? '';
       final remoteIsShorterPrefix = localFirst.isNotEmpty &&
           localFirst.toLowerCase() != remoteFirstName.toLowerCase() &&
-          localFirst.toLowerCase().startsWith('${remoteFirstName.toLowerCase()} ');
+          localFirst.toLowerCase().startsWith(
+            '${remoteFirstName.toLowerCase()} ',
+          );
       if (!remoteIsShorterPrefix) {
         await updateUserSettings(userId, firstName: remoteFirstName);
       }
@@ -2036,6 +2031,7 @@ class AppRepository {
   Future<void> mergeRemoteLearnerFavorites({
     required int learnerUserId,
     required List<RemoteLearnerFavorite> favorites,
+
     /// When false (default), only upsert remote favorites. Deleting local
     /// favorites that are missing remotely races with star/unstar and can
     /// wipe or restore toggles from a stale cloud snapshot.
@@ -2928,9 +2924,12 @@ class AppRepository {
           : normalizeCategoryKey(activity.categoryKey);
       if (!isPersonalCategoryKey(categoryKey)) continue;
 
-      final eventKey = remoteActivitySyncKey(createdAt: activity.createdAt,
-        phraseText: activity.phraseText, categoryKey: categoryKey,
-        eventId: activity.eventId);
+      final eventKey = remoteActivitySyncKey(
+        createdAt: activity.createdAt,
+        phraseText: activity.phraseText,
+        categoryKey: categoryKey,
+        eventId: activity.eventId,
+      );
       if (!seenEvents.add(eventKey)) continue;
 
       final mergeKey = '$categoryKey|$text';
@@ -4702,11 +4701,19 @@ class AppRepository {
     final db = await _dbHelper.database;
     for (final item in items) {
       if (item.parentUserId != parentUserId) continue;
+      // Device-local numeric IDs from a teacher phone cannot authorize or
+      // identify a learner on a parent's phone. Resolve the cloud UID locally.
+      final learnerUid = item.learnerFirebaseUid?.trim() ?? '';
+      if (learnerUid.isEmpty) continue;
+      final learner = await findUserByFirebaseUid(learnerUid);
+      if (learner == null || !await isChildLinked(parentUserId, learner.id)) {
+        continue;
+      }
       final createdAtMs = item.createdAt.millisecondsSinceEpoch;
       final existing = await db.query(
         'parent_notifications',
-        where: 'remote_id = ?',
-        whereArgs: [item.remoteId],
+        where: 'parent_user_id = ? AND remote_id = ?',
+        whereArgs: [parentUserId, item.remoteId],
         limit: 1,
       );
       if (existing.isNotEmpty) {
@@ -4715,6 +4722,7 @@ class AppRepository {
         await db.update(
           'parent_notifications',
           {
+            'learner_user_id': learner.id,
             'title': item.title,
             'body': item.body,
             'child_name': item.childName,
@@ -4741,7 +4749,7 @@ class AppRepository {
           'parent_notifications',
           {
             'remote_id': item.remoteId,
-            'learner_user_id': item.learnerUserId,
+            'learner_user_id': learner.id,
             'child_name': item.childName,
             'is_read': keepRead ? 1 : 0,
           },
@@ -4753,7 +4761,7 @@ class AppRepository {
 
       await db.insert('parent_notifications', {
         'parent_user_id': parentUserId,
-        'learner_user_id': item.learnerUserId,
+        'learner_user_id': learner.id,
         'child_name': item.childName,
         'alert_type': item.alertType,
         'title': item.title,
@@ -5304,8 +5312,10 @@ class AppRepository {
           if (raw.isEmpty) continue;
           // One-at-a-time so large videos finish reliably on Spark/Firestore.
           final url =
-              (await resolveImagePathForCloudSync(raw, teacherFirebaseUid))
-                  ?.trim() ??
+              (await resolveImagePathForCloudSync(
+                raw,
+                teacherFirebaseUid,
+              ))?.trim() ??
               '';
           if (url.isEmpty) continue;
           pendingPhrases[i] = (
@@ -5754,10 +5764,7 @@ class AppRepository {
         if (imagePath != null && imagePath.trim().isNotEmpty) {
           await db.update(
             'lesson_phrases',
-            {
-              'image_path': imagePath,
-              'cloud_phrase_key': cloudKey,
-            },
+            {'image_path': imagePath, 'cloud_phrase_key': cloudKey},
             where: 'id = ?',
             whereArgs: [existingId],
           );

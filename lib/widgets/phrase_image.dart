@@ -248,7 +248,9 @@ class _PhraseImageState extends State<PhraseImage> {
 
     final path = _resolvedPath ?? existingPhraseImagePath(raw) ?? raw;
     final lower = path.toLowerCase();
-    if (isFirestorePhraseMediaPath(path) || _resolving) {
+    if (isFirestorePhraseMediaPath(path) ||
+        authenticatedPhraseMediaReference(path) != null ||
+        _resolving) {
       return _Placeholder(theme: widget.theme);
     }
     if (lower.startsWith('assets/')) {

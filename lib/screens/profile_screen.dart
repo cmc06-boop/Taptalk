@@ -306,7 +306,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
     }
     if (err == null && isLearner) {
-      await app.updateEmergencyContacts(contacts);
+      err = await app.updateEmergencyContacts(contacts);
     }
     if (!mounted) return;
     setState(() => _saving = false);

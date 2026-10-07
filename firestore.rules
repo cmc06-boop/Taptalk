@@ -1,147 +1,115 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /parent_notifications/{notificationId} {
-      allow read: if request.auth != null
-        && (
-          resource.data.parentFirebaseUid == request.auth.uid
-          || resource.data.teacherFirebaseUid == request.auth.uid
-        );
-
-      allow create: if request.auth != null
+    function signedIn() { return request.auth != null; }
+    function self(uid) { return signedIn() && request.auth.uid == uid; }
+    function trustedParent() {
+      return signedIn() && 'trustedSession' in request.auth.token
+        && exists(/databases/$(database)/documents/caregiver_security/$(request.auth.uid))
+        && get(/databases/$(database)/documents/caregiver_security/$(request.auth.uid)).data.sessionId != null
+        && get(/databases/$(database)/documents/caregiver_security/$(request.auth.uid)).data.sessionId == request.auth.token.trustedSession;
+    }
+    function parentOf(uid) {
+      return trustedParent()
+        && exists(/databases/$(database)/documents/learner_caregivers/$(uid))
+        && get(/databases/$(database)/documents/learner_caregivers/$(uid)).data.active == true
+        && get(/databases/$(database)/documents/learner_caregivers/$(uid)).data.parentUid == request.auth.uid;
+    }
+    function teacherOf(uid) {
+      return signedIn() && exists(/databases/$(database)/documents/teacher_learner_access/$(request.auth.uid + '_' + uid));
+    }
+    function learnerAccess(uid) { return self(uid) || parentOf(uid) || teacherOf(uid); }
+    function classOwner(code) {
+      return signedIn() && get(/databases/$(database)/documents/teacher_classes_cloud/$(code)).data.teacherFirebaseUid == request.auth.uid;
+    }
+    function participant(data) { return self(data.learnerFirebaseUid) || self(data.teacherFirebaseUid); }
+    function mediaOwner(data) { return data.get('ownerFirebaseUid', data.get('teacherFirebaseUid', '')); }
+    match /caregiver_security/{uid} { allow read, write: if false; }
+    match /learner_caregivers/{uid} { allow read, write: if false; }
+    match /device_replacements/{id} { allow read, write: if false; }
+    match /security_rate_limits/{id} { allow read, write: if false; }
+    match /security_audit/{id} { allow read, write: if false; }
+    match /teacher_learner_access/{id} { allow read, write: if false; }
+    match /user_security/{id} { allow read, write: if false; }
+    match /parent_child_links/{id} {
+      allow read: if (self(resource.data.parentFirebaseUid) && trustedParent())
+        || self(resource.data.learnerFirebaseUid) || teacherOf(resource.data.learnerFirebaseUid);
+      allow create, delete: if false;
+      allow update: if self(resource.data.learnerFirebaseUid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['learnerName', 'learnerProfileCode', 'updatedAt']);
+    }
+    match /learner_profiles/{uid} {
+      allow read: if learnerAccess(uid);
+      allow create: if self(uid) && request.resource.data.learnerFirebaseUid == uid
+        && request.resource.data.get('emergencyContactsNeedReview', false) == false;
+      allow update: if self(uid) && request.resource.data.learnerFirebaseUid == uid
+        && request.resource.data.get('emergencyContactsNeedReview', false) == resource.data.get('emergencyContactsNeedReview', false);
+      allow delete: if self(uid);
+    }
+    match /user_profiles/{uid} {
+      allow read: if self(uid) || parentOf(uid) || teacherOf(uid);
+      allow create: if self(uid) && request.resource.data.firebaseUid == uid
+        && request.resource.data.role in ['learner', 'parent', 'teacher'];
+      allow update: if self(uid) && request.resource.data.firebaseUid == uid
+        && request.resource.data.role == resource.data.role;
+      allow delete: if self(uid);
+    }
+    match /learner_activity/{id} {
+      allow read: if learnerAccess(resource.data.learnerFirebaseUid);
+      allow create: if self(request.resource.data.learnerFirebaseUid);
+      allow update: if self(resource.data.learnerFirebaseUid)
+        && request.resource.data.learnerFirebaseUid == resource.data.learnerFirebaseUid;
+      allow delete: if self(resource.data.learnerFirebaseUid);
+    }
+    match /class_enrollments_cloud/{id} {
+      allow read: if participant(resource.data);
+      allow create, delete: if false;
+      allow update: if participant(resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['learnerName', 'teacherName', 'updatedAt']);
+    }
+    match /class_join_requests_cloud/{id} {
+      allow read: if participant(resource.data);
+      allow create: if self(request.resource.data.learnerFirebaseUid)
+        && request.resource.data.status == 'pending'
+        && id == request.resource.data.classCode + '_' + request.auth.uid
+        && request.resource.data.teacherFirebaseUid == get(/databases/$(database)/documents/teacher_classes_cloud/$(request.resource.data.classCode)).data.teacherFirebaseUid;
+      allow update: if request.resource.data.learnerFirebaseUid == resource.data.learnerFirebaseUid
+        && request.resource.data.teacherFirebaseUid == resource.data.teacherFirebaseUid
+        && request.resource.data.classCode == resource.data.classCode
+        && ((self(resource.data.learnerFirebaseUid) && request.resource.data.status == 'pending')
+          || (classOwner(resource.data.classCode) && request.resource.data.status in ['accepted', 'rejected']));
+      allow delete: if participant(resource.data);
+    }
+    match /teacher_classes_cloud/{code} {
+      // Class codes and lesson content remain discoverable to signed-in learners.
+      allow read: if signedIn();
+      allow create: if self(request.resource.data.teacherFirebaseUid)
+        && request.resource.data.classCode == code
+        && get(/databases/$(database)/documents/user_profiles/$(request.auth.uid)).data.role == 'teacher';
+      allow update: if self(resource.data.teacherFirebaseUid)
+        && request.resource.data.teacherFirebaseUid == resource.data.teacherFirebaseUid
+        && request.resource.data.classCode == code;
+      allow delete: if false;
+    }
+    match /parent_notifications/{id} {
+      allow read: if (self(resource.data.parentFirebaseUid) && parentOf(resource.data.learnerFirebaseUid)) || self(resource.data.teacherFirebaseUid);
+      allow create: if self(request.resource.data.teacherFirebaseUid)
         && request.resource.data.parentFirebaseUid is string
-        && request.resource.data.alertType in [
-          'teacherAlert',
-          'needsAttention',
-          'distress',
-          'schoolNeeded'
-        ];
-
-      allow update: if request.auth != null
-        && resource.data.parentFirebaseUid == request.auth.uid
-        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['isRead']);
+        && teacherOf(request.resource.data.learnerFirebaseUid)
+        && get(/databases/$(database)/documents/learner_caregivers/$(request.resource.data.learnerFirebaseUid)).data.active == true
+        && get(/databases/$(database)/documents/learner_caregivers/$(request.resource.data.learnerFirebaseUid)).data.parentUid == request.resource.data.parentFirebaseUid
+        && get(/databases/$(database)/documents/user_profiles/$(request.auth.uid)).data.role == 'teacher'
+        && request.resource.data.alertType in ['teacherAlert', 'needsAttention', 'distress', 'schoolNeeded'];
+      allow update: if self(resource.data.parentFirebaseUid) && parentOf(resource.data.learnerFirebaseUid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
     }
-
-    match /parent_child_links/{linkId} {
-      allow read: if request.auth != null;
-
-      allow create: if request.auth != null
-        && request.resource.data.parentFirebaseUid == request.auth.uid
-        && request.resource.data.learnerFirebaseUid is string;
-
-      allow update: if request.auth != null && (
-        (
-          request.resource.data.parentFirebaseUid == request.auth.uid
-          && request.resource.data.learnerFirebaseUid is string
-        )
-        || (
-          resource.data.learnerFirebaseUid == request.auth.uid
-          && request.resource.data.learnerFirebaseUid == request.auth.uid
-          && request.resource.data.diff(resource.data).changedKeys()
-            .hasOnly(['learnerName', 'learnerProfileCode', 'updatedAt'])
-        )
-      );
-
-      allow delete: if request.auth != null
-        && (
-          resource.data.parentFirebaseUid == request.auth.uid
-          || resource.data.learnerFirebaseUid == request.auth.uid
-        );
+    match /phrase_media_cloud/{id} {
+      allow read: if signedIn() && (learnerAccess(mediaOwner(resource.data))
+        || get(/databases/$(database)/documents/user_profiles/$(mediaOwner(resource.data))).data.role == 'teacher');
+      allow create: if self(mediaOwner(request.resource.data));
+      allow update: if self(mediaOwner(resource.data))
+        && mediaOwner(request.resource.data) == mediaOwner(resource.data);
+      allow delete: if self(mediaOwner(resource.data));
     }
-
-    match /class_enrollments_cloud/{enrollmentId} {
-      allow read: if request.auth != null;
-
-      allow create, update: if request.auth != null
-        && request.resource.data.teacherFirebaseUid is string
-        && request.resource.data.learnerFirebaseUid is string
-        && request.resource.data.classCode is string
-        && (
-          request.resource.data.learnerFirebaseUid == request.auth.uid
-          || request.resource.data.teacherFirebaseUid == request.auth.uid
-        );
-
-      allow delete: if request.auth != null
-        && (
-          resource.data.learnerFirebaseUid == request.auth.uid
-          || resource.data.teacherFirebaseUid == request.auth.uid
-        );
-    }
-
-    match /class_join_requests_cloud/{requestId} {
-      allow read: if request.auth != null;
-
-      // The learner creates the request; the teacher rewrites it with the
-      // accepted/rejected status, so either side may write their own doc.
-      allow create, update: if request.auth != null
-        && request.resource.data.learnerFirebaseUid is string
-        && request.resource.data.teacherFirebaseUid is string
-        && request.resource.data.classCode is string
-        && (
-          request.resource.data.learnerFirebaseUid == request.auth.uid
-          || request.resource.data.teacherFirebaseUid == request.auth.uid
-        );
-
-      allow delete: if request.auth != null
-        && (
-          resource.data.learnerFirebaseUid == request.auth.uid
-          || resource.data.teacherFirebaseUid == request.auth.uid
-        );
-    }
-
-    match /teacher_classes_cloud/{classCode} {
-      allow read: if request.auth != null;
-
-      // Stamp live Auth uid on the payload. Update is allowed when the NEW
-      // document belongs to the signed-in teacher (so a re-login can reclaim).
-      allow create, update: if request.auth != null
-        && request.resource.data.teacherFirebaseUid == request.auth.uid
-        && request.resource.data.classCode is string
-        && request.resource.data.className is string;
-
-      allow delete: if request.auth != null
-        && resource.data.teacherFirebaseUid == request.auth.uid;
-    }
-
-    match /learner_profiles/{learnerUid} {
-      allow read: if request.auth != null;
-      allow create, update: if request.auth != null
-        && request.auth.uid == learnerUid
-        && request.resource.data.learnerFirebaseUid == learnerUid;
-      allow delete: if request.auth != null && request.auth.uid == learnerUid;
-    }
-
-    match /user_profiles/{userId} {
-      allow read: if request.auth != null && (
-        request.auth.uid == userId
-        || resource.data.role == 'learner'
-        || resource.data.role == 'teacher'
-        || resource.data.role == 'parent'
-      );
-      allow create, update: if request.auth != null && request.auth.uid == userId;
-      allow delete: if request.auth != null && request.auth.uid == userId;
-    }
-
-    match /learner_activity/{docId} {
-      // Teachers and parents can read; learner writes their own activity.
-      allow read: if request.auth != null;
-      allow create, update: if request.auth != null
-        && request.resource.data.learnerFirebaseUid == request.auth.uid;
-      allow delete: if request.auth != null
-        && resource.data.learnerFirebaseUid == request.auth.uid;
-    }
-
-    // Lesson phrase images/videos when Firebase Storage is unavailable (Spark).
-    match /phrase_media_cloud/{docId} {
-      allow read: if request.auth != null;
-
-      allow create, update: if request.auth != null
-        && request.resource.data.teacherFirebaseUid == request.auth.uid;
-
-      allow delete: if request.auth != null
-        && resource.data.teacherFirebaseUid == request.auth.uid;
-    }
-
   }
 }

@@ -118,6 +118,7 @@ class NotificationSyncService {
         final remoteId = await _cloud.publishTeacherAlert(
           TeacherAlertCloudEvent(
             localNotificationId: notificationId,
+            learnerFirebaseUid: resolvedLearnerUid ?? '',
             parentUserId: parentId,
             parentFirebaseUid: parentFirebaseUid,
             learnerUserId: learnerUserId,
@@ -156,6 +157,7 @@ class NotificationSyncService {
             final remoteId = await _cloud.publishTeacherAlert(
               TeacherAlertCloudEvent(
                 localNotificationId: localNotificationId,
+                learnerFirebaseUid: resolvedLearnerUid,
                 parentUserId: -1,
                 parentFirebaseUid: parentUid,
                 learnerUserId: learnerUserId,
@@ -931,37 +933,25 @@ class NotificationSyncService {
     }
   }
 
-  /// Learner's cloud profile is the source of truth when available; otherwise
-  /// uses the teacher device's local copy.
+  /// Cloud contacts are authoritative for teacher SMS. Cached numbers never
+  /// reopen recipients removed by a caregiver transfer or contact edit.
   Future<List<String>> resolveEmergencyContacts({
     required int learnerUserId,
     required List<String> localContacts,
     String? learnerFirebaseUid,
   }) async {
-    final normalizedLocal =
-        AppRepository.normalizeEmergencyContacts(localContacts);
     final uid = learnerFirebaseUid?.trim();
-    if (!_cloud.isAvailable || uid == null || uid.isEmpty) {
-      return normalizedLocal;
-    }
+    if (!_cloud.isAvailable || uid == null || uid.isEmpty) return const [];
     try {
-      final cloudContacts = AppRepository.normalizeEmergencyContacts(
+      final contacts = AppRepository.normalizeEmergencyContacts(
         await _cloud.getLearnerEmergencyContacts(uid),
       );
-      final merged = AppRepository.normalizeEmergencyContacts([
-        ...cloudContacts,
-        ...normalizedLocal,
-      ]);
-      if (merged.isNotEmpty) {
-        if (merged.join('|') != normalizedLocal.join('|')) {
-          await _repository.updateEmergencyContacts(learnerUserId, merged);
-        }
-        return merged;
-      }
+      await _repository.updateEmergencyContacts(learnerUserId, contacts);
+      return contacts;
     } catch (e, st) {
-      debugPrint('Cloud emergency contact fetch failed: $e\n$st');
+      debugPrint('Verified emergency contact fetch failed: $e\n$st');
+      return const [];
     }
-    return normalizedLocal;
   }
 
   Future<void> startParentSync({

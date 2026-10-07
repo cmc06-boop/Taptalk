@@ -19,8 +19,10 @@ The teacher's Android phone sends warnings to the learner's saved emergency
 contact numbers. Parents' numbers must be saved in the learner's **Profile →
 Emergency contacts**. This uses the same contact source as manual teacher alerts.
 The teacher must have an active SIM/SMS plan and grant the Android SMS permission.
-The teacher app must be running and have the learner's activity available locally
-or through monitoring sync. The parent app does not need to be open for SMS.
+The teacher app must be running, online, and have the learner's activity available locally
+or through monitoring sync. A fresh authorized contact read is required before SMS submission;
+removed recipients are not restored from an old teacher cache. After a caregiver transfer,
+save reviewed emergency contacts on the learner Profile while online to resume teacher SMS. The parent app does not need to be open for SMS.
 
 The app stores a separate SMS submission record for each teacher, learner,
 phrase, local calendar day and normalized phone number. Refreshing or restarting
