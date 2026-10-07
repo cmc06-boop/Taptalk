@@ -63,6 +63,39 @@ an unregistered token causes all caregiver and enrollment callables to fail.
 Enable Firebase email/password sign-in and email verification, and verify that
 the app is configured for the same project as the deployed backend.
 
+Mobile debug builds activate the App Check debug provider. Rebuild any APK made
+before that activation fix, start it on the test phone, and find the generated
+debug secret in Android Logcat (`DebugAppCheckProvider`). Register that phone's
+token under Firebase Console → App Check → Android app → Manage debug tokens.
+Restart the app after registration. Each test installation needs its own token;
+keep the token private. Windows debug builds require `APP_CHECK_DEBUG_TOKEN` in
+the process environment. See the [Firebase debug-provider guide](https://firebase.google.com/docs/app-check/flutter/debug-provider).
+
+The runtime also needs permission to sign the custom tokens used for trusted
+sessions. Enable the IAM Service Account Credentials API, then grant Service
+Account Token Creator on the actual function service account to that same
+account. Inspect the deployed service account rather than guessing its name.
+With the Google Cloud CLI available, run after function deployment:
+
+```powershell
+gcloud services enable iamcredentials.googleapis.com --project=taptalk-2d809
+$tapRuntimeSa = gcloud functions describe caregiverSecurity --gen2 --region=us-central1 --project=taptalk-2d809 --format='value(serviceConfig.serviceAccountEmail)'
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tapRuntimeSa)) { throw 'Could not identify the deployed service account.' }
+gcloud iam service-accounts add-iam-policy-binding $tapRuntimeSa --member="serviceAccount:$tapRuntimeSa" --role="roles/iam.serviceAccountTokenCreator" --project=taptalk-2d809
+```
+
+This grants signing permission on that service account. See [Firebase custom
+token setup](https://firebase.google.com/docs/auth/admin/create-custom-tokens)
+and the [IAM signing API](https://docs.cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/signBlob).
+
+The same runtime account also needs Firestore document read/write permissions
+and Firebase Auth user-read permissions. If those are not already granted by
+the project's existing policy, grant `roles/datastore.user` and
+`roles/firebaseauth.viewer` to that runtime account in this project. Secret
+access is required for `SMTP_PASSWORD`; the Firebase CLI normally requests or
+configures that access for the function's bound secret. See [Firestore IAM](https://firebase.google.com/docs/firestore/security/iam)
+and [Firebase Auth permissions](https://docs.cloud.google.com/iam/docs/roles-permissions/firebaseauth).
+
 Review and test the migration below before releasing the new app. Deploy the
 function, Firestore and Storage rules together with:
 
