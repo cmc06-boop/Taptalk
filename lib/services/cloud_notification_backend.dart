@@ -295,6 +295,7 @@ class RemoteLearnerSpeakHistory {
     required this.createdAt,
     this.className,
     this.lessonTitle,
+    this.eventId,
   });
 
   final String phraseText;
@@ -302,8 +303,10 @@ class RemoteLearnerSpeakHistory {
   final DateTime createdAt;
   final String? className;
   final String? lessonTitle;
+  final String? eventId;
 
   Map<String, Object?> toFirestoreMap() => {
+        if (eventId != null) 'eventId': eventId,
         'phraseText': phraseText,
         'categoryKey': categoryKey,
         'createdAt': createdAt.toUtc().toIso8601String(),
@@ -325,6 +328,7 @@ class RemoteLearnerSpeakHistory {
       createdAt: createdAt,
       className: map['className'] as String?,
       lessonTitle: map['lessonTitle'] as String?,
+      eventId: map['eventId'] as String?,
     );
   }
 }
@@ -431,6 +435,7 @@ class LearnerActivityCloudEvent {
     required this.createdAt,
     this.className,
     this.lessonTitle,
+    this.eventId,
   });
 
   final String learnerFirebaseUid;
@@ -439,9 +444,11 @@ class LearnerActivityCloudEvent {
   final DateTime createdAt;
   final String? className;
   final String? lessonTitle;
+  final String? eventId;
 
   Map<String, Object?> toFirestoreMap() => {
         'learnerFirebaseUid': learnerFirebaseUid,
+        if (eventId != null) 'eventId': eventId,
         'phraseText': phraseText,
         'categoryKey': categoryKey,
         'createdAt': createdAt.toUtc().toIso8601String(),
@@ -459,6 +466,7 @@ class RemoteLearnerActivity {
     required this.createdAt,
     this.className,
     this.lessonTitle,
+    this.eventId,
   });
 
   final String phraseText;
@@ -466,6 +474,7 @@ class RemoteLearnerActivity {
   final DateTime createdAt;
   final String? className;
   final String? lessonTitle;
+  final String? eventId;
 }
 
 class RemoteLessonPhraseContent {

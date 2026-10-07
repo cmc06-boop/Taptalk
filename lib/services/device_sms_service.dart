@@ -12,6 +12,52 @@ import '../data/repositories/app_repository.dart';
 /// Sends SMS through the device's cellular plan (works without mobile data / Wi‑Fi).
 class DeviceSmsService {
   static const _channel = MethodChannel('com.taptalk/direct_sms');
+  bool _automaticPermissionRequested = false;
+
+  /// Automatic warnings never open a composer or treat it as a sent SMS.
+  /// The native sender reports submission to the SIM, not delivery receipts.
+  Future<SmsAlertResult> sendAutomaticAlert({
+    required AppLanguage language,
+    required String phoneNumber,
+    required String message,
+  }) async {
+    SmsAlertResult failure(String message) =>
+        SmsAlertResult(attempted: 1, sent: 0, failed: 1, errorMessage: message);
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return failure(AppStrings.automaticSmsAndroidOnly(language));
+    }
+    final normalized = normalizePhoneNumber(phoneNumber);
+    if (normalized == null) {
+      return failure(AppStrings.smsNoEmergencyContacts(language));
+    }
+    try {
+      var permission = await Permission.sms.status;
+      if (!permission.isGranted && !_automaticPermissionRequested) {
+        _automaticPermissionRequested = true;
+        permission = await Permission.sms.request();
+      }
+      if (!permission.isGranted) {
+        return failure(AppStrings.smsPermissionDenied(language));
+      }
+      final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+        'sendSmsBatch',
+        {
+          'recipients': [toLocalSmsDialString(normalized)],
+          'message': message,
+        },
+      );
+      final submitted = result?['sent'] == 1;
+      return SmsAlertResult(
+        attempted: 1,
+        sent: submitted ? 1 : 0,
+        failed: submitted ? 0 : 1,
+        sentViaDevice: true,
+        errorMessage: submitted ? null : AppStrings.smsSendFailed(language),
+      );
+    } catch (_) {
+      return failure(AppStrings.smsSendFailed(language));
+    }
+  }
 
   String? normalizePhoneNumber(String raw) {
     var cleaned = raw.replaceAll(RegExp(r'[^\d+]'), '').trim();

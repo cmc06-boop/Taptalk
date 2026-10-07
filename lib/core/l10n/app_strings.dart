@@ -1499,6 +1499,24 @@ abstract final class AppStrings {
   static String negativeUsageWarningTitle(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Babala' : 'Warning';
 
+  static String automaticSmsAndroidOnly(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Kailangan ng Android phone na may SIM para sa automatic SMS.'
+      : 'Automatic SMS requires an Android phone with a SIM.';
+
+  static String automaticSmsStatus(
+    AppLanguage lang,
+    int submitted,
+    int total,
+    String? error,
+  ) {
+    final status = lang == AppLanguage.filipino
+        ? 'SMS: $submitted sa $total ang naisumite sa SIM para ipadala.'
+        : 'SMS: $submitted of $total submitted to the SIM for sending.';
+    if (submitted == total) return status;
+    return '$status ${error ?? (lang == AppLanguage.filipino ? 'Hindi pa kumpirmado ang ibang pagpapadala.' : 'Other submissions are not confirmed.')}';
+  }
+
   static String negativeUsageWarningLevelTitle(AppLanguage lang, int level) {
     switch (level) {
       case 2:
@@ -1560,8 +1578,8 @@ abstract final class AppStrings {
   static String frequentlyUsedSubtitle(AppLanguage lang) {
     final min = MonitoringConstants.frequentlyUsedMinCount;
     return lang == AppLanguage.filipino
-        ? 'Pariralang ginamit nang hindi bababa sa $min beses.'
-        : 'Phrases used at least $min times.';
+        ? 'Mga pariralang ginamit nang hindi bababa sa $min beses. Pinagsama ang bilang sa lahat ng kategorya at ang katumbas sa English at Filipino.'
+        : 'Phrases used at least $min times. Counts combine all categories and matching English and Filipino phrases.';
   }
 
   static String noPhrasesInSelectedCategory(AppLanguage lang) {

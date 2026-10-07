@@ -4,10 +4,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 import 'dart:async';
 
 import '../core/l10n/app_strings.dart';
 import '../core/utils/negative_phrases.dart';
+import '../core/utils/phrase_usage_calculator.dart';
 import '../core/utils/auth_validation.dart';
 import '../core/utils/phrase_image_storage.dart';
 import '../core/utils/phrase_video_speak_sync.dart';
@@ -53,6 +55,7 @@ import '../services/firebase_service.dart';
 import '../services/firestore_notification_backend.dart';
 import '../services/notification_sync_service.dart';
 import '../services/device_sms_service.dart';
+import '../services/negative_usage_sms_service.dart';
 import '../services/network_status.dart';
 import '../services/saved_accounts_store.dart';
 import '../services/stt_service.dart';
@@ -110,6 +113,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   AppScreenBuilder? _screenBuilder;
   final TtsService tts = TtsService();
   final DeviceSmsService _deviceSms = DeviceSmsService();
+  late final NegativeUsageSmsService _negativeUsageSms = NegativeUsageSmsService(
+    repository: _repo,
+    sms: _deviceSms,
+  );
   late final NotificationSyncService _notificationSync =
       NotificationSyncService(
         repository: _repo,
@@ -3575,6 +3582,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         ? storedCategoryKey
         : AppRepository.normalizeCategoryKey(baseCategoryKey);
     final now = DateTime.now();
+    final eventId = const Uuid().v4();
     final historyId = await _repo.addHistory(
       userId: _user!.id,
       text: stored,
@@ -3582,6 +3590,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       className: className,
       lessonTitle: lessonTitle,
       createdAt: now,
+      eventId: eventId,
     );
     _history = await _repo.getHistory(_user!.id);
     notifyListeners();
@@ -3589,6 +3598,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       unawaited(
         _pushHistoryItemToCloud(
           historyId: historyId,
+          eventId: eventId,
           phraseText: stored,
           categoryKey: cloudCategoryKey,
           createdAt: now,
@@ -3627,6 +3637,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _pushHistoryItemToCloud({
     required int historyId,
+    required String eventId,
     required String phraseText,
     required String categoryKey,
     required DateTime createdAt,
@@ -3648,12 +3659,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           ? categoryKey
           : AppRepository.normalizeCategoryKey(categoryKey);
       final syncKey = AppRepository.remoteActivitySyncKey(
+        eventId: eventId,
         createdAt: createdAt,
         phraseText: phraseText,
         categoryKey: effectiveCategoryKey,
       );
       final pushed = await _notificationSync.pushLearnerActivity(
         LearnerActivityCloudEvent(
+          eventId: eventId,
           learnerFirebaseUid: uid,
           phraseText: phraseText,
           categoryKey: categoryKey,
@@ -3707,6 +3720,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           LearnerActivityCloudEvent(
             learnerFirebaseUid: uid,
             phraseText: item.text.trim(),
+            eventId: item.eventId,
             categoryKey: categoryKey,
             createdAt: item.createdAt,
             className: item.className,
@@ -4060,6 +4074,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
             activities: activities,
           );
           _bumpChildMonitoringRevision(learnerUserId);
+          unawaited(_evaluateTeacherNegativeUsageWarnings());
         },
       );
     }
@@ -4536,31 +4551,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _notifications = await _repo.getParentNotifications(_user!.id);
   }
 
-  int _normalizedPhraseCount(List<PhraseUsageStat> stats, String phraseKey) {
-    var total = 0;
-    for (final stat in stats) {
-      if (NegativePhrases.normalizeText(stat.text) == phraseKey) {
-        total += stat.count;
-      }
-    }
-    return total;
-  }
-
-  int _negativeWarningLevelForCounts({
-    required int todayCount,
-    required int yesterdayCount,
-    required int twoDaysAgoCount,
-  }) {
-    if (todayCount < MonitoringConstants.negativeUsageWarningCount) return 0;
-    if (yesterdayCount < MonitoringConstants.negativeUsageWarningCount) {
-      return 1;
-    }
-    if (twoDaysAgoCount < MonitoringConstants.negativeUsageWarningCount) {
-      return 2;
-    }
-    return MonitoringConstants.maxNegativeWarningLevel;
-  }
-
   Future<Map<String, int>> getNegativePhraseWarningLevels({
     required int learnerUserId,
   }) async {
@@ -4585,37 +4575,36 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     );
 
     final levels = <String, int>{};
-    final phraseKeys = <String>{};
-    for (final stat in todayStats) {
-      if (!NegativePhrases.isNegative(
-        text: stat.text,
-        categoryKey: stat.categoryKey,
-      )) {
-        continue;
-      }
-      final phraseKey = NegativePhrases.normalizeText(stat.text);
-      if (phraseKey.isEmpty) continue;
-      phraseKeys.add(phraseKey);
-    }
-    for (final phraseKey in phraseKeys) {
-      final todayCount = _normalizedPhraseCount(todayStats, phraseKey);
-      final level = _negativeWarningLevelForCounts(
-        todayCount: todayCount,
-        yesterdayCount: _normalizedPhraseCount(yesterdayStats, phraseKey),
-        twoDaysAgoCount: _normalizedPhraseCount(twoDaysAgoStats, phraseKey),
+    final today = NegativePhrases.dailyTotals(todayStats);
+    final yesterday = PhraseUsageCalculator.totals(yesterdayStats);
+    final twoDaysAgo = PhraseUsageCalculator.totals(twoDaysAgoStats);
+    for (final entry in today.entries) {
+      final phraseKey = entry.key;
+      final level = NegativePhrases.warningLevel(
+        today: entry.value,
+        yesterday: yesterday[phraseKey] ?? 0,
+        twoDaysAgo: twoDaysAgo[phraseKey] ?? 0,
       );
       if (level > 0) levels[phraseKey] = level;
     }
     return levels;
   }
 
+  bool _negativeUsageEvalRequested = false;
+
   Future<void> _evaluateTeacherNegativeUsageWarnings() async {
     final inFlight = _negativeUsageEvalInFlight;
     if (inFlight != null) {
+      _negativeUsageEvalRequested = true;
       await inFlight;
       return;
     }
-    final started = _runTeacherNegativeUsageEvaluation();
+    final started = () async {
+      do {
+        _negativeUsageEvalRequested = false;
+        await _runTeacherNegativeUsageEvaluation();
+      } while (_negativeUsageEvalRequested);
+    }();
     _negativeUsageEvalInFlight = started;
     try {
       await started;
@@ -4630,6 +4619,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (_user == null || (!_user!.isTeacher && !_user!.isParent)) return;
     try {
       final recipientUserId = _user!.id;
+      final isTeacher = _user!.isTeacher;
+      final language = _language;
+      bool stillSignedIn() =>
+          _user?.id == recipientUserId &&
+          (_user?.isTeacher == true || _user?.isParent == true);
       final watchers = <({int learnerId, String fullName})>[];
       if (_user!.isTeacher) {
         final students = await _repo.getTeacherClassStudents(recipientUserId);
@@ -4647,10 +4641,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           children = await _repo.getLinkedChildren(recipientUserId);
         }
         for (final child in children) {
-          watchers.add((
-            learnerId: child.learnerId,
-            fullName: child.fullName,
-          ));
+          watchers.add((learnerId: child.learnerId, fullName: child.fullName));
         }
       }
       if (watchers.isEmpty && _pendingNegativeUsageWarnings.isEmpty) return;
@@ -4662,6 +4653,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       final created = <TeacherNegativeUsageWarning>[];
 
       for (final watcher in watchers) {
+        if (!stillSignedIn()) return;
         final todayStats = await _repo.getPhraseUsageStats(
           learnerUserId: watcher.learnerId,
           rangeStart: range.$1,
@@ -4678,96 +4670,133 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           rangeEnd: yesterdayStart,
         );
 
-        final phraseTotals = <String, ({int count, String display})>{};
-        for (final stat in todayStats) {
-          if (!NegativePhrases.isNegative(
-            text: stat.text,
-            categoryKey: stat.categoryKey,
-          )) {
-            continue;
-          }
-          final phraseKey = NegativePhrases.normalizeText(stat.text);
-          if (phraseKey.isEmpty) continue;
-          final display = localizedPhrase(stat.text, stat.categoryKey);
-          final existing = phraseTotals[phraseKey];
-          phraseTotals[phraseKey] = (
-            count: (existing?.count ?? 0) + stat.count,
-            display: existing?.display ?? display,
-          );
-        }
+        final phraseTotals = NegativePhrases.dailyTotals(todayStats);
+        final yesterday = PhraseUsageCalculator.totals(yesterdayStats);
+        final twoDaysAgo = PhraseUsageCalculator.totals(twoDaysAgoStats);
 
         for (final entry in phraseTotals.entries) {
           final phraseKey = entry.key;
-          final todayCount = entry.value.count;
+          final todayCount = entry.value;
           if (todayCount < MonitoringConstants.negativeUsageWarningCount) {
             continue;
           }
-          final alreadyWarned =
-              await _repo.hasTeacherNegativeUsageWarningToday(
+          var notificationId = await _repo.findTeacherNegativeUsageWarningToday(
             teacherUserId: recipientUserId,
             learnerUserId: watcher.learnerId,
             phraseKey: phraseKey,
             dayStart: dayStart,
           );
-          if (alreadyWarned) continue;
+          if (!stillSignedIn()) return;
 
-          final level = _negativeWarningLevelForCounts(
-            todayCount: todayCount,
-            yesterdayCount: _normalizedPhraseCount(
-              yesterdayStats,
-              phraseKey,
-            ),
-            twoDaysAgoCount: _normalizedPhraseCount(
-              twoDaysAgoStats,
-              phraseKey,
-            ),
+          final level = NegativePhrases.warningLevel(
+            today: todayCount,
+            yesterday: yesterday[phraseKey] ?? 0,
+            twoDaysAgo: twoDaysAgo[phraseKey] ?? 0,
           );
+          final phrase = todayStats.firstWhere(
+            (stat) => NegativePhrases.normalizeText(stat.text) == phraseKey,
+          );
+          final display = localizedPhrase(phrase.text, phrase.categoryKey);
           final childName = watcher.fullName.trim().isEmpty
               ? AppStrings.defaultLearnerName(_language)
               : watcher.fullName.trim();
           final warning = TeacherNegativeUsageWarning(
             childName: childName,
-            phraseText: entry.value.display,
+            phraseText: display,
             count: todayCount,
             level: level,
             title: AppStrings.negativeUsageWarningLevelTitle(_language, level),
             body: AppStrings.negativeUsageWarningNotificationBody(
               _language,
               childName,
-              entry.value.display,
+              display,
               todayCount,
               level,
             ),
           );
-          await _repo.insertTeacherNegativeUsageWarning(
-            teacherUserId: recipientUserId,
-            learnerUserId: watcher.learnerId,
-            childName: warning.childName,
-            phraseKey: phraseKey,
-            title: warning.title,
-            body: warning.body,
-            createdAt: DateTime.now(),
-          );
-          created.add(warning);
+          if (notificationId == null) {
+            notificationId = await _repo.insertTeacherNegativeUsageWarning(
+              teacherUserId: recipientUserId,
+              learnerUserId: watcher.learnerId,
+              childName: warning.childName,
+              phraseKey: phraseKey,
+              title: warning.title,
+              body: warning.body,
+              createdAt: DateTime.now(),
+            );
+            created.add(warning);
+          }
+          // SMS retries are independent of whether today's in-app warning
+          // already exists. The persistent per-number ledger prevents resends.
+          if (isTeacher && stillSignedIn()) {
+            try {
+              final status = await _sendNegativeUsageWarningSms(
+                teacherUserId: recipientUserId,
+                learnerUserId: watcher.learnerId,
+                phraseKey: phraseKey,
+                dayStart: dayStart,
+                warning: warning,
+                language: language,
+              );
+              await _repo.updateWarningSmsBody(
+                notificationId,
+                '${warning.body}\n$status',
+              );
+            } catch (e, st) {
+              debugPrint('Automatic warning SMS failed: $e\n$st');
+              await _repo.updateWarningSmsBody(
+                notificationId,
+                '${warning.body}\nSMS: ${AppStrings.smsSendFailed(language)}',
+              );
+            }
+          }
         }
       }
 
-      if (created.isNotEmpty) {
+      if (!stillSignedIn()) return;
+      if (created.isNotEmpty || isTeacher) {
         await _loadNotifications();
         notifyListeners();
       }
       if (created.isNotEmpty || _pendingNegativeUsageWarnings.isNotEmpty) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          unawaited(
-            _presentNegativeUsageWarnings([
-              ...created,
-            ]),
-          );
+          unawaited(_presentNegativeUsageWarnings([...created]));
         });
       }
     } catch (e, st) {
       debugPrint('Negative-usage warning eval failed: $e\n$st');
     }
+  }
+
+  Future<String> _sendNegativeUsageWarningSms({
+    required int teacherUserId,
+    required int learnerUserId,
+    required String phraseKey,
+    required DateTime dayStart,
+    required TeacherNegativeUsageWarning warning,
+    required AppLanguage language,
+  }) async {
+    final localContacts = await _repo.getEmergencyContactsForLearner(
+      learnerUserId,
+    );
+    final learnerUid = await _repo.getFirebaseUidForUser(learnerUserId);
+    final contacts = await _notificationSync
+        .resolveEmergencyContacts(
+          learnerUserId: learnerUserId,
+          localContacts: localContacts,
+          learnerFirebaseUid: learnerUid,
+        )
+        .timeout(const Duration(seconds: 8), onTimeout: () => localContacts);
+    return _negativeUsageSms.send(
+      teacherUserId: teacherUserId,
+      learnerUserId: learnerUserId,
+      phraseKey: phraseKey,
+      dayStart: dayStart,
+      language: language,
+      contacts: contacts,
+      message: 'TapTalk - ${warning.title}\n${warning.body}',
+      canSend: () => _user?.id == teacherUserId && _user?.isTeacher == true,
+    );
   }
 
   Future<void> _presentNegativeUsageWarnings(
@@ -7708,12 +7737,25 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       return false;
     }
 
-    await SttService.releaseForTts();
-
     if (_speechPaused && spoken == _pausedSpeechText.trim()) {
       // Already logged when this utterance first started.
       return _resumePausedSpeech();
     }
+
+    // Count the user action before waiting for audio/video. A later tap can
+    // interrupt playback without erasing this use. Home already records its
+    // card tap and calls this with record:false.
+    if (record) {
+      unawaited(
+        recordHistory(
+          text,
+          categoryKey: catKey,
+          className: className,
+          lessonTitle: lessonTitle,
+        ),
+      );
+    }
+    await SttService.releaseForTts();
 
     final gen = ++_ttsGeneration;
     _currentSpeakGeneration = null;
@@ -7745,21 +7787,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         if (_speechPaused) return true;
         return false;
       }
-    }
-
-    // Log the use the moment playback starts rather than after the audio ends.
-    // Learners routinely tap the next phrase mid-sentence, and monitoring was
-    // dropping every one of those interrupted phrases. Unawaited so writing
-    // history never delays speech.
-    if (record) {
-      unawaited(
-        recordHistory(
-          text,
-          categoryKey: catKey,
-          className: className,
-          lessonTitle: lessonTitle,
-        ),
-      );
     }
 
     final completed = await _speakUntilDone(gen: gen, fullText: spoken);

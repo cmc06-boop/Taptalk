@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -9,6 +10,8 @@ import '../default_builtin_content.dart';
 
 class DatabaseHelper {
   DatabaseHelper._();
+  @visibleForTesting
+  DatabaseHelper.withDatabase(Database database) : _db = database;
   static final DatabaseHelper instance = DatabaseHelper._();
 
   Database? _db;
@@ -30,7 +33,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 22,
+      version: 24,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE users (
@@ -87,7 +90,8 @@ class DatabaseHelper {
             created_at INTEGER NOT NULL,
             class_name TEXT,
             lesson_title TEXT,
-            remote_sync_key TEXT
+            remote_sync_key TEXT,
+            event_id TEXT
           )
         ''');
         await db.execute(
@@ -96,9 +100,11 @@ class DatabaseHelper {
           'WHERE remote_sync_key IS NOT NULL',
         );
         await _createParentChildrenTable(db);
+        await ensureHistoryEventIdentity(db);
         await _createClassTables(db);
         await _createJoinRequestTable(db);
         await _createParentNotificationsTable(db);
+        await createWarningSmsDeliveriesTable(db);
         await _createLessonTables(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
@@ -239,8 +245,39 @@ class DatabaseHelper {
             'ALTER TABLE users ADD COLUMN phone_number TEXT',
           );
         }
+        if (oldVersion < 23) {
+          await createWarningSmsDeliveriesTable(db);
+        }
+        if (oldVersion < 24) {
+          await ensureHistoryEventIdentity(db);
+        }
       },
     );
+  }
+
+  static Future<void> createWarningSmsDeliveriesTable(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS warning_sms_deliveries (
+        teacher_user_id INTEGER NOT NULL,
+        learner_user_id INTEGER NOT NULL,
+        phrase_key TEXT NOT NULL,
+        day_start INTEGER NOT NULL,
+        phone_number TEXT NOT NULL,
+        status TEXT NOT NULL,
+        last_attempt_at INTEGER NOT NULL,
+        last_error TEXT,
+        PRIMARY KEY (teacher_user_id, learner_user_id, phrase_key, day_start, phone_number)
+      )
+    ''');
+  }
+
+  static Future<void> ensureHistoryEventIdentity(DatabaseExecutor db) async {
+    final columns = await db.rawQuery('PRAGMA table_info(history)');
+    if (!columns.any((column) => column['name'] == 'event_id')) {
+      await db.execute('ALTER TABLE history ADD COLUMN event_id TEXT');
+    }
+    await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_history_event_id '
+      'ON history(user_id, event_id) WHERE event_id IS NOT NULL');
   }
 
   Future<void> _ensureHistoryRemoteSyncKeyColumn(Database db) async {

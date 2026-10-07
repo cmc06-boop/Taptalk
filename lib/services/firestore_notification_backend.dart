@@ -325,10 +325,18 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     if (!isAvailable || event.learnerFirebaseUid.trim().isEmpty) return;
     final payload = event.toFirestoreMap()
       ..['createdAt'] = Timestamp.fromDate(event.createdAt.toUtc());
-    // Each tap is its own document so usage counts stay accurate.
+    // A retry of this event updates the same document, while rapid taps have
+    // different event IDs even when their timestamps match.
+    final syncKey = AppRepository.remoteActivitySyncKey(
+      createdAt: event.createdAt,
+      phraseText: event.phraseText,
+      categoryKey: event.categoryKey,
+      eventId: event.eventId,
+    );
     await FirebaseFirestore.instance
         .collection(activityCollectionName)
-        .add(payload);
+        .doc('${event.learnerFirebaseUid}_$syncKey')
+        .set(payload);
   }
 
   @override
@@ -383,10 +391,9 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       void absorb(DocumentSnapshot<Map<String, dynamic>> doc) {
         final activity = _activityFromDocument(doc);
         if (activity == null) return;
-        final key =
-            '${activity.createdAt.millisecondsSinceEpoch}|'
-            '${activity.phraseText.trim().toLowerCase()}|'
-            '${activity.categoryKey}';
+        final key = AppRepository.remoteActivitySyncKey(
+          createdAt: activity.createdAt, phraseText: activity.phraseText,
+          categoryKey: activity.categoryKey, eventId: activity.eventId);
         if (!seen.add(key)) return;
         activities.add(activity);
       }
@@ -408,6 +415,7 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
       phraseText: (data['phraseText'] as String?) ?? '',
       categoryKey: (data['categoryKey'] as String?) ?? '',
       createdAt: createdAt.toLocal(),
+      eventId: data['eventId'] as String?,
       className: data['className'] as String?,
       lessonTitle: data['lessonTitle'] as String?,
     );

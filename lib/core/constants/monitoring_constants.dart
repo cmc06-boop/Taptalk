@@ -14,9 +14,6 @@ abstract final class MonitoringConstants {
   /// Gap between phrase taps before a new usage session starts.
   static const Duration sessionGap = Duration(minutes: 15);
 
-  /// History rows within this window with the same phrase are treated as one tap.
-  static const Duration monitoringHistoryDedupeWindow = Duration(seconds: 5);
-
   /// How far back parent/teacher cloud pulls reach for learner phrase activity.
   static const int cloudActivityPullDays = 365 * 3;
 

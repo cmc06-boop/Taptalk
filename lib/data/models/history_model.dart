@@ -19,6 +19,7 @@ class HistoryModel {
     required this.createdAt,
     this.className,
     this.lessonTitle,
+    this.eventId,
   });
 
   final int id;
@@ -28,6 +29,7 @@ class HistoryModel {
   final DateTime createdAt;
   final String? className;
   final String? lessonTitle;
+  final String? eventId;
 
   static String encodeLessonCategoryKey({
     required String className,
@@ -73,6 +75,7 @@ class HistoryModel {
         'created_at': createdAt.millisecondsSinceEpoch,
         'class_name': className,
         'lesson_title': lessonTitle,
+        'event_id': eventId,
       };
 
   factory HistoryModel.fromMap(Map<String, Object?> map) {
@@ -84,6 +87,7 @@ class HistoryModel {
       createdAt: DateTime.fromMillisecondsSinceEpoch(map['created_at'] as int),
       className: map['class_name'] as String?,
       lessonTitle: map['lesson_title'] as String?,
+      eventId: map['event_id'] as String?,
     );
   }
 }

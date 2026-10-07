@@ -8,6 +8,7 @@ import '../core/constants/monitoring_constants.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../core/utils/negative_phrases.dart';
+import '../core/utils/phrase_usage_calculator.dart';
 import '../data/models/phrase_usage_stat.dart';
 import '../data/repositories/app_repository.dart';
 
@@ -51,10 +52,15 @@ class _FrequentlyUsedSectionState extends State<FrequentlyUsedSection> {
     return allowed.contains(AppRepository.normalizeCategoryKey(categoryKey));
   }
 
-  List<PhraseUsageStat> get _personalStats => widget.stats
-      .where((s) => _isAllowedCategory(s.categoryKey))
-      .where((s) => s.count >= FrequentlyUsedSection.minUsageCount)
-      .toList();
+  List<PhraseUsageStat> get _personalStats =>
+      PhraseUsageCalculator.withPhraseTotals(
+            widget.stats.where(
+              (s) => AppRepository.isPersonalCategoryKey(s.categoryKey),
+            ),
+          )
+          .where((s) => _isAllowedCategory(s.categoryKey))
+          .where((s) => s.count >= FrequentlyUsedSection.minUsageCount)
+          .toList();
 
   Map<String, List<PhraseUsageStat>> _groupByCategory(
     List<PhraseUsageStat> stats,
@@ -117,9 +123,6 @@ class _FrequentlyUsedSectionState extends State<FrequentlyUsedSection> {
   }
 
   String? _levelLabelFor(PhraseUsageStat stat) {
-    if (stat.count < MonitoringConstants.negativeUsageWarningCount) {
-      return null;
-    }
     final key = NegativePhrases.normalizeText(stat.text);
     final level = widget.warningLevels[key];
     if (level == null || level < 1) return null;
@@ -314,9 +317,6 @@ class _AllFrequentlyUsedSheetState extends State<_AllFrequentlyUsedSheet> {
       widget.grouped[_selectedCategoryKey] ?? const [];
 
   String? _levelLabelFor(PhraseUsageStat stat) {
-    if (stat.count < MonitoringConstants.negativeUsageWarningCount) {
-      return null;
-    }
     final key = NegativePhrases.normalizeText(stat.text);
     final level = widget.warningLevels[key];
     if (level == null || level < 1) return null;
