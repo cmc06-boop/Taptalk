@@ -5,8 +5,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/l10n/app_strings.dart';
+import '../core/utils/code_qr_utils.dart';
+import '../data/repositories/app_repository.dart';
 import '../providers/app_state.dart';
 import '../services/caregiver_security_service.dart';
+import 'code_scan_flow_screen.dart';
 import 'link_child_dialog.dart';
 
 typedef CaregiverSecurityCall =
@@ -59,6 +63,7 @@ class CaregiverSecurityGate extends StatefulWidget {
     this.onMainBack,
     this.reauthenticate,
     this.recoveryProviders,
+    this.recoveryLinkListener,
     this.pollInterval = const Duration(seconds: 15),
   });
 
@@ -71,6 +76,7 @@ class CaregiverSecurityGate extends StatefulWidget {
   final Future<void> Function()? onMainBack;
   final Future<void> Function(String password, bool google)? reauthenticate;
   final Set<String>? recoveryProviders;
+  final void Function(void Function(String link) onLink)? recoveryLinkListener;
   final Duration pollInterval;
 
   @override
@@ -82,17 +88,21 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
   final _security = CaregiverSecurityService.instance;
   final _securityNavigator = GlobalKey<NavigatorState>();
   final _code = TextEditingController();
-  final _otp = TextEditingController();
   final _password = TextEditingController();
+  final _legacyCode = TextEditingController();
   final _presentedRequests = <String>{};
   List<String> _pendingRequests = [];
+  List<Map<String, dynamic>> _legacyLearners = [];
+  final _legacyCodes = <String>{};
   bool _recoveryVerified = false;
   bool _showRecovery = false;
+  bool _recoveryEmailSent = false;
   String? _transferLearnerId;
   Timer? _timer;
   String _state = 'checking';
   String? _message;
   String? _requestId;
+  String? _pendingRecoveryLink;
   bool _busy = false;
   bool _manage = false;
   bool _wasTrusted = false;
@@ -114,6 +124,12 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    final recoveryLinkListener = widget.recoveryLinkListener;
+    if (recoveryLinkListener != null) {
+      recoveryLinkListener(_onIncomingRecoveryLink);
+    } else if (widget.call == null) {
+      _security.listenForRecoveryEmailLinks(_onIncomingRecoveryLink);
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_check()));
     _timer = Timer.periodic(widget.pollInterval, (_) {
       if (_foreground) unawaited(_check());
@@ -167,6 +183,10 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
       setState(() {
         _state = next;
         _wasTrusted |= next == 'trusted';
+        _legacyLearners = (result['learners'] as List? ?? [])
+            .whereType<Map>()
+            .map((learner) => Map<String, dynamic>.from(learner))
+            .toList();
         _pendingRequests = requests;
         if (requests.any((request) => !_presentedRequests.contains(request))) {
           _manage = true;
@@ -226,9 +246,10 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
     'requestTransfer' =>
       'Transfer request created. Give this code to the current caregiver.',
     'sendRecovery' =>
-      'An 8-digit code was sent to your registered recovery email. It expires in 5 minutes.',
+      'A Firebase sign-in link was sent to your registered recovery email. Open it on this phone.',
     'verifyRecovery' =>
       'Recovery email verified. Confirm below to replace your trusted phone.',
+    'confirmLegacy' => 'Leftover caregiver links confirmed on this phone.',
     'confirmReplacement' => 'Trusted phone replaced.',
     'approveReplacement' => 'New phone approved. This phone has been revoked.',
     'transfer' =>
@@ -244,20 +265,29 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
     setState(() => _busy = true);
     try {
       final result = await _call(action, values);
+      if (action == 'sendRecovery' && widget.call == null) {
+        final email = result['recoveryEmail'] as String?;
+        if (email == null || email.isEmpty) {
+          throw StateError('Recovery email is unavailable.');
+        }
+        await _security.sendRecoveryEmailLink(email);
+      }
       if (!mounted) return;
       setState(() {
         _requestId = result['requestId'] as String? ?? _requestId;
         if (action == 'requestReplacement') {
           _recoveryVerified = false;
           _showRecovery = false;
-          _otp.clear();
+          _recoveryEmailSent = false;
         }
+        if (action == 'sendRecovery') _recoveryEmailSent = true;
         if (action == 'verifyRecovery') _recoveryVerified = true;
         _message = _actionMessage(action);
         if ([
           'confirmReplacement',
           'approveReplacement',
           'transfer',
+          'confirmLegacy',
         ].contains(action)) {
           // Do not reveal cached content while confirmation is being checked.
           _state = 'checking';
@@ -270,12 +300,13 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
             'resource-exhausted' =>
               'Too many attempts. Please try again later.',
             'unauthenticated' =>
-              'Verify your account again below, then request a new email code.',
-            'failed-precondition' =>
-              'Verify your account email before continuing.',
+              'Verify your account again below, then request a new recovery email.',
+            'failed-precondition' => action == 'verifyRecovery'
+                ? 'Open the recovery link from your email on this phone, then try again.'
+                : 'Verify your account email before continuing. It must match the registered recovery email.',
             _ =>
               action == 'verifyRecovery'
-                  ? 'The code is incorrect, expired, or no longer available. Request a new code and try again.'
+                  ? 'Recovery is not ready yet. Open the email link on this phone, then try again.'
                   : 'Request unavailable. Check the request code or create a new request.',
           },
         );
@@ -294,11 +325,137 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
           'confirmReplacement',
           'approveReplacement',
           'transfer',
+          'confirmLegacy',
         ].contains(action) ||
         _checkPending) {
       _checkPending = false;
       await _check();
     }
+  }
+
+  void _onIncomingRecoveryLink(String link) {
+    _pendingRecoveryLink = link;
+    if (_requestId != null && _showRecovery) {
+      unawaited(_completeEmailRecovery(link));
+    }
+  }
+
+  Future<void> _completeEmailRecovery([String? link]) async {
+    if (_busy || _loggingOut || _requestId == null || !_showRecovery) return;
+    final incoming =
+        link ?? _pendingRecoveryLink ?? await _security.takePendingEmailLink();
+    if (incoming == null) {
+      if (mounted) {
+        setState(
+          () => _message =
+              'Open the recovery link from your email on this phone, then try again.',
+        );
+      }
+      return;
+    }
+    if (widget.call == null) {
+      try {
+        final completed = await _security.completeRecoveryEmailLink(incoming);
+        if (!completed) {
+          if (mounted) {
+            setState(
+              () => _message =
+                  'That email link is not valid for recovery. Request a new email.',
+            );
+          }
+          return;
+        }
+      } on FirebaseAuthException catch (error) {
+        if (mounted) {
+          setState(
+            () => _message = error.code == 'too-many-requests'
+                ? 'Too many verification attempts. Please try again later.'
+                : 'Could not open the recovery email link. Request a new email and try again.',
+          );
+        }
+        return;
+      } catch (_) {
+        if (mounted) {
+          setState(
+            () => _message =
+                'Could not open the recovery email link. Request a new email and try again.',
+          );
+        }
+        return;
+      }
+    }
+    _pendingRecoveryLink = null;
+    await _action('verifyRecovery', {'requestId': _requestId});
+  }
+
+  Future<void> _verifyAccountAndConfirmLegacy(bool google) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    var verified = false;
+    try {
+      await (widget.reauthenticate?.call(_password.text, google) ??
+          _security.reauthenticate(password: _password.text, google: google));
+      verified = true;
+      _password.clear();
+    } on FirebaseAuthException catch (error) {
+      if (mounted) {
+        setState(
+          () => _message = error.code == 'too-many-requests'
+              ? 'Too many verification attempts. Please try again later.'
+              : 'Account verification failed. Use the credentials for this signed-in parent account.',
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _message =
+              'Account verification was not completed. Try again with this parent account.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (verified && mounted) {
+      await _action('confirmLegacy', {'profileCodes': _legacyCodes.toList()});
+    }
+  }
+
+  Future<void> _saveLegacyCode([String? raw]) async {
+    final code = AppRepository.normalizeProfileCode(raw ?? _legacyCode.text);
+    if (!AppRepository.isValidProfileCodeFormat(code)) {
+      setState(
+        () => _message = 'Enter a learner profile code like TT-XXXXXXXX.',
+      );
+      return;
+    }
+    setState(() {
+      _legacyCodes.add(code);
+      _legacyCode.clear();
+      _message =
+          'Saved $code. Confirm leftover links when every conflicting learner is scanned.';
+    });
+  }
+
+  Future<void> _scanLegacyCode(BuildContext scanContext) async {
+    if (_busy || _app == null) return;
+    final lang = _app!.language;
+    await CodeScanFlowScreen.open(
+      scanContext,
+      kind: QrScanKind.profileCode,
+      title: AppStrings.linkChildCode(lang),
+      scanHint: AppStrings.qrScanProfileHint(lang),
+      manualTitle: AppStrings.linkChildCode(lang),
+      manualHint: AppStrings.enterChildCodeHint(lang),
+      manualHintText: 'TT-XXXXXXXX',
+      onSubmit: (code) async {
+        final normalized = CodeQrUtils.extractProfileCode(code);
+        if (normalized == null) {
+          return 'Enter a learner profile code like TT-XXXXXXXX.';
+        }
+        await _saveLegacyCode(normalized);
+        return null;
+      },
+    );
   }
 
   Future<void> _verifyAccountAndSendCode(bool google) async {
@@ -363,8 +520,11 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
   void dispose() {
     _timer?.cancel();
     _code.dispose();
-    _otp.dispose();
+    _legacyCode.dispose();
     _password.dispose();
+    if (widget.call == null) {
+      _security.stopListeningForRecoveryEmailLinks();
+    }
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -444,6 +604,8 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
                     ? 'This phone is trusted.'
                     : _state == 'setup'
                     ? 'Link your learner to get started.'
+                    : _state == 'legacyConfirmation'
+                    ? 'Confirm leftover caregiver links from the previous app.'
                     : _state == 'checking'
                     ? 'Checking protected access...'
                     : 'Protected learner information is locked.',
@@ -504,6 +666,70 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
                         },
                   child: const Text('Scan learner QR'),
                 ),
+              ] else if (_state == 'legacyConfirmation') ...[
+                const Text(
+                  'These leftover links stay blocked until you confirm them on this phone. Conflicting learners also need their QR so TapTalk does not pick a caregiver for you.',
+                ),
+                for (final learner in _legacyLearners)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      '${(learner['learnerName'] as String?)?.trim().isNotEmpty == true ? learner['learnerName'] : 'Learner'}'
+                      '${learner['ambiguous'] == true ? ' (conflicting — scan this learner QR)' : ''}',
+                    ),
+                  ),
+                if (_legacyLearners.any(
+                  (learner) => learner['ambiguous'] == true,
+                )) ...[
+                  TextField(
+                    controller: _legacyCode,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Conflicting learner QR code',
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _busy ? null : () => unawaited(_saveLegacyCode()),
+                    child: const Text('Save learner code'),
+                  ),
+                  if (_app != null)
+                    TextButton(
+                      onPressed: _busy
+                          ? null
+                          : () => unawaited(_scanLegacyCode(scanContext)),
+                      child: const Text('Scan learner QR'),
+                    ),
+                  if (_legacyCodes.isNotEmpty)
+                    Text('Saved codes: ${_legacyCodes.join(', ')}'),
+                ],
+                if (providers.contains('password')) ...[
+                  TextField(
+                    controller: _password,
+                    obscureText: true,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    decoration: const InputDecoration(
+                      labelText: 'Account password',
+                    ),
+                  ),
+                  FilledButton(
+                    onPressed: _busy
+                        ? null
+                        : () => _verifyAccountAndConfirmLegacy(false),
+                    child: const Text(
+                      'Verify password and confirm leftover links',
+                    ),
+                  ),
+                ],
+                if (providers.contains('google.com'))
+                  FilledButton(
+                    onPressed: _busy
+                        ? null
+                        : () => _verifyAccountAndConfirmLegacy(true),
+                    child: const Text(
+                      'Verify Google account and confirm leftover links',
+                    ),
+                  ),
               ] else if (_state == 'trusted') ...[
                 for (final requestId in _pendingRequests)
                   Card(
@@ -621,7 +847,7 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
                   ),
                   if (_showRecovery) ...[
                     const Text(
-                      'Verify ownership of this parent account. Then enter the code sent to the recovery email registered with your trusted phone.',
+                      'Verify ownership of this parent account. Firebase will email a sign-in link to the recovery address registered with your trusted phone. Open that link on this phone.',
                     ),
                     if (providers.contains('password')) ...[
                       TextField(
@@ -638,7 +864,7 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
                             ? null
                             : () => _verifyAccountAndSendCode(false),
                         child: const Text(
-                          'Verify password and send email code',
+                          'Verify password and send recovery email',
                         ),
                       ),
                     ],
@@ -648,7 +874,7 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
                             ? null
                             : () => _verifyAccountAndSendCode(true),
                         child: const Text(
-                          'Verify Google account and send email code',
+                          'Verify Google account and send recovery email',
                         ),
                       ),
                     if (!providers.contains('password') &&
@@ -656,23 +882,11 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
                       const Text(
                         'Sign in again with your parent account email/password or Google account to use recovery.',
                       ),
-                    TextField(
-                      controller: _otp,
-                      keyboardType: TextInputType.number,
-                      maxLength: 8,
-                      decoration: const InputDecoration(
-                        labelText: '8-digit email code',
+                    if (_recoveryEmailSent)
+                      FilledButton(
+                        onPressed: _busy ? null : () => _completeEmailRecovery(),
+                        child: const Text('I opened the recovery email'),
                       ),
-                    ),
-                    FilledButton(
-                      onPressed: _busy
-                          ? null
-                          : () => _action('verifyRecovery', {
-                              'requestId': _requestId,
-                              'otp': _otp.text.trim(),
-                            }),
-                      child: const Text('Verify recovery code'),
-                    ),
                     if (_recoveryVerified) ...[
                       const Text(
                         'Replace your trusted device? This will remove access from your previous device.',

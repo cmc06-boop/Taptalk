@@ -1,11 +1,14 @@
 package com.example.flutter_application_1
 
+import android.content.Intent
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private var speechCapture: SpeechCapture? = null
+    private var emailLinkChannel: MethodChannel? = null
+    private var pendingEmailLink: String? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -82,11 +85,48 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        emailLinkChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.taptalk/email_links",
+        )
+        emailLinkChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getInitialLink" -> result.success(takeEmailLink())
+                else -> result.notImplemented()
+            }
+        }
+        rememberEmailLink(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        rememberEmailLink(intent)
+        takeEmailLink()?.let { emailLinkChannel?.invokeMethod("onLink", it) }
+    }
+
+    private fun rememberEmailLink(intent: Intent?) {
+        val data = intent?.dataString ?: return
+        if (data.contains("oobCode") ||
+            data.contains("mode=signIn") ||
+            data.contains("caregiver-recovery")
+        ) {
+            pendingEmailLink = data
+        }
+    }
+
+    private fun takeEmailLink(): String? {
+        val link = pendingEmailLink
+        pendingEmailLink = null
+        return link
     }
 
     override fun onDestroy() {
         speechCapture?.destroy()
         speechCapture = null
+        emailLinkChannel?.setMethodCallHandler(null)
+        emailLinkChannel = null
         super.onDestroy()
     }
 }

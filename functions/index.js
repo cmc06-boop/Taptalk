@@ -1,18 +1,14 @@
 const {initializeApp} = require('firebase-admin/app');
 const {getAuth} = require('firebase-admin/auth');
 const {getFirestore, FieldValue} = require('firebase-admin/firestore');
-const {defineSecret, defineString} = require('firebase-functions/params');
-const nodemailer = require('nodemailer');
-const {randomInt} = require('node:crypto');
-const smtpPassword = defineSecret('SMTP_PASSWORD');
-const smtpHost = defineString('SMTP_HOST');
-const smtpUser = defineString('SMTP_USER');
-const smtpFrom = defineString('SMTP_FROM');
 const {onCall, HttpsError} = require('firebase-functions/v2/https');
 const {hash, newId, trusted, deviceMatches, canConfirm} = require('./security-policy');
 initializeApp();
 const db = getFirestore();
 const deny = () => { throw new HttpsError('permission-denied', 'Verification required or request unavailable.'); };
+const emailOf = value => typeof value === 'string' ? value.trim().toLowerCase() : '';
+const recentLogin = auth => Number.isFinite(auth.token.auth_time) && Date.now() / 1000 - auth.token.auth_time <= 300;
+const signInProvider = auth => auth.token?.firebase?.sign_in_provider;
 const ref = (collection, id) => db.collection(collection).doc(id);
 const id = value => {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value)) deny();
@@ -45,7 +41,7 @@ async function rateLimit(uid, action, max = 10) {
 
 // All authority changes are server transactions. Clients cannot write owners,
 // device credentials, grants, approvals, or session IDs through Firestore.
-exports.caregiverSecurity = onCall({enforceAppCheck: true, region: 'us-central1', secrets: [smtpPassword]}, async request => {
+exports.caregiverSecurity = onCall({enforceAppCheck: true, region: 'us-central1'}, async request => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
   const uid = request.auth.uid;
   await activeAccount(uid);
@@ -66,19 +62,35 @@ exports.caregiverSecurity = onCall({enforceAppCheck: true, region: 'us-central1'
   const secret = data.deviceSecret;
   if (typeof secret !== 'string' || !/^[a-f0-9]{64}$/.test(secret)) deny();
   if (action === 'transfer') return transfer(request, secret);
+  if (action === 'confirmLegacy') return confirmLegacy(request, secret);
   if (action === 'sendRecovery' || action === 'verifyRecovery') return recover(request, secret);
   if (action === 'status') {
     const result = await db.runTransaction(async tx => {
       const sec = (await tx.get(secRef)).data();
       if (!sec) {
         const legacy = await tx.get(db.collection('parent_child_links').where('parentFirebaseUid', '==', uid).limit(1));
-        return {state: legacy.empty ? 'setup' : 'verificationRequired'};
+        return {state: legacy.empty ? 'setup' : 'legacyConfirmation'};
       }
       if (!deviceMatches(secret, sec)) return {state: 'verificationRequired'};
       const sessionId = sec.sessionId || newId();
       if (!sec.sessionId) tx.update(secRef, {sessionId});
       return {state: 'trusted', sessionId, needsToken: request.auth.token.trustedSession !== sessionId};
     });
+    if (result.state === 'legacyConfirmation') {
+      const links = await db.collection('parent_child_links').where('parentFirebaseUid', '==', uid).get();
+      const learners = [];
+      for (const doc of links.docs) {
+        const learnerUid = doc.data().learnerFirebaseUid;
+        const all = await db.collection('parent_child_links').where('learnerFirebaseUid', '==', learnerUid).get();
+        learners.push({
+          learnerFirebaseUid: learnerUid,
+          learnerName: doc.data().learnerName ?? '',
+          learnerProfileCode: doc.data().learnerProfileCode ?? '',
+          ambiguous: all.size > 1,
+        });
+      }
+      return {state: 'legacyConfirmation', learners};
+    }
     const pending = result.state === 'trusted' ? await db.collection('device_replacements')
       .where('uid', '==', uid).get() : null;
     const links = result.state === 'trusted' ? await db.collection('parent_child_links').where('parentFirebaseUid', '==', uid).get() : null;
@@ -190,41 +202,91 @@ exports.caregiverSecurity = onCall({enforceAppCheck: true, region: 'us-central1'
 
 async function recover(request, secret) {
   const {data, auth} = request;
-  if (!Number.isFinite(auth.token.auth_time) || Date.now() / 1000 - auth.token.auth_time > 300) {
-    throw new HttpsError('unauthenticated', 'Sign in again before recovery.');
-  }
+  if (!recentLogin(auth)) throw new HttpsError('unauthenticated', 'Sign in again before recovery.');
   const target = ref('device_replacements', id(data.requestId));
+  const account = await getAuth().getUser(auth.uid);
+  const accountEmail = emailOf(account.email);
   if (data.action === 'sendRecovery') {
     await rateLimit(auth.uid, 'recovery', 3);
-    const otp = String(randomInt(10000000, 100000000));
-    const email = await db.runTransaction(async tx => {
+    const recoveryEmail = await db.runTransaction(async tx => {
       const sec = (await tx.get(securityRef(auth.uid))).data();
       const pending = (await tx.get(target)).data();
       if (!sec?.recoveryEmail || pending?.uid !== auth.uid || pending.kind !== 'replacement' ||
           pending.deviceHash !== hash(secret) || pending.status !== 'pending' || pending.expiresAt <= Date.now() ||
           pending.generation !== sec.generation) deny();
-      tx.update(target, {otpHash: hash(`${data.requestId}:${otp}`), otpExpiresAt: Date.now() + 300000, attempts: 0});
-      return sec.recoveryEmail;
+      const pinned = emailOf(sec.recoveryEmail);
+      if (!account.emailVerified || !accountEmail || accountEmail !== pinned) {
+        throw new HttpsError('failed-precondition',
+          'The signed-in email must match the pinned recovery email.');
+      }
+      tx.update(target, {emailRecoveryPending: true});
+      return pinned;
     });
-    await nodemailer.createTransport({host: smtpHost.value(), port: 465, secure: true,
-      auth: {user: smtpUser.value(), pass: smtpPassword.value()}}).sendMail({
-      from: smtpFrom.value(), to: email, subject: 'TapTalk trusted phone verification',
-      text: `Your TapTalk verification code is ${otp}. It expires in 5 minutes. Only enter it on the new phone you are authorizing. Do not share this code.`,
-    });
-    return {sent: true};
+    return {sent: true, recoveryEmail};
   }
-  const verified = await db.runTransaction(async tx => {
+  if (signInProvider(auth) !== 'emailLink') {
+    throw new HttpsError('failed-precondition', 'Open the recovery link from your email on this phone.');
+  }
+  const tokenEmail = emailOf(auth.token.email || account.email);
+  await db.runTransaction(async tx => {
     const pending = (await tx.get(target)).data();
     const sec = (await tx.get(securityRef(auth.uid))).data();
+    const pinned = emailOf(sec?.recoveryEmail);
+    if (!account.emailVerified || tokenEmail !== pinned || accountEmail !== pinned) deny();
     if (pending?.uid !== auth.uid || pending.kind !== 'replacement' || pending.deviceHash !== hash(secret) ||
         pending.status !== 'pending' || pending.generation !== sec?.generation ||
-        !pending.otpHash || pending.otpExpiresAt <= Date.now() || pending.expiresAt <= Date.now() || pending.attempts >= 5) deny();
-    const ok = pending.otpHash === hash(`${data.requestId}:${String(data.otp)}`);
-    tx.update(target, {attempts: pending.attempts + 1, ...(ok ? {status: 'approved', otpHash: FieldValue.delete()} : {})});
-    return ok;
+        !pending.emailRecoveryPending || pending.expiresAt <= Date.now()) deny();
+    tx.update(target, {status: 'approved', emailRecoveryPending: FieldValue.delete()});
   });
-  if (!verified) deny();
   return {verified: true};
+}
+
+// Leftover client-written links stay blocked until this parent confirms.
+// Conflicting learner records also require that learner's QR.
+async function confirmLegacy(request, secret) {
+  const {data, auth} = request;
+  if (!recentLogin(auth)) throw new HttpsError('unauthenticated', 'Sign in again before recovery.');
+  await rateLimit(auth.uid, 'legacy', 5);
+  const account = await getAuth().getUser(auth.uid);
+  const accountEmail = emailOf(account.email);
+  if (!account.emailVerified || !accountEmail) {
+    throw new HttpsError('failed-precondition', 'Verify your email before continuing.');
+  }
+  const codes = new Set((Array.isArray(data.profileCodes) ? data.profileCodes : [])
+    .map(code => String(code).trim().toUpperCase()).filter(code => /^TT-[A-Z0-9]{8}$/.test(code)));
+  const sessionId = await db.runTransaction(async tx => {
+    const currentRef = securityRef(auth.uid);
+    if ((await tx.get(currentRef)).data()) deny();
+    const links = await tx.get(db.collection('parent_child_links').where('parentFirebaseUid', '==', auth.uid));
+    if (links.empty) deny();
+    const ownerWrites = [];
+    const extraDeletes = [];
+    for (const linkDoc of links.docs) {
+      const learnerUid = id(linkDoc.data().learnerFirebaseUid);
+      const allLinks = await tx.get(db.collection('parent_child_links').where('learnerFirebaseUid', '==', learnerUid));
+      const ownerRef = ref('learner_caregivers', learnerUid);
+      const owner = (await tx.get(ownerRef)).data();
+      if (owner && (owner.parentUid !== auth.uid || owner.active !== true)) deny();
+      if (allLinks.size > 1) {
+        const profile = (await tx.get(ref('learner_profiles', learnerUid))).data();
+        const code = String(profile?.profileCode ?? '').trim().toUpperCase();
+        if (!codes.has(code)) deny();
+        for (const other of allLinks.docs) {
+          if (other.data().parentFirebaseUid !== auth.uid) extraDeletes.push(other.ref);
+        }
+      }
+      if (!owner) ownerWrites.push(ownerRef);
+    }
+    const nextSession = newId();
+    tx.set(currentRef, {deviceHash: hash(secret), sessionId: nextSession, generation: 1,
+      recoveryEmail: account.email.trim()});
+    for (const ownerRef of ownerWrites) tx.set(ownerRef, {parentUid: auth.uid, active: true});
+    for (const other of extraDeletes) tx.delete(other);
+    tx.set(db.collection('security_audit').doc(), {action: 'confirmLegacy', uid: auth.uid,
+      at: FieldValue.serverTimestamp()});
+    return nextSession;
+  });
+  return issue(auth.uid, sessionId);
 }
 
 // Transfer requires the current trusted caregiver's explicit approval and a

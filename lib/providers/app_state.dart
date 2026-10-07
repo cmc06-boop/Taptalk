@@ -1,3 +1,4 @@
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
@@ -5454,6 +5455,17 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         return AppStrings.childAlreadyLinked(_language);
       }
       return null;
+    } on FirebaseFunctionsException catch (error) {
+      return switch (error.code) {
+        'failed-precondition' =>
+          'Verify your account email before scanning the learner QR.',
+        'unauthenticated' =>
+          'Sign in online, then scan the learner QR again.',
+        'permission-denied' =>
+          'Unable to link. This learner may already have a caregiver, or leftover conflicting links need confirmation on the trusted-device screen.',
+        _ =>
+          'Unable to link. Connect to the internet, verify caregiver authorization, and verify your account email.',
+      };
     } catch (_) {
       return 'Unable to link. Connect to the internet and verify caregiver authorization, and verify your account email.';
     }

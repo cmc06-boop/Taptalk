@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -23,11 +24,17 @@ class CaregiverSecurityService {
       synchronizable: false,
     ),
   );
+  static const _emailLinks = MethodChannel('com.taptalk/email_links');
+  static const _pendingRecoveryEmailKey = 'caregiver_recovery_email';
+  static const recoveryContinueUrl =
+      'https://taptalk-2d809.firebaseapp.com/caregiver-recovery';
+
   Future<String>? _secretFuture;
   Future<void> _tokenApplication = Future<void>.value();
   int _authGeneration = 0;
   StreamSubscription<User?>? _authSubscription;
   String? _observedUid;
+  void Function(String link)? _onEmailLink;
 
   Future<String> _secret() => _secretFuture ??= _loadSecret().catchError((
     Object error,
@@ -91,6 +98,72 @@ class CaregiverSecurityService {
       throw StateError('The signed-in account changed.');
     }
     await user.getIdToken(true);
+  }
+
+  ActionCodeSettings get recoveryActionCodeSettings => ActionCodeSettings(
+    url: recoveryContinueUrl,
+    handleCodeInApp: true,
+    androidPackageName: 'com.example.flutter_application_1',
+    androidInstallApp: false,
+    iOSBundleId: 'com.example.flutterApplication1',
+  );
+
+  Future<void> sendRecoveryEmailLink(String email) async {
+    final trimmed = email.trim();
+    if (trimmed.isEmpty) throw StateError('Recovery email is unavailable.');
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_pendingRecoveryEmailKey, trimmed);
+    await FirebaseAuth.instance.sendSignInLinkToEmail(
+      email: trimmed,
+      actionCodeSettings: recoveryActionCodeSettings,
+    );
+  }
+
+  Future<String?> takePendingEmailLink() async {
+    try {
+      final link = await _emailLinks.invokeMethod<String>('getInitialLink');
+      if (link != null && link.isNotEmpty) return link;
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
+    return null;
+  }
+
+  void listenForRecoveryEmailLinks(void Function(String link) onLink) {
+    _onEmailLink = onLink;
+    _emailLinks.setMethodCallHandler((call) async {
+      if (call.method == 'onLink' && call.arguments is String) {
+        final link = call.arguments as String;
+        if (link.isNotEmpty) _onEmailLink?.call(link);
+      }
+    });
+    unawaited(
+      takePendingEmailLink().then((link) {
+        if (link != null) _onEmailLink?.call(link);
+      }),
+    );
+  }
+
+  void stopListeningForRecoveryEmailLinks() {
+    _onEmailLink = null;
+    _emailLinks.setMethodCallHandler(null);
+  }
+
+  Future<bool> completeRecoveryEmailLink(String link) async {
+    if (!FirebaseAuth.instance.isSignInWithEmailLink(link)) return false;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) throw StateError('Sign in again before recovery.');
+    final prefs = await SharedPreferences.getInstance();
+    final email =
+        prefs.getString(_pendingRecoveryEmailKey) ?? user.email ?? '';
+    if (email.isEmpty) throw StateError('Recovery email is unavailable.');
+    await user.reauthenticateWithCredential(
+      EmailAuthProvider.credentialWithLink(email: email, emailLink: link),
+    );
+    await user.getIdToken(true);
+    return true;
   }
 
   Future<String> _loadSecret() async {

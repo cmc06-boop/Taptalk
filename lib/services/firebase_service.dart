@@ -178,11 +178,17 @@ class FirebaseService {
         ? Platform.environment['APP_CHECK_DEBUG_TOKEN']?.trim()
         : null;
 
+    const appCheckDebugToken = String.fromEnvironment(
+      'TAPTALK_APP_CHECK_DEBUG_TOKEN',
+    );
+
     // Mobile debug providers generate a token that the developer registers
     // in Firebase App Check. Never skip them: security callables require it.
     // Windows requires an explicitly configured debug token.
-    if (kDebugMode && isWindows &&
-        (windowsDebugToken == null || windowsDebugToken.isEmpty)) {
+    if (kDebugMode &&
+        isWindows &&
+        (windowsDebugToken == null || windowsDebugToken.isEmpty) &&
+        appCheckDebugToken.isEmpty) {
       if (!_appCheckSkipLogged) {
         _appCheckSkipLogged = true;
         debugPrint(
@@ -192,17 +198,23 @@ class FirebaseService {
       return;
     }
 
+    final androidDebug = appCheckDebugToken.isNotEmpty
+        ? AndroidDebugProvider(debugToken: appCheckDebugToken)
+        : (kDebugMode ? const AndroidDebugProvider() : null);
+    final appleDebug = appCheckDebugToken.isNotEmpty
+        ? AppleDebugProvider(debugToken: appCheckDebugToken)
+        : (kDebugMode ? const AppleDebugProvider() : null);
+
     try {
       await FirebaseAppCheck.instance.activate(
-        providerAndroid: kDebugMode
-            ? const AndroidDebugProvider()
-            : const AndroidPlayIntegrityProvider(),
-        providerApple: kDebugMode
-            ? const AppleDebugProvider()
-            : const AppleAppAttestProvider(),
+        providerAndroid:
+            androidDebug ?? const AndroidPlayIntegrityProvider(),
+        providerApple: appleDebug ?? const AppleAppAttestProvider(),
         providerWindows: WindowsDebugProvider(
           debugToken: windowsDebugToken != null && windowsDebugToken.isNotEmpty
               ? windowsDebugToken
+              : appCheckDebugToken.isNotEmpty
+              ? appCheckDebugToken
               : null,
         ),
       );

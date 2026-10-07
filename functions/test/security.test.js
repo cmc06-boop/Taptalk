@@ -6,24 +6,18 @@ const {doc, getDoc, getDocs, query, collection, where, setDoc, updateDoc, delete
 const {hash, newId, trusted} = require('../security-policy');
 process.env.GCLOUD_PROJECT = 'demo-taptalk-security';
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080';
-process.env.SMTP_PASSWORD = 'test';
-process.env.SMTP_HOST = 'test';
-process.env.SMTP_USER = 'test';
-process.env.SMTP_FROM = 'test@example.test';
 const {caregiverSecurity} = require('../index');
 const {getFirestore} = require('firebase-admin/firestore');
 const {getAuth} = require('firebase-admin/auth');
-const nodemailer = require('nodemailer');
 const db = getFirestore();
 const A = 'a'.repeat(64), B = 'b'.repeat(64), C = 'c'.repeat(64);
 const account = uid => ({uid, email: `${uid}@example.test`, emailVerified: true});
 getAuth().getUser = async uid => account(uid);
 getAuth().createCustomToken = async (uid, claims) => JSON.stringify({uid, ...claims});
-let mail;
-nodemailer.createTransport = () => ({sendMail: async message => { mail = message; }});
 let env;
-const call = (uid, action, deviceSecret = A, data = {}, session) => caregiverSecurity.run({
-  auth: {uid, token: {auth_time: Math.floor(Date.now()/1000), ...(session ? {trustedSession: session} : {})}},
+const call = (uid, action, deviceSecret = A, data = {}, session, provider = 'password') => caregiverSecurity.run({
+  auth: {uid, token: {auth_time: Math.floor(Date.now()/1000), email: `${uid}@example.test`,
+    firebase: {sign_in_provider: provider}, ...(session ? {trustedSession: session} : {})}},
   data: {action, deviceSecret, ...data},
 });
 const get = async path => (await db.doc(path).get()).data();
@@ -43,7 +37,6 @@ beforeEach(async () => {
   await db.doc('learner_profiles/learner').set({learnerFirebaseUid: 'learner', learnerName: 'Private learner', profileCode: 'TT-12345678', speakHistory: ['private']});
   await db.doc('user_profiles/learner').set({firebaseUid: 'learner', role: 'learner', fullName: 'Private learner'});
   await db.doc('learner_activity/tap').set({learnerFirebaseUid: 'learner', phraseText: 'private'});
-  mail = null;
 });
 after(async () => { await env.cleanup(); await db.terminate(); });
 
@@ -97,33 +90,60 @@ test('old-phone approval atomically activates new phone and invalidates old toke
   await assertSucceeds(getDoc(doc(env.authenticatedContext('parent', {trustedSession: nextSession}).firestore(), 'learner_activity/tap')));
   await assert.rejects(call('parent', 'approveReplacement', A, {requestId}, session));
 });
-test('recovery OTP is pinned to old verified email and requires explicit final confirmation', async () => {
+test('recovery email link is pinned to the verified Auth email and requires explicit final confirmation', async () => {
   const session = await link();
   getAuth().getUser = async uid => ({...account(uid), email: 'attacker@example.test'});
   const {requestId} = await call('parent', 'requestReplacement', B);
-  await call('parent', 'sendRecovery', B, {requestId});
-  assert.equal(mail.to, 'parent@example.test');
-  const otp = mail.text.match(/\d{8}/)[0];
-  await assert.rejects(call('parent', 'verifyRecovery', C, {requestId, otp}));
-  await call('parent', 'verifyRecovery', B, {requestId, otp});
+  await assert.rejects(call('parent', 'sendRecovery', B, {requestId}), {code: 'failed-precondition'});
+  getAuth().getUser = async uid => account(uid);
+  const sent = await call('parent', 'sendRecovery', B, {requestId});
+  assert.equal(sent.recoveryEmail, 'parent@example.test');
+  await assert.rejects(call('parent', 'verifyRecovery', B, {requestId}), {code: 'failed-precondition'});
+  await assert.rejects(call('parent', 'verifyRecovery', C, {requestId}, undefined, 'emailLink'));
+  await call('parent', 'verifyRecovery', B, {requestId}, undefined, 'emailLink');
   assert.equal((await get('caregiver_security/parent')).sessionId, session);
   await call('parent', 'confirmReplacement', B, {requestId});
   assert.equal((await call('parent', 'status', B)).state, 'trusted');
   assert.equal(trusted({token: {trustedSession: session}}, await get('caregiver_security/parent')), false);
   await assert.rejects(call('parent', 'confirmReplacement', B, {requestId}));
-  getAuth().getUser = async uid => account(uid);
 });
-test('OTP wrong attempts, expired codes and stale password sessions are denied', async () => {
+test('stale password sessions and expired recovery requests are denied', async () => {
   await link();
   const {requestId} = await call('parent', 'requestReplacement', B);
   await call('parent', 'sendRecovery', B, {requestId});
-  const otp = mail.text.match(/\d{8}/)[0];
-  for (let i = 0; i < 5; i++) await assert.rejects(call('parent', 'verifyRecovery', B, {requestId, otp: '00000000'}));
-  await assert.rejects(call('parent', 'verifyRecovery', B, {requestId, otp}));
-  await db.doc(`device_replacements/${requestId}`).update({attempts: 0, otpExpiresAt: 0});
-  await assert.rejects(call('parent', 'verifyRecovery', B, {requestId, otp}));
-  await assert.rejects(caregiverSecurity.run({auth: {uid: 'parent', token: {auth_time: 1}},
+  await db.doc(`device_replacements/${requestId}`).update({expiresAt: 0});
+  await assert.rejects(call('parent', 'verifyRecovery', B, {requestId}, undefined, 'emailLink'));
+  await assert.rejects(caregiverSecurity.run({auth: {uid: 'parent', token: {auth_time: 1, email: 'parent@example.test',
+    firebase: {sign_in_provider: 'password'}}},
     data: {action: 'sendRecovery', deviceSecret: B, requestId}}), {code: 'unauthenticated'});
+});
+test('unambiguous leftover parent links can be confirmed onto this phone', async () => {
+  await db.doc('parent_child_links/parent_learner').set({
+    parentFirebaseUid: 'parent', learnerFirebaseUid: 'learner', learnerName: 'Private learner',
+    learnerProfileCode: 'TT-12345678'});
+  const status = await call('parent', 'status', B);
+  assert.equal(status.state, 'legacyConfirmation');
+  assert.equal(status.learners[0].ambiguous, false);
+  await call('parent', 'confirmLegacy', B);
+  assert.equal((await call('parent', 'status', B)).state, 'trusted');
+  assert.equal((await get('learner_caregivers/learner')).parentUid, 'parent');
+  assert.equal((await get('caregiver_security/parent')).recoveryEmail, 'parent@example.test');
+});
+test('conflicting leftover caregiver links require this learner QR and do not auto-pick', async () => {
+  await parent('other');
+  await db.doc('parent_child_links/parent_learner').set({
+    parentFirebaseUid: 'parent', learnerFirebaseUid: 'learner', learnerName: 'Private learner',
+    learnerProfileCode: 'TT-12345678'});
+  await db.doc('parent_child_links/other_learner').set({
+    parentFirebaseUid: 'other', learnerFirebaseUid: 'learner', learnerName: 'Private learner',
+    learnerProfileCode: 'TT-12345678'});
+  const status = await call('parent', 'status', B);
+  assert.equal(status.learners[0].ambiguous, true);
+  await assert.rejects(call('parent', 'confirmLegacy', B));
+  await call('parent', 'confirmLegacy', B, {profileCodes: ['TT-12345678']});
+  assert.equal((await get('learner_caregivers/learner')).parentUid, 'parent');
+  assert.equal(await get('parent_child_links/other_learner'), undefined);
+  await assert.rejects(call('other', 'confirmLegacy', C, {profileCodes: ['TT-12345678']}));
 });
 test('pending approvals from an older generation cannot replace the current phone', async () => {
   const session = await link();

@@ -30,6 +30,7 @@ Widget _harness({
   Future<void> Function()? onRevoked,
   Future<void> Function()? onMainBack,
   Future<void> Function(String, bool)? reauthenticate,
+  void Function(void Function(String link) onLink)? recoveryLinkListener,
   Duration pollInterval = const Duration(minutes: 20),
 }) => MaterialApp(
   navigatorKey: navigatorKey,
@@ -41,6 +42,7 @@ Widget _harness({
     onLogout: () async {},
     onMainBack: onMainBack,
     reauthenticate: reauthenticate,
+    recoveryLinkListener: recoveryLinkListener,
     recoveryProviders: const {'password'},
     pollInterval: pollInterval,
     child: child!,
@@ -226,6 +228,7 @@ void main() {
       final actions = <String>[];
       await tester.pumpWidget(
         _harness(
+          recoveryLinkListener: (onLink) => onLink('firebase-recovery-link'),
           call: (action, values) async {
             actions.add(action);
             if (action == 'requestReplacement') {
@@ -258,24 +261,64 @@ void main() {
         find.widgetWithText(TextField, 'Account password'),
         'fresh-password',
       );
-      await _tap(tester, 'Verify password and send email code');
+      await _tap(tester, 'Verify password and send recovery email');
       expect(
         actions.indexOf('reauthenticate'),
         lessThan(actions.indexOf('sendRecovery')),
       );
       expect(find.text('same-request'), findsOneWidget);
       expect(find.text('Cached learner history'), findsNothing);
-      await tester.enterText(
-        find.widgetWithText(TextField, '8-digit email code'),
-        '12345678',
-      );
-      await _tap(tester, 'Verify recovery code');
+      await _tap(tester, 'I opened the recovery email');
       expect(
         find.text('Confirm replacement and revoke old phone'),
         findsOneWidget,
       );
       expect(find.text('Cached learner history'), findsNothing);
       await _tap(tester, 'Confirm replacement and revoke old phone');
+      expect(find.text('Cached learner history'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'leftover unique caregiver links can be confirmed onto this phone',
+    (tester) async {
+      var confirmed = false;
+      await tester.pumpWidget(
+        _harness(
+          call: (action, values) async {
+            if (action == 'confirmLegacy') {
+              confirmed = true;
+              return {'state': 'trusted'};
+            }
+            return confirmed
+                ? {'state': 'trusted', 'links': []}
+                : {
+                    'state': 'legacyConfirmation',
+                    'learners': [
+                      {
+                        'learnerFirebaseUid': 'learner',
+                        'learnerName': 'Private learner',
+                        'ambiguous': false,
+                      },
+                    ],
+                  };
+          },
+          reauthenticate: (password, google) async {
+            expect(password, 'fresh-password');
+            expect(google, false);
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Confirm leftover caregiver links from the previous app.'),
+        findsOneWidget,
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Account password'),
+        'fresh-password',
+      );
+      await _tap(tester, 'Verify password and confirm leftover links');
       expect(find.text('Cached learner history'), findsOneWidget);
     },
   );

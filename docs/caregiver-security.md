@@ -8,9 +8,11 @@ not grant learner access and does not revoke the previous phone.
 
 The parent must verify an account email before the first QR link. TapTalk pins
 that verified address for recovery; changing the Firebase Auth account email
-does not silently change the recovery address. These flows require an email
-account. Mobile-number-only accounts need a verified email before onboarding or
-legacy migration; SMS OTP recovery is not implemented.
+does not silently change the recovery address. Lost-phone recovery through
+Firebase email links requires the signed-in Auth email to still match that pin;
+otherwise use the old trusted phone to approve the new device. These flows
+require an email account. Mobile-number-only accounts need a verified email
+before onboarding or legacy migration; SMS OTP recovery is not implemented.
 
 ## Phone replacement
 
@@ -21,12 +23,12 @@ on the old phone. That server transaction trusts the new phone and invalidates
 the old phone's protected session. Requests use in-app polling, not FCM or a
 background push notification; open TapTalk on the old phone to approve.
 
-If the old phone is unavailable, the parent signs in again, requests an email
-OTP at the pinned recovery address and enters the code on the requesting phone.
-The eight-digit code expires in five minutes and allows five attempts. Recovery
-requires a recent login. Successful OTP verification does not revoke the old
-phone until the parent explicitly confirms replacement. Recovery does not
-require an administrator.
+If the old phone is unavailable, the parent signs in again and requests a
+Firebase Auth sign-in link at the pinned recovery address, which must still
+match the signed-in account email. They open that link on the new phone.
+Recovery requires a recent login. Opening the email link does not revoke the
+old phone until the parent explicitly confirms replacement. Recovery does not
+require an administrator or a custom SMTP account.
 
 Normal logout ends the protected session while keeping the phone credential.
 Reinstallation or removal of app data requires device verification again.
@@ -48,13 +50,11 @@ its pinned dependencies with `pnpm install --frozen-lockfile` before testing or
 deploying. Cloud Functions deployment requires a Firebase project with the
 necessary billing enabled.
 
-Configure the callable's parameters `SMTP_HOST`, `SMTP_USER` and `SMTP_FROM`
-with an SMTP provider that supports authenticated TLS on port 465. Store the
-SMTP password in Secret Manager using
-`firebase functions:secrets:set SMTP_PASSWORD --project PROJECT_ID`. Supply the
-string parameters when Firebase prompts during deployment, or through the
-project-specific local functions environment configuration. Do not commit SMTP
-credentials. Confirm that the configured sender is authorized by the provider.
+Lost-phone recovery uses Firebase Authentication email sign-in links, not a
+custom SMTP server. Enable Email/Password, email verification, and Email link
+sign-in in the Firebase Auth console. Add
+`taptalk-2d809.firebaseapp.com` as an authorized domain if it is not already
+present.
 
 The `caregiverSecurity` callable uses `us-central1` and enforces Firebase App
 Check. Register production App Check providers for every target app in the
@@ -68,8 +68,10 @@ before that activation fix, start it on the test phone, and find the generated
 debug secret in Android Logcat (`DebugAppCheckProvider`). Register that phone's
 token under Firebase Console → App Check → Android app → Manage debug tokens.
 Restart the app after registration. Each test installation needs its own token;
-keep the token private. Windows debug builds require `APP_CHECK_DEBUG_TOKEN` in
-the process environment. See the [Firebase debug-provider guide](https://firebase.google.com/docs/app-check/flutter/debug-provider).
+keep the token private. Sideloaded release test APKs can pass
+`--dart-define=TAPTALK_APP_CHECK_DEBUG_TOKEN=...` so Play Integrity is not
+required. Windows debug builds require `APP_CHECK_DEBUG_TOKEN` in the process
+environment. See the [Firebase debug-provider guide](https://firebase.google.com/docs/app-check/flutter/debug-provider).
 
 The runtime also needs permission to sign the custom tokens used for trusted
 sessions. Enable the IAM Service Account Credentials API, then grant Service
@@ -91,9 +93,7 @@ and the [IAM signing API](https://docs.cloud.google.com/iam/docs/reference/crede
 The same runtime account also needs Firestore document read/write permissions
 and Firebase Auth user-read permissions. If those are not already granted by
 the project's existing policy, grant `roles/datastore.user` and
-`roles/firebaseauth.viewer` to that runtime account in this project. Secret
-access is required for `SMTP_PASSWORD`; the Firebase CLI normally requests or
-configures that access for the function's bound secret. See [Firestore IAM](https://firebase.google.com/docs/firestore/security/iam)
+`roles/firebaseauth.viewer` to that runtime account in this project. See [Firestore IAM](https://firebase.google.com/docs/firestore/security/iam)
 and [Firebase Auth permissions](https://docs.cloud.google.com/iam/docs/roles-permissions/firebaseauth).
 
 Review and test the migration below before releasing the new app. Deploy the
@@ -143,9 +143,11 @@ node migrate-security.js --project=PROJECT_ID --apply
 For each unambiguous legacy caregiver relationship, this seeds the learner owner
 and pins the account's verified recovery email. A newly seeded security record
 has `deviceHash: null`, `sessionId: null` and `generation: 0`: no phone is
-automatically trusted. The parent signs in, chooses unavailable-old-phone
-recovery, verifies the pinned email OTP and explicitly confirms replacement.
-This is account recovery, not product administrator approval.
+automatically trusted. The parent signs in and confirms leftover links, or
+uses unavailable-old-phone recovery with the Firebase email link and then
+explicitly confirms replacement. This is account recovery, not product
+administrator approval. Conflicting multi-caregiver records stay blocked until
+the confirming parent scans that learner QR.
 
 The migration also builds each teacher's learner-access record from enrollments
 where that teacher owns the referenced class. It refuses orphaned enrollments,
@@ -166,10 +168,11 @@ node --test test/migration.test.js
 
 The security tests in `test/security.test.js` additionally use the Firestore
 emulator on port 8080. Validate first QR link, repeated QR, another caregiver's
-QR attempt, password-only new-phone login, old-phone approval, email recovery
-with final confirmation, expiry and retry limits, old-session rejection,
-logout/reinstall, caregiver transfer, and enrollment access revocation. Verify
-real SMTP delivery and the two-phone flow in staging before releasing.
+QR attempt, password-only new-phone login, old-phone approval, Firebase email
+link recovery with final confirmation, expiry, leftover-link confirmation,
+old-session rejection, logout/reinstall, caregiver transfer, and enrollment
+access revocation. Verify a real recovery email and the two-phone flow in
+staging before releasing.
 
 ## Private media and platform configuration
 
@@ -187,6 +190,11 @@ URLs outside the updated app. Revoke those old tokens during the coordinated
 media rollout before claiming protection for historical URLs. Historical copies
 already downloaded to old devices cannot be retroactively withdrawn.
 
+iOS recovery links are routed back into TapTalk through the Associated Domains
+entitlement. Keep `applinks:taptalk-2d809.firebaseapp.com` enabled for the iOS
+app identifier in Apple Developer and verify the domain association on a signed
+device build; unsigned simulator builds cannot validate universal-link routing.
+
 The Android app disables backup. Apple credentials use device-only Keychain
 accessibility with synchronization disabled, and the runner entitlements include
 Keychain access. Apple code signing/provisioning must support those entitlements.
@@ -200,10 +208,11 @@ Start both local demo emulators from the repository root for backend tests:
 firebase emulators:start --only firestore,storage --project demo-taptalk-security
 ```
 
-In a second terminal, from `functions/`, run `pnpm test`. SMTP is mocked in these
-tests; no email or SMS is sent. Flutter security gate/media/notification tests
-also mock native dependencies. A source commit does not verify real email
-receipt, Google reauthentication on a phone, or production App Check setup.
+In a second terminal, from `functions/`, run `pnpm test`. Recovery email sending
+is not invoked in these tests; no email or SMS is sent. Flutter security
+gate/media/notification tests also mock native dependencies. A source commit
+does not verify real email receipt, Google reauthentication on a phone, or
+production App Check setup.
 
 Caregiver transfer pauses teacher SMS and clears the cloud emergency recipients.
 This pause survives background sync from an old learner contact cache. Save the
