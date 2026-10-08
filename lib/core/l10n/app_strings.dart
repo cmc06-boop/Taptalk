@@ -1476,18 +1476,18 @@ abstract final class AppStrings {
 
   static String confirmLeftoverLinks(AppLanguage lang) =>
       lang == AppLanguage.filipino
-      ? 'Kumpirmahin ang dating caregiver links'
-      : 'Confirm leftover caregiver links';
+      ? 'Kumpirmahin ang dating parent links'
+      : 'Confirm previous parent links';
 
   static String learnerHasCaregiverTitle(AppLanguage lang) =>
       lang == AppLanguage.filipino
-      ? 'May caregiver na'
-      : 'Already has a caregiver';
+      ? 'May naka-link nang parent'
+      : 'Already linked to a parent';
 
   static String learnerHasCaregiverBody(AppLanguage lang) =>
       lang == AppLanguage.filipino
-      ? 'Naka-link na ang learner na ito sa caregiver.'
-      : 'This learner is already linked to a caregiver.';
+      ? 'Naka-link na ang learner na ito sa parent.'
+      : 'This learner is already linked to a parent.';
 
   static String requestTransfer(AppLanguage lang) =>
       lang == AppLanguage.filipino
@@ -1499,18 +1499,18 @@ abstract final class AppStrings {
 
   static String transferCodeHint(AppLanguage lang) =>
       lang == AppLanguage.filipino
-      ? 'Ipakita ito sa bagong caregiver. Gagana ito sa loob ng 15 minuto.'
-      : 'Show this to the new caregiver. It works for 15 minutes.';
+      ? 'Ipakita ito sa bagong parent. Gagana ito sa loob ng 15 minuto.'
+      : 'Show this to the new parent. It works for 15 minutes.';
 
   static String shareTransferCodeMessage(AppLanguage lang, String code) =>
       lang == AppLanguage.filipino
-      ? 'TapTalk caregiver transfer code: $code'
-      : 'TapTalk caregiver transfer code: $code';
+      ? 'TapTalk parent transfer code: $code'
+      : 'TapTalk parent transfer code: $code';
 
   static String transferCaregiver(AppLanguage lang) =>
       lang == AppLanguage.filipino
-      ? 'Ilipat ang caregiver'
-      : 'Transfer caregiver';
+      ? 'Ilipat sa ibang parent'
+      : 'Transfer to another parent';
 
   static String transferLearnerTitle(AppLanguage lang, String name) =>
       lang == AppLanguage.filipino ? 'Ilipat si $name?' : 'Transfer $name?';
@@ -1542,8 +1542,8 @@ abstract final class AppStrings {
 
   static String scanChildOrTransferHint(AppLanguage lang) =>
       lang == AppLanguage.filipino
-      ? 'I-scan ang learner QR o caregiver transfer QR.'
-      : 'Scan a learner QR or caregiver transfer QR.';
+      ? 'I-scan ang learner QR o parent transfer QR.'
+      : 'Scan a learner QR or parent transfer QR.';
 
   static String enterChildOrTransferCode(AppLanguage lang) =>
       lang == AppLanguage.filipino
@@ -1552,21 +1552,21 @@ abstract final class AppStrings {
 
   static String scanTransferHint(AppLanguage lang) =>
       lang == AppLanguage.filipino
-      ? 'I-scan ang code na ipinakita ng kasalukuyang caregiver.'
-      : 'Scan the code shown by the current caregiver.';
+      ? 'I-scan ang code na ipinakita ng kasalukuyang parent.'
+      : 'Scan the code shown by the current parent.';
 
   static String enterTransferCodeHint(AppLanguage lang) =>
       lang == AppLanguage.filipino
-      ? 'Ilagay ang code na ibinigay ng kasalukuyang caregiver.'
-      : 'Enter the code the current caregiver gave you.';
+      ? 'Ilagay ang code na ibinigay ng kasalukuyang parent.'
+      : 'Enter the code the current parent gave you.';
 
   static String learnerTransferredTitle(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Nailipat na' : 'Transferred';
 
   static String learnerTransferredBody(AppLanguage lang, String name) =>
       lang == AppLanguage.filipino
-      ? 'Nasa bagong caregiver na si $name.'
-      : '$name is now with the new caregiver.';
+      ? 'Nasa bagong parent na si $name.'
+      : '$name is now linked to the new parent.';
 
   static String transferReceivedBody(AppLanguage lang) =>
       lang == AppLanguage.filipino
@@ -1575,8 +1575,8 @@ abstract final class AppStrings {
 
   static String anotherCaregiverOwnsLearner(AppLanguage lang) =>
       lang == AppLanguage.filipino
-      ? 'Naka-link na ang learner na ito sa caregiver.'
-      : 'This learner is already linked to a caregiver.';
+      ? 'Naka-link na ang learner na ito sa parent.'
+      : 'This learner is already linked to a parent.';
 
   static String noPhraseUsage(AppLanguage lang) {
     final min = MonitoringConstants.frequentlyUsedMinCount;

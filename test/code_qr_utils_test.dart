@@ -13,7 +13,7 @@ void main() {
     expect(CodeQrUtils.extractTransferCode('TRABCDEFG2'), 'TR-ABCDEFG2');
     expect(
       CodeQrUtils.extractTransferCode(
-        'TapTalk caregiver transfer code: TR-ABCDEFG2',
+        'TapTalk parent transfer code: TR-ABCDEFG2',
       ),
       'TR-ABCDEFG2',
     );

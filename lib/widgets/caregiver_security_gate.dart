@@ -199,7 +199,8 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
           !_autoReplacementRequested) {
         _autoReplacementRequested = true;
         final replacement = await _call('requestReplacement');
-        if (!mounted || !_foreground || generation != _lifecycleGeneration) return;
+        if (!mounted || !_foreground || generation != _lifecycleGeneration)
+          return;
         setState(() {
           _requestId = replacement['requestId'] as String;
           _message = _actionMessage('requestReplacement');
@@ -244,16 +245,15 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
     'requestReplacement' =>
       'Replacement request created. It expires in 15 minutes. Your old phone is still trusted.',
     'requestTransfer' =>
-      'Transfer request created. Give this code to the current caregiver.',
+      'Transfer request created. Give this code to the current parent.',
     'sendRecovery' =>
       'A Firebase sign-in link was sent to your registered recovery email. Open it on this phone.',
     'verifyRecovery' =>
       'Recovery email verified. Confirm below to replace your trusted phone.',
-    'confirmLegacy' => 'Leftover caregiver links confirmed on this phone.',
+    'confirmLegacy' => 'Previous parent links confirmed on this phone.',
     'confirmReplacement' => 'Trusted phone replaced.',
     'approveReplacement' => 'New phone approved. This phone has been revoked.',
-    'transfer' =>
-      'Caregiver transfer complete. Your previous access has been revoked.',
+    'transfer' => 'Parent transfer complete.',
     _ => 'Request complete.',
   };
 
@@ -301,9 +301,10 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
               'Too many attempts. Please try again later.',
             'unauthenticated' =>
               'Verify your account again below, then request a new recovery email.',
-            'failed-precondition' => action == 'verifyRecovery'
-                ? 'Open the recovery link from your email on this phone, then try again.'
-                : 'Verify your account email before continuing. It must match the registered recovery email.',
+            'failed-precondition' =>
+              action == 'verifyRecovery'
+                  ? 'Open the recovery link from your email on this phone, then try again.'
+                  : 'Verify your account email before continuing. It must match the registered recovery email.',
             _ =>
               action == 'verifyRecovery'
                   ? 'Recovery is not ready yet. Open the email link on this phone, then try again.'
@@ -605,7 +606,7 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
                     : _state == 'setup'
                     ? 'Link your learner to get started.'
                     : _state == 'legacyConfirmation'
-                    ? 'Confirm leftover caregiver links from the previous app.'
+                    ? 'Confirm previous parent links from the old app.'
                     : _state == 'checking'
                     ? 'Checking protected access...'
                     : 'Protected learner information is locked.',
@@ -642,14 +643,14 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
                 ),
                 TextButton(
                   onPressed: _busy ? null : () => _action('requestTransfer'),
-                  child: const Text('Receive a caregiver transfer'),
+                  child: const Text('Receive a parent transfer'),
                 ),
                 if (_requestId != null)
                   SelectableText(
-                    'Give this transfer request to the current caregiver:\n$_requestId',
+                    'Give this transfer request to the current parent:\n$_requestId',
                   ),
                 const Text(
-                  'Scan the learner QR to establish your caregiver link and authorize this phone.',
+                  'Scan the learner QR to establish your parent link and authorize this phone.',
                 ),
                 FilledButton(
                   onPressed: _busy
@@ -668,7 +669,7 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
                 ),
               ] else if (_state == 'legacyConfirmation') ...[
                 const Text(
-                  'These leftover links stay blocked until you confirm them on this phone. Conflicting learners also need their QR so TapTalk does not pick a caregiver for you.',
+                  'These previous links stay blocked until you confirm them on this phone. Conflicting learners also need their QR so TapTalk does not pick a parent for you.',
                 ),
                 for (final learner in _legacyLearners)
                   Padding(
@@ -689,7 +690,9 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
                     ),
                   ),
                   TextButton(
-                    onPressed: _busy ? null : () => unawaited(_saveLegacyCode()),
+                    onPressed: _busy
+                        ? null
+                        : () => unawaited(_saveLegacyCode()),
                     child: const Text('Save learner code'),
                   ),
                   if (_app != null)
@@ -775,7 +778,7 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
                 if (children.isNotEmpty) ...[
                   const SizedBox(height: 20),
                   const Text(
-                    'Caregiver transfer: select a learner and enter the new caregiver’s transfer request. This removes your learner access and ends your trusted session.',
+                    'Parent transfer: select a learner and enter the new parent’s transfer request. This removes your access to that learner.',
                   ),
                   DropdownButtonFormField<String>(
                     initialValue: _transferLearnerId,
@@ -884,7 +887,9 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
                       ),
                     if (_recoveryEmailSent)
                       FilledButton(
-                        onPressed: _busy ? null : () => _completeEmailRecovery(),
+                        onPressed: _busy
+                            ? null
+                            : () => _completeEmailRecovery(),
                         child: const Text('I opened the recovery email'),
                       ),
                     if (_recoveryVerified) ...[

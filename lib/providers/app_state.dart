@@ -6119,10 +6119,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
               ? 'Hindi ma-link ang learner na ito. Suriin ang QR at subukan ulit.'
               : 'Could not link this learner. Check the QR and try again.',
         _ =>
-          'Unable to link. Connect to the internet, verify caregiver authorization, and verify your account email.',
+          'Unable to link. Connect to the internet, verify parent authorization, and verify your account email.',
       };
     } catch (_) {
-      return 'Unable to link. Connect to the internet and verify caregiver authorization, and verify your account email.';
+      return 'Unable to link. Connect to the internet and verify parent authorization, and verify your account email.';
     }
   }
 
