@@ -6,7 +6,7 @@ const {doc, getDoc, getDocs, query, collection, where, setDoc, updateDoc, delete
 const {hash, newId, trusted} = require('../security-policy');
 process.env.GCLOUD_PROJECT = 'demo-taptalk-security';
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080';
-const {caregiverSecurity} = require('../index');
+const {caregiverSecurity, caregiverRecovery} = require('../index');
 const {getFirestore, FieldValue} = require('firebase-admin/firestore');
 const {getAuth} = require('firebase-admin/auth');
 const db = getFirestore();
@@ -32,6 +32,17 @@ const call = (uid, action, deviceSecret = A, data = {}, session, provider = 'pas
     firebase: {sign_in_provider: provider}, ...(session ? {trustedSession: session} : {})}},
   data: {action, deviceSecret, ...data},
 });
+const approveInBrowser = async body => {
+  let status;
+  let payload;
+  const response = {
+    set() {},
+    status(value) { status = value; return this; },
+    json(value) { payload = value; },
+  };
+  await caregiverRecovery({method: 'POST', body}, response);
+  return {status, payload};
+};
 const get = async path => (await db.doc(path).get()).data();
 const parent = async (uid = 'parent') => db.doc(`user_profiles/${uid}`).set({firebaseUid: uid, role: 'parent'});
 async function link() {
@@ -171,6 +182,35 @@ test('recovery email link is pinned to the verified Auth email and requires expl
   await assertFails(getDoc(doc(env.authenticatedContext('parent', {trustedSession: session}).firestore(), 'learner_activity/tap')));
   assert.equal(trusted({token: {trustedSession: session}}, await get('caregiver_security/parent')), false);
   await assert.rejects(call('parent', 'confirmReplacement', B, {requestId}));
+});
+test('email opened in another browser approves only the requesting new phone', async () => {
+  const oldSession = await link();
+  const {requestId} = await call('parent', 'requestReplacement', B);
+  await call('parent', 'sendRecovery', B, {requestId});
+  const approval = await approveInBrowser({
+    requestId,
+    oobCode: emailCode('parent'),
+  });
+  assert.equal(approval.status, 200);
+  assert.deepEqual(approval.payload, {ok: true});
+  assert.deepEqual(
+    await call('parent', 'replacementStatus', B, {requestId}),
+    {status: 'approved'},
+  );
+  await assert.rejects(
+    call('parent', 'replacementStatus', C, {requestId}),
+    {code: 'permission-denied'},
+  );
+  const confirmed = await call('parent', 'confirmReplacement', B, {requestId});
+  const nextSession = JSON.parse(confirmed.token).trustedSession;
+  assert.equal((await call('parent', 'status', B, {}, nextSession)).state, 'trusted');
+  assert.equal(
+    trusted(
+      {token: {trustedSession: oldSession}},
+      await get('caregiver_security/parent'),
+    ),
+    false,
+  );
 });
 test('stale password sessions and expired recovery requests are denied', async () => {
   await link();

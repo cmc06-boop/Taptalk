@@ -9,23 +9,73 @@
            display: flex; min-height: 100vh; align-items: center; justify-content: center; text-align: center; }
     main { padding: 24px; max-width: 360px; }
     h1 { font-size: 24px; margin: 0 0 8px; }
-    p { font-size: 14px; color: #4f6c5d; margin: 0 0 24px; }
-    a { display: block; background: #000; color: #fff; text-decoration: none; font-weight: 700;
-        padding: 15px; border-radius: 14px; }
+    p { font-size: 14px; color: #4f6c5d; margin: 0 0 18px; line-height: 1.45; }
+    button { width: 100%; border: 0; background: #000; color: #fff; font: inherit; font-weight: 700;
+             padding: 15px; border-radius: 14px; }
+    button[hidden] { display: none; }
   </style>
 </head>
 <body>
   <main>
-    <h1>Open TapTalk</h1>
-    <p>Tap the button to finish verifying this phone.</p>
-    <a id="open" href="#">Open TapTalk</a>
+    <h1 id="title">Confirming phone</h1>
+    <p id="message">Please wait. You can keep TapTalk open on your new phone.</p>
+    <button id="retry" type="button" hidden>Try again</button>
   </main>
   <script>
-    // Hands the verification link (with its one-time code) to the TapTalk app.
-    var target = 'intent://' + location.host + location.pathname + location.search +
-      '#Intent;scheme=https;package=com.example.flutter_application_1;end';
-    document.getElementById('open').href = target;
-    if (/oobCode=/.test(location.search)) location.replace(target);
+    (function () {
+      var title = document.getElementById('title');
+      var message = document.getElementById('message');
+      var retry = document.getElementById('retry');
+
+      function findParam(name, raw, depth) {
+        if (!raw || depth > 4) return null;
+        try {
+          var url = new URL(raw, location.origin);
+          var direct = url.searchParams.get(name);
+          if (direct) return direct;
+          var nested = ['link', 'continueUrl', 'url'];
+          for (var i = 0; i < nested.length; i++) {
+            var value = url.searchParams.get(nested[i]);
+            var found = findParam(name, value, depth + 1);
+            if (found) return found;
+          }
+        } catch (_) {}
+        return null;
+      }
+
+      async function confirm() {
+        retry.hidden = true;
+        title.textContent = 'Confirming phone';
+        message.textContent = 'Please wait. You can keep TapTalk open on your new phone.';
+        var requestId = findParam('requestId', location.href, 0);
+        var oobCode = findParam('oobCode', location.href, 0);
+        if (!requestId || !oobCode) {
+          failed('This verification link is incomplete. Send a new link from your new phone.');
+          return;
+        }
+        try {
+          var result = await fetch('/caregiver-recovery/approve', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({requestId: requestId, oobCode: oobCode}),
+          });
+          if (!result.ok) throw new Error('rejected');
+          title.textContent = 'Phone confirmed';
+          message.textContent = 'Return to your new phone. TapTalk will finish automatically.';
+        } catch (_) {
+          failed('This link expired, was already used, or could not be confirmed. Send a new link from your new phone.');
+        }
+      }
+
+      function failed(text) {
+        title.textContent = 'Could not confirm';
+        message.textContent = text;
+        retry.hidden = false;
+      }
+
+      retry.addEventListener('click', confirm);
+      confirm();
+    })();
   </script>
 </body>
 </html>

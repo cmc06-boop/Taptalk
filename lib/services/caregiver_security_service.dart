@@ -102,22 +102,25 @@ class CaregiverSecurityService {
     await user.getIdToken(true);
   }
 
-  ActionCodeSettings get recoveryActionCodeSettings => ActionCodeSettings(
-    url: recoveryContinueUrl,
-    handleCodeInApp: true,
-    androidPackageName: 'com.example.flutter_application_1',
-    androidInstallApp: false,
-    iOSBundleId: 'com.example.flutterApplication1',
-  );
+  ActionCodeSettings recoveryActionCodeSettings(String requestId) =>
+      ActionCodeSettings(
+        url: Uri.parse(
+          recoveryContinueUrl,
+        ).replace(queryParameters: {'requestId': requestId}).toString(),
+        handleCodeInApp: true,
+        androidPackageName: 'com.example.flutter_application_1',
+        androidInstallApp: false,
+        iOSBundleId: 'com.example.flutterApplication1',
+      );
 
-  Future<void> sendRecoveryEmailLink(String email) async {
+  Future<void> sendRecoveryEmailLink(String email, String requestId) async {
     final trimmed = email.trim();
     if (trimmed.isEmpty) throw StateError('Recovery email is unavailable.');
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_pendingRecoveryEmailKey, trimmed);
     await FirebaseAuth.instance.sendSignInLinkToEmail(
       email: trimmed,
-      actionCodeSettings: recoveryActionCodeSettings,
+      actionCodeSettings: recoveryActionCodeSettings(requestId),
     );
   }
 

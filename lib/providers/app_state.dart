@@ -5724,7 +5724,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           );
           final email = sent['recoveryEmail'] as String?;
           if (email == null || email.isEmpty) break;
-          await CaregiverSecurityService.instance.sendRecoveryEmailLink(email);
+          await CaregiverSecurityService.instance.sendRecoveryEmailLink(
+            email,
+            requestId,
+          );
           _deviceRegistrationEmail = email;
           notifyListeners();
           return (error: null, needsReauth: false);
@@ -5846,12 +5849,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       await CaregiverSecurityService.instance.call('confirmReplacement', {
         'requestId': requestId,
       });
-      await prefs.remove(key!);
-      _deviceRegistrationEmail = null;
-      _deviceRegisteredPendingContinue = true;
-      final stale = _caregiverRefresh;
-      if (stale != null) await stale.catchError((Object _) {});
-      await refreshCaregiverAccess();
+      await _activateApprovedReplacement(
+        prefs: prefs,
+        key: key!,
+        showContinue: true,
+      );
       return null;
     } on FirebaseAuthException catch (error) {
       debugPrint('Device registration link failed: ${error.code}');
@@ -5891,6 +5893,72 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         'Hindi ma-verify ang link. Suriin ang internet at subukan ulit.',
       );
     }
+  }
+
+  /// Checks whether the email was approved in any browser. Only this phone can
+  /// finalize the request because the server compares its installation secret
+  /// with the device hash stored when the request was created.
+  Future<({bool completed, String? error})>
+  checkDeviceRegistrationApproval() async {
+    String pick(String en, String fil) =>
+        _language == AppLanguage.filipino ? fil : en;
+    if (_user?.isParent != true) return (completed: false, error: null);
+    final key = _deviceRequestKey();
+    if (key == null) return (completed: false, error: null);
+    final prefs = await SharedPreferences.getInstance();
+    final requestId = prefs.getString(key);
+    if (requestId == null || requestId.isEmpty) {
+      return (completed: false, error: null);
+    }
+    try {
+      final result = await CaregiverSecurityService.instance.call(
+        'replacementStatus',
+        {'requestId': requestId},
+      );
+      final status = result['status'] as String?;
+      if (status == 'pending') return (completed: false, error: null);
+      if (status == 'expired') {
+        await prefs.remove(key);
+        await prefs.remove('${key}_at');
+        return (
+          completed: false,
+          error: pick(
+            'This verification link expired. Send a new link.',
+            'Nag-expire ang verification link. Magpadala ng bagong link.',
+          ),
+        );
+      }
+      if (status != 'approved') return (completed: false, error: null);
+      await CaregiverSecurityService.instance.call('confirmReplacement', {
+        'requestId': requestId,
+      });
+      await _activateApprovedReplacement(
+        prefs: prefs,
+        key: key,
+        showContinue: false,
+      );
+      return (completed: true, error: null);
+    } on FirebaseFunctionsException catch (error) {
+      debugPrint('Device registration approval check failed: ${error.code}');
+      return (completed: false, error: null);
+    } catch (e, st) {
+      debugPrint('Device registration approval check failed: $e\n$st');
+      return (completed: false, error: null);
+    }
+  }
+
+  Future<void> _activateApprovedReplacement({
+    required SharedPreferences prefs,
+    required String key,
+    required bool showContinue,
+  }) async {
+    await prefs.remove(key);
+    await prefs.remove('${key}_at');
+    _deviceRegistrationEmail = null;
+    _deviceRegisteredPendingContinue = showContinue;
+    final stale = _caregiverRefresh;
+    if (stale != null) await stale.catchError((Object _) {});
+    await refreshCaregiverAccess();
   }
 
   void finishDeviceRegistration() {

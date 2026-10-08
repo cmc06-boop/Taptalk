@@ -17,9 +17,10 @@ Firestore and Storage rules only allow a parent to read a learner, their
 activity, notifications, media, or link record when that device hash equals the
 parent's current trusted phone. A verified phone replacement (email link or
 old-phone approval) moves every linked learner to the new phone in the same
-transaction, so no rescan is needed. The email link opens TapTalk directly via
-the App Link on `/__/auth/links` (`hosting/.well-known/assetlinks.json`); if a
-browser opens it instead, `hosting/caregiver-recovery` hands it to the app.
+transaction, so no rescan is needed. The email link opens
+`hosting/caregiver-recovery` in any browser. The browser consumes the one-time
+email proof and approves only the pending request; the original new phone polls
+that request and finalizes it with its installation secret.
 
 A parent account has exactly one trusted phone. The first phone where a
 verified parent signs in becomes that phone automatically (`status` registers
@@ -36,10 +37,13 @@ until the step finishes. A password alone never moves the trusted phone.
 2. `sendRecovery` requires a sign-in from the last 5 minutes (otherwise the
    screen asks for the password or Google again) and an Auth email that matches
    the pinned recovery address. TapTalk then sends an email sign-in link there.
-3. The parent opens the link on this phone (or pastes it). The link
-   reauthenticates with the `emailLink` provider, `verifyRecovery` approves the
-   request, and `confirmReplacement` makes this phone the trusted phone.
-4. The previous phone's session and device credential stop working at once. If
+3. The parent opens the link on any phone or computer. The hosted browser page
+   redeems the one-time email code and marks the request approved. It does not
+   open or register TapTalk on that device.
+4. The requesting new phone polls `replacementStatus`. Once approved, it calls
+   `confirmReplacement` with its device secret and becomes the trusted phone
+   automatically.
+5. The previous phone's session and device credential stop working at once. If
    it opens TapTalk again, it is shown the same verification step.
 
 This is also the lost-phone recovery path: the old phone is not needed. A

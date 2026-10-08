@@ -16,6 +16,15 @@
         "source": "/.well-known/assetlinks.json",
         "headers": [{"key": "Content-Type", "value": "application/json"}]
       }
+    ],
+    "rewrites": [
+      {
+        "source": "/caregiver-recovery/approve",
+        "function": {
+          "functionId": "caregiverRecovery",
+          "region": "us-central1"
+        }
+      }
     ]
   },
   "emulators": {

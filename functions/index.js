@@ -2,7 +2,7 @@ const {randomBytes} = require('node:crypto');
 const {initializeApp} = require('firebase-admin/app');
 const {getAuth} = require('firebase-admin/auth');
 const {getFirestore, FieldValue} = require('firebase-admin/firestore');
-const {onCall, HttpsError} = require('firebase-functions/v2/https');
+const {onCall, onRequest, HttpsError} = require('firebase-functions/v2/https');
 const {hash, newId, trusted, deviceMatches, canConfirm} = require('./security-policy');
 initializeApp();
 const db = getFirestore();
@@ -206,6 +206,15 @@ exports.caregiverSecurity = onCall(
       generation: sec?.generation ?? 0, status: 'pending', expiresAt: Date.now() + 15 * 60000});
     return {requestId};
   }
+  if (action === 'replacementStatus') {
+    const pending = (await ref('device_replacements', id(data.requestId)).get()).data();
+    const sec = (await secRef.get()).data();
+    if (pending?.uid !== uid || pending.kind !== 'replacement' ||
+        pending.deviceHash !== hash(secret) ||
+        pending.generation !== (sec?.generation ?? 0)) deny();
+    if (pending.expiresAt <= Date.now()) return {status: 'expired'};
+    return {status: pending.status === 'approved' ? 'approved' : 'pending'};
+  }
   if (action === 'approveReplacement' || action === 'confirmReplacement') {
     const target = ref('device_replacements', id(data.requestId));
     const sessionId = await db.runTransaction(async tx => {
@@ -368,6 +377,56 @@ async function recover(request, secret) {
   });
   return {verified: true};
 }
+
+// Browser approval is intentionally independent of the phone where the email
+// was opened. The one-time Firebase email code proves account ownership, while
+// the pending request remains bound to the device hash chosen by the new phone.
+async function approveRecoveryFromBrowser(requestId, oobCode) {
+  const target = ref('device_replacements', id(requestId));
+  if (typeof oobCode !== 'string' || !/^[A-Za-z0-9_-]{10,512}$/.test(oobCode)) deny();
+  const pending = (await target.get()).data();
+  if (pending?.kind !== 'replacement' || pending.status !== 'pending' ||
+      !pending.emailRecoveryPending || pending.expiresAt <= Date.now()) deny();
+  const sec = (await securityRef(pending.uid).get()).data();
+  const pinned = emailOf(sec?.recoveryEmail);
+  const account = await activeAccount(pending.uid);
+  if (!pinned || !account.emailVerified || emailOf(account.email) !== pinned ||
+      pending.generation !== sec?.generation) deny();
+  await redeemEmailLink(pinned, oobCode, pending.uid);
+  await db.runTransaction(async tx => {
+    const fresh = (await tx.get(target)).data();
+    const current = (await tx.get(securityRef(pending.uid))).data();
+    if (fresh?.kind !== 'replacement' || fresh.uid !== pending.uid ||
+        fresh.status !== 'pending' || !fresh.emailRecoveryPending ||
+        fresh.expiresAt <= Date.now() ||
+        fresh.generation !== current?.generation) deny();
+    tx.update(target, {
+      status: 'approved',
+      emailRecoveryPending: FieldValue.delete(),
+      approvedAt: FieldValue.serverTimestamp(),
+    });
+  });
+}
+
+exports.caregiverRecovery = onRequest(
+  {region: 'us-central1', invoker: 'public'},
+  async (request, response) => {
+    response.set('Cache-Control', 'no-store');
+    response.set('Content-Type', 'application/json; charset=utf-8');
+    if (request.method !== 'POST') {
+      response.status(405).json({ok: false});
+      return;
+    }
+    try {
+      const body = request.body ?? {};
+      await approveRecoveryFromBrowser(body.requestId, body.oobCode);
+      response.status(200).json({ok: true});
+    } catch (error) {
+      console.warn('Browser recovery approval rejected', error?.code ?? 'unknown');
+      response.status(400).json({ok: false});
+    }
+  },
+);
 
 async function redeemEmailLink(email, oobCode, uid) {
   const response = await emailLinkSignIn(email, oobCode);

@@ -270,7 +270,11 @@ class _CaregiverSecurityGateState extends State<CaregiverSecurityGate>
         if (email == null || email.isEmpty) {
           throw StateError('Recovery email is unavailable.');
         }
-        await _security.sendRecoveryEmailLink(email);
+        final requestId = values['requestId'] as String? ?? _requestId;
+        if (requestId == null || requestId.isEmpty) {
+          throw StateError('Recovery request is unavailable.');
+        }
+        await _security.sendRecoveryEmailLink(email, requestId);
       }
       if (!mounted) return;
       setState(() {

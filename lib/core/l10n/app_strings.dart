@@ -1409,8 +1409,13 @@ abstract final class AppStrings {
 
   static String deviceLinkSent(AppLanguage lang, String email) =>
       lang == AppLanguage.filipino
-      ? 'I-tap ang link na ipinadala sa $email gamit ang phone na ito.'
-      : 'Tap the link we sent to $email on this phone.';
+      ? 'Buksan ang link na ipinadala sa $email sa kahit anong phone o computer.'
+      : 'Open the link sent to $email on any phone or computer.';
+
+  static String waitingForConfirmation(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Naghihintay ng confirmation'
+      : 'Waiting for confirmation';
 
   static String emailConfirmedTitle(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Nakumpirma ang email' : 'Email confirmed';

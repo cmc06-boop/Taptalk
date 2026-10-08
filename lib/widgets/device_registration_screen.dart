@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -17,28 +19,27 @@ class DeviceRegistrationScreen extends StatefulWidget {
       _DeviceRegistrationScreenState();
 }
 
-class _DeviceRegistrationScreenState extends State<DeviceRegistrationScreen> {
+class _DeviceRegistrationScreenState extends State<DeviceRegistrationScreen>
+    with WidgetsBindingObserver {
   final _password = TextEditingController();
+  Timer? _approvalTimer;
   bool _busy = false;
+  bool _checkingApproval = false;
   bool _sent = false;
   bool _needsReauth = false;
-  String? _link;
   String? _message;
   bool _messageIsError = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _password.addListener(_refresh);
-    CaregiverSecurityService.instance.listenForRecoveryEmailLinks((link) {
-      if (!mounted || !CaregiverSecurityService.isRecoveryEmailLink(link)) {
-        return;
-      }
-      setState(() {
-        _link = link;
-        _message = null;
-      });
-    });
+    _approvalTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => _checkApproval(),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkApproval());
   }
 
   void _refresh() {
@@ -47,9 +48,15 @@ class _DeviceRegistrationScreenState extends State<DeviceRegistrationScreen> {
 
   @override
   void dispose() {
-    CaregiverSecurityService.instance.stopListeningForRecoveryEmailLinks();
+    WidgetsBinding.instance.removeObserver(this);
+    _approvalTimer?.cancel();
     _password.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _checkApproval();
   }
 
   Future<void> _send({bool google = false}) async {
@@ -71,27 +78,24 @@ class _DeviceRegistrationScreenState extends State<DeviceRegistrationScreen> {
       _message = firstReauthPrompt ? null : result.error;
       _messageIsError = _message != null;
     });
+    if (result.error == null) unawaited(_checkApproval());
   }
 
-  Future<void> _complete() async {
-    final link = _link;
-    if (link == null) return;
-    setState(() {
-      _busy = true;
-      _message = null;
-    });
-    final error = await context.read<AppState>().completeDeviceRegistration(
-      link,
-    );
+  Future<void> _checkApproval() async {
+    if (!mounted || _busy || _checkingApproval) return;
+    _checkingApproval = true;
+    final result = await context
+        .read<AppState>()
+        .checkDeviceRegistrationApproval();
+    _checkingApproval = false;
     if (!mounted) return;
-    setState(() {
-      _busy = false;
-      if (error != null) {
-        _link = null;
-        _message = error;
+    if (result.error != null) {
+      setState(() {
+        _sent = false;
+        _message = result.error;
         _messageIsError = true;
-      }
-    });
+      });
+    }
   }
 
   @override
@@ -122,21 +126,6 @@ class _DeviceRegistrationScreenState extends State<DeviceRegistrationScreen> {
         messageIsError: true,
         primaryLabel: AppStrings.tryAgain(lang),
         onPrimary: app.retryDeviceCheck,
-        footerLabel: logout,
-        onFooter: () => app.logout(),
-      );
-    }
-
-    if (_link != null) {
-      return SecurityStepLayout(
-        icon: Icons.mark_email_read_outlined,
-        title: AppStrings.emailConfirmedTitle(lang),
-        subtitle: AppStrings.emailConfirmedBody(lang),
-        busy: _busy,
-        message: _message,
-        messageIsError: _messageIsError,
-        primaryLabel: AppStrings.completeVerification(lang),
-        onPrimary: _complete,
         footerLabel: logout,
         onFooter: () => app.logout(),
       );
@@ -189,7 +178,7 @@ class _DeviceRegistrationScreenState extends State<DeviceRegistrationScreen> {
         busy: _busy,
         message: _message,
         messageIsError: _messageIsError,
-        primaryLabel: AppStrings.completeVerification(lang),
+        primaryLabel: AppStrings.waitingForConfirmation(lang),
         onPrimary: null,
         secondaryLabel: AppStrings.resendDeviceLink(lang),
         onSecondary: _send,
