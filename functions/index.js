@@ -28,14 +28,18 @@ async function issue(uid, sessionId) {
   await activeAccount(uid);
   return {state: 'trusted', token: await getAuth().createCustomToken(uid, {trustedSession: sessionId})};
 }
-async function rateLimit(uid, action, max = 10) {
+async function rateLimit(uid, action, max = 10, windowMs = 3600000) {
   const target = ref('security_rate_limits', `${uid}_${action}`);
   await db.runTransaction(async tx => {
     const old = (await tx.get(target)).data();
     const current = Date.now();
-    const count = old?.until > current ? old.count + 1 : 1;
-    if (count > max) throw new HttpsError('resource-exhausted', 'Please try again later.');
-    tx.set(target, {count, until: old?.until > current ? old.until : current + 3600000});
+    const active = old?.until > current;
+    const count = active ? old.count + 1 : 1;
+    if (count > max) {
+      throw new HttpsError('resource-exhausted', 'Please try again later.',
+        {retryAfterSeconds: Math.ceil((old.until - current) / 1000)});
+    }
+    tx.set(target, {count, until: active ? old.until : current + windowMs});
   });
 }
 
@@ -50,7 +54,7 @@ exports.caregiverSecurity = onCall(
   async request => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
   const uid = request.auth.uid;
-  await activeAccount(uid);
+  const caller = await activeAccount(uid);
   const data = request.data ?? {};
   const action = data.action;
   const secRef = securityRef(uid);
@@ -71,11 +75,20 @@ exports.caregiverSecurity = onCall(
   if (action === 'confirmLegacy') return confirmLegacy(request, secret);
   if (action === 'sendRecovery' || action === 'verifyRecovery') return recover(request, secret);
   if (action === 'status') {
+    const account = caller;
+    const accountEmail = emailOf(account.email);
     const result = await db.runTransaction(async tx => {
       const sec = (await tx.get(secRef)).data();
       if (!sec) {
         const legacy = await tx.get(db.collection('parent_child_links').where('parentFirebaseUid', '==', uid).limit(1));
-        return {state: legacy.empty ? 'setup' : 'legacyConfirmation'};
+        if (!legacy.empty) return {state: 'legacyConfirmation'};
+        if (!account.emailVerified || !accountEmail) return {state: 'setup'};
+        // The first phone a verified parent signs in on becomes the only
+        // trusted phone. Any other phone must verify through the email link.
+        const sessionId = newId();
+        tx.set(secRef, {deviceHash: hash(secret), sessionId, generation: 1, recoveryEmail: accountEmail});
+        tx.set(db.collection('security_audit').doc(), {action: 'registerFirstDevice', uid, at: FieldValue.serverTimestamp()});
+        return {state: 'trusted', sessionId, needsToken: true};
       }
       if (!deviceMatches(secret, sec)) return {state: 'verificationRequired'};
       const sessionId = sec.sessionId || newId();
@@ -97,12 +110,16 @@ exports.caregiverSecurity = onCall(
       }
       return {state: 'legacyConfirmation', learners};
     }
-    const pending = result.state === 'trusted' ? await db.collection('device_replacements')
-      .where('uid', '==', uid).get() : null;
-    const links = result.state === 'trusted' ? await db.collection('parent_child_links').where('parentFirebaseUid', '==', uid).get() : null;
-    return {...(result.needsToken ? await issue(uid, result.sessionId) : {state: result.state}),
-      links: links?.docs.map(doc => ({learnerFirebaseUid: doc.data().learnerFirebaseUid,
-        learnerName: doc.data().learnerName ?? '', learnerProfileCode: doc.data().learnerProfileCode ?? ''})) ?? [], requests: pending?.docs
+    const trustedNow = result.state === 'trusted';
+    const [pending, links, issued] = await Promise.all([
+      trustedNow ? db.collection('device_replacements').where('uid', '==', uid).get() : null,
+      trustedNow ? boundLinks(uid, hash(secret)) : [],
+      result.needsToken
+        ? getAuth().createCustomToken(uid, {trustedSession: result.sessionId}).then(token => ({state: 'trusted', token}))
+        : {state: result.state},
+    ]);
+    return {...issued,
+      links, requests: pending?.docs
       .filter(doc => doc.data().kind === 'replacement' && doc.data().status === 'pending' && doc.data().expiresAt > Date.now())
       .map(doc => ({id: doc.id})) ?? []};
   }
@@ -129,22 +146,26 @@ exports.caregiverSecurity = onCall(
       const previousLinks = await tx.get(db.collection('parent_child_links').where('parentFirebaseUid', '==', uid).limit(1));
       if (!sec && !previousLinks.empty) deny();
       const sessionId = sec?.sessionId || newId();
-      if (!sec) tx.set(secRef, {deviceHash: hash(secret), sessionId, generation: 1, recoveryEmail: account.email});
+      const deviceHash = hash(secret);
+      if (!sec) tx.set(secRef, {deviceHash, sessionId, generation: 1, recoveryEmail: account.email});
       const linkRef = ref('parent_child_links', `${uid}_${learnerUid}`);
       const learnerData = learner.data();
-      if (!owner) {
-        tx.set(ownerRef, {parentUid: uid, active: true});
+      // The learner is bound to the phone that scanned this QR. The same
+      // caregiver scanning again on a newly trusted phone moves that binding.
+      const alreadyLinked = !!owner && owner.deviceHash === deviceHash;
+      if (!alreadyLinked) {
+        tx.set(ownerRef, {parentUid: uid, active: true, deviceHash});
         tx.set(linkRef, {parentFirebaseUid: uid, learnerFirebaseUid: learnerUid,
-          learnerName: learnerData.learnerName ?? '', learnerProfileCode: code,
-          linkedAt: FieldValue.serverTimestamp()});
+          learnerName: learnerData.learnerName ?? '', learnerProfileCode: code, deviceHash,
+          linkedAt: FieldValue.serverTimestamp()}, {merge: true});
       }
-      return {sessionId, alreadyLinked: !!owner, learnerFirebaseUid: learnerUid,
+      return {sessionId, alreadyLinked, learnerFirebaseUid: learnerUid,
         learnerName: learnerData.learnerName ?? '', profileCode: code};
     });
     return {...result, ...(await issue(uid, result.sessionId))};
   }
   if (action === 'requestReplacement' || action === 'requestTransfer') {
-    await rateLimit(uid, 'replacement', 5);
+    await rateLimit(uid, 'replacement', 10, 15 * 60000);
     const sec = (await secRef.get()).data();
     const account = await getAuth().getUser(uid);
     if (action === 'requestTransfer' && (!account.emailVerified || !account.email)) deny();
@@ -160,6 +181,7 @@ exports.caregiverSecurity = onCall(
     const sessionId = await db.runTransaction(async tx => {
       const sec = (await tx.get(secRef)).data();
       const pending = (await tx.get(target)).data();
+      const bindings = await linkedOwners(tx, uid);
       if (action === 'approveReplacement') {
         if (!trusted(request.auth, sec) || !deviceMatches(secret, sec) ||
             pending?.uid !== uid || pending.kind !== 'replacement' || pending.status !== 'pending' || pending.expiresAt <= Date.now() ||
@@ -168,6 +190,7 @@ exports.caregiverSecurity = onCall(
         // phone receives its capability on its next status poll.
         const nextSession = newId();
         tx.set(secRef, {...sec, deviceHash: pending.deviceHash, sessionId: nextSession, generation: sec.generation + 1});
+        moveLinkedLearners(tx, bindings, pending.deviceHash);
         tx.update(target, {status: 'consumed'});
         tx.set(db.collection('security_audit').doc(), {action, uid, at: FieldValue.serverTimestamp()});
         return null;
@@ -175,6 +198,7 @@ exports.caregiverSecurity = onCall(
       if (!canConfirm(pending, uid, secret, sec, Date.now())) deny();
       const nextSession = newId();
       tx.set(secRef, {...sec, deviceHash: hash(secret), sessionId: nextSession, generation: (sec?.generation ?? 0) + 1});
+      moveLinkedLearners(tx, bindings, hash(secret));
       tx.update(target, {status: 'consumed'});
       tx.set(db.collection('security_audit').doc(), {action, uid, at: FieldValue.serverTimestamp()});
       return nextSession;
@@ -206,6 +230,64 @@ exports.caregiverSecurity = onCall(
   throw new HttpsError('invalid-argument', 'Unknown action.');
 });
 
+// A verified phone replacement carries this caregiver's learners to the new
+// phone. Reads happen here so the caller's transaction can write afterwards.
+async function linkedOwners(tx, uid) {
+  const links = await tx.get(db.collection('parent_child_links').where('parentFirebaseUid', '==', uid));
+  const bindings = [];
+  for (const linkDoc of links.docs) {
+    const learnerUid = linkDoc.data().learnerFirebaseUid;
+    if (typeof learnerUid !== 'string' || !learnerUid) continue;
+    const ownerRef = ref('learner_caregivers', learnerUid);
+    const owner = (await tx.get(ownerRef)).data();
+    if (owner?.parentUid === uid && owner.active === true) bindings.push({ownerRef, linkRef: linkDoc.ref});
+  }
+  return bindings;
+}
+function moveLinkedLearners(tx, bindings, deviceHash) {
+  for (const {ownerRef, linkRef} of bindings) {
+    tx.update(ownerRef, {deviceHash});
+    tx.update(linkRef, {deviceHash});
+  }
+}
+
+// Learners bound to this trusted phone. Owners from before device binding are
+// bound once to the phone that is trusted when they are first seen; links for
+// learners scanned on another phone stay hidden until scanned here.
+async function boundLinks(uid, deviceHash) {
+  const links = await db.collection('parent_child_links').where('parentFirebaseUid', '==', uid).get();
+  const valid = links.docs.filter(doc => typeof doc.data().learnerFirebaseUid === 'string' && doc.data().learnerFirebaseUid);
+  const owners = valid.length
+    ? await db.getAll(...valid.map(doc => ref('learner_caregivers', doc.data().learnerFirebaseUid)))
+    : [];
+  const visible = [];
+  for (let i = 0; i < valid.length; i++) {
+    const linkDoc = valid[i];
+    const link = linkDoc.data();
+    const learnerUid = link.learnerFirebaseUid;
+    const owner = owners[i].data();
+    if (owner?.parentUid !== uid || owner.active !== true) continue;
+    let bound = owner.deviceHash === deviceHash;
+    if (owner.deviceHash === undefined || link.deviceHash !== owner.deviceHash) {
+      bound = await db.runTransaction(async tx => {
+        const ownerRef = ref('learner_caregivers', learnerUid);
+        const fresh = (await tx.get(ownerRef)).data();
+        const current = (await tx.get(linkDoc.ref)).data();
+        if (!current || fresh?.parentUid !== uid || fresh.active !== true) return false;
+        const ownerHash = fresh.deviceHash ?? deviceHash;
+        if (fresh.deviceHash === undefined) tx.update(ownerRef, {deviceHash});
+        if (current.deviceHash !== ownerHash) tx.update(linkDoc.ref, {deviceHash: ownerHash});
+        return ownerHash === deviceHash;
+      });
+    }
+    if (bound) {
+      visible.push({learnerFirebaseUid: learnerUid, learnerName: link.learnerName ?? '',
+        learnerProfileCode: link.learnerProfileCode ?? ''});
+    }
+  }
+  return visible;
+}
+
 async function recover(request, secret) {
   const {data, auth} = request;
   if (!recentLogin(auth)) throw new HttpsError('unauthenticated', 'Sign in again before recovery.');
@@ -213,7 +295,6 @@ async function recover(request, secret) {
   const account = await getAuth().getUser(auth.uid);
   const accountEmail = emailOf(account.email);
   if (data.action === 'sendRecovery') {
-    await rateLimit(auth.uid, 'recovery', 3);
     const recoveryEmail = await db.runTransaction(async tx => {
       const sec = (await tx.get(securityRef(auth.uid))).data();
       const pending = (await tx.get(target)).data();
@@ -228,6 +309,8 @@ async function recover(request, secret) {
       tx.update(target, {emailRecoveryPending: true});
       return pinned;
     });
+    // Only links that will actually be emailed count: 5 per 15 minutes.
+    await rateLimit(auth.uid, 'recovery', 5, 15 * 60000);
     return {sent: true, recoveryEmail};
   }
   if (signInProvider(auth) !== 'emailLink') {
@@ -281,12 +364,14 @@ async function confirmLegacy(request, secret) {
           if (other.data().parentFirebaseUid !== auth.uid) extraDeletes.push(other.ref);
         }
       }
-      if (!owner) ownerWrites.push(ownerRef);
+      ownerWrites.push(ownerRef);
     }
     const nextSession = newId();
-    tx.set(currentRef, {deviceHash: hash(secret), sessionId: nextSession, generation: 1,
+    const deviceHash = hash(secret);
+    tx.set(currentRef, {deviceHash, sessionId: nextSession, generation: 1,
       recoveryEmail: account.email.trim()});
-    for (const ownerRef of ownerWrites) tx.set(ownerRef, {parentUid: auth.uid, active: true});
+    for (const ownerRef of ownerWrites) tx.set(ownerRef, {parentUid: auth.uid, active: true, deviceHash});
+    for (const linkDoc of links.docs) tx.update(linkDoc.ref, {deviceHash});
     for (const other of extraDeletes) tx.delete(other);
     tx.set(db.collection('security_audit').doc(), {action: 'confirmLegacy', uid: auth.uid,
       at: FieldValue.serverTimestamp()});
@@ -319,11 +404,11 @@ async function transfer(request, secret) {
     tx.set(currentRef, {...current, sessionId: null, deviceHash: null, generation: current.generation + 1});
     tx.set(nextRef, {deviceHash: pending.deviceHash, sessionId: newId(),
       generation: (next?.generation ?? 0) + 1, recoveryEmail: next?.recoveryEmail ?? pending.recoveryEmail});
-    tx.set(ownerRef, {parentUid: pending.uid, active: true});
+    tx.set(ownerRef, {parentUid: pending.uid, active: true, deviceHash: pending.deviceHash});
     tx.update(ref('learner_profiles', learnerUid), {emergencyContacts: [], emergencyContactsNeedReview: true});
     tx.delete(ref('parent_child_links', `${auth.uid}_${learnerUid}`));
     tx.set(ref('parent_child_links', `${pending.uid}_${learnerUid}`), {
-      parentFirebaseUid: pending.uid, learnerFirebaseUid: learnerUid,
+      parentFirebaseUid: pending.uid, learnerFirebaseUid: learnerUid, deviceHash: pending.deviceHash,
       learnerName: learner.learnerName ?? '', learnerProfileCode: learner.profileCode ?? '', linkedAt: FieldValue.serverTimestamp()});
     tx.update(target, {status: 'consumed'});
     tx.set(db.collection('security_audit').doc(), {action: 'transfer', actor: auth.uid,

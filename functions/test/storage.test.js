@@ -16,8 +16,8 @@ beforeEach(async () => {
     const db = context.firestore();
     await db.doc('user_profiles/learner').set({firebaseUid: 'learner', role: 'learner'});
     await db.doc('user_profiles/teacher').set({firebaseUid: 'teacher', role: 'teacher'});
-    await db.doc('caregiver_security/parent').set({sessionId: 'current'});
-    await db.doc('learner_caregivers/learner').set({parentUid: 'parent', active: true});
+    await db.doc('caregiver_security/parent').set({sessionId: 'current', deviceHash: 'phone-a'});
+    await db.doc('learner_caregivers/learner').set({parentUid: 'parent', active: true, deviceHash: 'phone-a'});
     await context.storage(bucket).ref(path).put(new Uint8Array([1, 2, 3]), {contentType: 'image/png', customMetadata: {audience: 'private'}});
   });
 });
@@ -32,6 +32,10 @@ test('Storage caregiver authorization stays inside the two-document budget and r
   await assertSucceeds(storage('parent', 'current').ref(path).getMetadata());
   await env.withSecurityRulesDisabled(context => context.firestore().doc('caregiver_security/parent').update({sessionId: 'next'}));
   await assertFails(storage('parent', 'current').ref(path).getMetadata());
+  await assertSucceeds(storage('parent', 'next').ref(path).getMetadata());
+  await env.withSecurityRulesDisabled(context => context.firestore().doc('caregiver_security/parent').update({deviceHash: 'phone-b'}));
+  await assertFails(storage('parent', 'next').ref(path).getMetadata());
+  await env.withSecurityRulesDisabled(context => context.firestore().doc('learner_caregivers/learner').update({deviceHash: 'phone-b'}));
   await assertSucceeds(storage('parent', 'next').ref(path).getMetadata());
   await env.withSecurityRulesDisabled(context => context.firestore().doc('learner_caregivers/learner').update({active: false}));
   await assertFails(storage('parent', 'next').ref(path).getMetadata());

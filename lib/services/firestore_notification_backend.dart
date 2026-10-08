@@ -650,11 +650,20 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     String parentFirebaseUid,
   ) async {
     if (!isAvailable || parentFirebaseUid.trim().isEmpty) return const [];
-    final snapshot = await FirebaseFirestore.instance
+    final snapshot = await _parentLinksQuery(parentFirebaseUid).then(
+      (query) => query.get(),
+    );
+    return snapshot.docs.map(_parentChildLinkFromDocument).toList();
+  }
+
+  Future<Query<Map<String, dynamic>>> _parentLinksQuery(
+    String parentFirebaseUid,
+  ) async {
+    final deviceHash = await CaregiverSecurityService.instance.deviceHash();
+    return FirebaseFirestore.instance
         .collection(linkCollectionName)
         .where('parentFirebaseUid', isEqualTo: parentFirebaseUid.trim())
-        .get();
-    return snapshot.docs.map(_parentChildLinkFromDocument).toList();
+        .where('deviceHash', isEqualTo: deviceHash);
   }
 
   @override
@@ -1246,10 +1255,8 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
     if (!isAvailable || parentFirebaseUid.trim().isEmpty) {
       return const Stream.empty();
     }
-    return FirebaseFirestore.instance
-        .collection(linkCollectionName)
-        .where('parentFirebaseUid', isEqualTo: parentFirebaseUid.trim())
-        .snapshots()
+    return Stream.fromFuture(_parentLinksQuery(parentFirebaseUid))
+        .asyncExpand((query) => query.snapshots())
         .map(
           (snapshot) =>
               snapshot.docs.map(_parentChildLinkFromDocument).toList(),
@@ -1295,10 +1302,10 @@ class FirestoreNotificationBackend implements CloudNotificationBackend {
 
     controller = StreamController<List<RemoteParentNotification>>(
       onListen: () {
-        linksSubscription = FirebaseFirestore.instance
-            .collection(linkCollectionName)
-            .where('parentFirebaseUid', isEqualTo: parentFirebaseUid.trim())
-            .snapshots()
+        linksSubscription = Stream.fromFuture(
+              _parentLinksQuery(parentFirebaseUid),
+            )
+            .asyncExpand((query) => query.snapshots())
             .listen(
               (snapshot) {
                 if (cancelled) return;

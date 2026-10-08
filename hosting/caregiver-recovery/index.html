@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TapTalk</title>
+  <style>
+    body { margin: 0; font-family: Poppins, Roboto, sans-serif; background: #eaf7ef; color: #1e3a2c;
+           display: flex; min-height: 100vh; align-items: center; justify-content: center; text-align: center; }
+    main { padding: 24px; max-width: 360px; }
+    h1 { font-size: 24px; margin: 0 0 8px; }
+    p { font-size: 14px; color: #4f6c5d; margin: 0 0 24px; }
+    a { display: block; background: #000; color: #fff; text-decoration: none; font-weight: 700;
+        padding: 15px; border-radius: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Open TapTalk</h1>
+    <p>Tap the button to finish verifying this phone.</p>
+    <a id="open" href="#">Open TapTalk</a>
+  </main>
+  <script>
+    // Hands the verification link (with its one-time code) to the TapTalk app.
+    var target = 'intent://' + location.host + location.pathname + location.search +
+      '#Intent;scheme=https;package=com.example.flutter_application_1;end';
+    document.getElementById('open').href = target;
+    if (/oobCode=/.test(location.search)) location.replace(target);
+  </script>
+</body>
+</html>

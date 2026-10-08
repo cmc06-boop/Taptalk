@@ -7,7 +7,7 @@ const {hash, newId, trusted} = require('../security-policy');
 process.env.GCLOUD_PROJECT = 'demo-taptalk-security';
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080';
 const {caregiverSecurity} = require('../index');
-const {getFirestore} = require('firebase-admin/firestore');
+const {getFirestore, FieldValue} = require('firebase-admin/firestore');
 const {getAuth} = require('firebase-admin/auth');
 const db = getFirestore();
 const A = 'a'.repeat(64), B = 'b'.repeat(64), C = 'c'.repeat(64);
@@ -75,6 +75,24 @@ test('password-only/new phone login cannot revoke old phone or read protected da
   const old = env.authenticatedContext('parent', {trustedSession: session}).firestore();
   await assertSucceeds(getDoc(doc(old, 'learner_profiles/learner')));
 });
+test('first verified sign-in registers exactly one trusted phone; a second phone is not trusted', async () => {
+  const first = await call('parent', 'status', A);
+  assert.equal(first.state, 'trusted');
+  const session = JSON.parse(first.token).trustedSession;
+  assert.equal((await get('caregiver_security/parent')).deviceHash, hash(A));
+  assert.equal((await get('caregiver_security/parent')).recoveryEmail, 'parent@example.test');
+  assert.equal((await call('parent', 'status', B)).state, 'verificationRequired');
+  assert.equal((await call('parent', 'status', A, {}, session)).state, 'trusted');
+  assert.equal((await get('caregiver_security/parent')).deviceHash, hash(A));
+  await assert.rejects(call('parent', 'adoptDevice', B), {code: 'invalid-argument'});
+  assert.equal((await get('caregiver_security/parent')).deviceHash, hash(A));
+});
+test('unverified email never registers a phone', async () => {
+  getAuth().getUser = async uid => ({...account(uid), emailVerified: false});
+  assert.equal((await call('parent', 'status', A)).state, 'setup');
+  getAuth().getUser = async uid => account(uid);
+  assert.equal(await get('caregiver_security/parent'), undefined);
+});
 test('old-phone approval atomically activates new phone and invalidates old tokens', async () => {
   const session = await link();
   const {requestId} = await call('parent', 'requestReplacement', B);
@@ -87,8 +105,35 @@ test('old-phone approval atomically activates new phone and invalidates old toke
   assert.equal((await call('parent', 'status', A)).state, 'verificationRequired');
   await assertFails(getDoc(doc(env.authenticatedContext('parent', {trustedSession: session}).firestore(), 'learner_activity/tap')));
   const nextSession = JSON.parse(next.token).trustedSession;
-  await assertSucceeds(getDoc(doc(env.authenticatedContext('parent', {trustedSession: nextSession}).firestore(), 'learner_activity/tap')));
+  assert.equal(next.links.length, 1);
+  assert.equal((await get('learner_caregivers/learner')).deviceHash, hash(B));
+  const nextDb = env.authenticatedContext('parent', {trustedSession: nextSession}).firestore();
+  await assertSucceeds(getDoc(doc(nextDb, 'learner_activity/tap')));
   await assert.rejects(call('parent', 'approveReplacement', A, {requestId}, session));
+});
+test('a learner is visible only on the phone that scanned their QR', async () => {
+  const session = await link();
+  assert.equal((await get('learner_caregivers/learner')).deviceHash, hash(A));
+  assert.equal((await get('parent_child_links/parent_learner')).deviceHash, hash(A));
+  const parentDb = env.authenticatedContext('parent', {trustedSession: session}).firestore();
+  await assertSucceeds(getDocs(query(collection(parentDb, 'parent_child_links'),
+    where('parentFirebaseUid', '==', 'parent'), where('deviceHash', '==', hash(A)))));
+  await assertFails(getDocs(query(collection(parentDb, 'parent_child_links'), where('parentFirebaseUid', '==', 'parent'))));
+  // The same account on another phone never reads the learner or their QR code.
+  await db.doc('caregiver_security/parent').update({deviceHash: hash(B)});
+  await assertFails(getDoc(doc(parentDb, 'learner_activity/tap')));
+  await assertFails(getDoc(doc(parentDb, 'learner_profiles/learner')));
+  await assertFails(getDocs(query(collection(parentDb, 'parent_child_links'),
+    where('parentFirebaseUid', '==', 'parent'), where('deviceHash', '==', hash(A)))));
+  assert.equal((await call('parent', 'status', B, {}, session)).links.length, 0);
+});
+test('owners from before device binding are bound once to the trusted phone', async () => {
+  const session = await link();
+  await db.doc('learner_caregivers/learner').set({parentUid: 'parent', active: true});
+  await db.doc('parent_child_links/parent_learner').update({deviceHash: FieldValue.delete()});
+  assert.equal((await call('parent', 'status', A, {}, session)).links.length, 1);
+  assert.equal((await get('learner_caregivers/learner')).deviceHash, hash(A));
+  assert.equal((await get('parent_child_links/parent_learner')).deviceHash, hash(A));
 });
 test('recovery email link is pinned to the verified Auth email and requires explicit final confirmation', async () => {
   const session = await link();
@@ -102,8 +147,12 @@ test('recovery email link is pinned to the verified Auth email and requires expl
   await assert.rejects(call('parent', 'verifyRecovery', C, {requestId}, undefined, 'emailLink'));
   await call('parent', 'verifyRecovery', B, {requestId}, undefined, 'emailLink');
   assert.equal((await get('caregiver_security/parent')).sessionId, session);
-  await call('parent', 'confirmReplacement', B, {requestId});
-  assert.equal((await call('parent', 'status', B)).state, 'trusted');
+  const confirmed = await call('parent', 'confirmReplacement', B, {requestId});
+  const recovered = await call('parent', 'status', B, {}, JSON.parse(confirmed.token).trustedSession);
+  assert.equal(recovered.state, 'trusted');
+  assert.equal(recovered.links.length, 1);
+  assert.equal((await get('parent_child_links/parent_learner')).deviceHash, hash(B));
+  await assertFails(getDoc(doc(env.authenticatedContext('parent', {trustedSession: session}).firestore(), 'learner_activity/tap')));
   assert.equal(trusted({token: {trustedSession: session}}, await get('caregiver_security/parent')), false);
   await assert.rejects(call('parent', 'confirmReplacement', B, {requestId}));
 });
@@ -201,7 +250,8 @@ test('trusted monitoring queries work; role changes and class ownership takeover
   const session = await link();
   const parentDb = env.authenticatedContext('parent', {trustedSession: session}).firestore();
   await assertSucceeds(getDocs(query(collection(parentDb, 'learner_activity'), where('learnerFirebaseUid', '==', 'learner'))));
-  await assertSucceeds(getDocs(query(collection(parentDb, 'parent_child_links'), where('parentFirebaseUid', '==', 'parent'))));
+  await assertSucceeds(getDocs(query(collection(parentDb, 'parent_child_links'),
+    where('parentFirebaseUid', '==', 'parent'), where('deviceHash', '==', hash(A)))));
   await assertFails(updateDoc(doc(parentDb, 'user_profiles/parent'), {role: 'teacher'}));
   await db.doc('teacher_classes_cloud/CLASS').set({classCode: 'CLASS', teacherFirebaseUid: 'teacher'});
   await assertFails(updateDoc(doc(parentDb, 'teacher_classes_cloud/CLASS'), {teacherFirebaseUid: 'parent'}));

@@ -12,7 +12,9 @@ service firebase.storage {
         && firestore.get(/databases/(default)/documents/caregiver_security/$(request.auth.uid)).data.sessionId != null
         && firestore.get(/databases/(default)/documents/caregiver_security/$(request.auth.uid)).data.sessionId == request.auth.token.trustedSession
         && firestore.get(/databases/(default)/documents/learner_caregivers/$(uid)).data.active == true
-        && firestore.get(/databases/(default)/documents/learner_caregivers/$(uid)).data.parentUid == request.auth.uid;
+        && firestore.get(/databases/(default)/documents/learner_caregivers/$(uid)).data.parentUid == request.auth.uid
+        && firestore.get(/databases/(default)/documents/caregiver_security/$(request.auth.uid)).data.get('deviceHash', null) != null
+        && firestore.get(/databases/(default)/documents/learner_caregivers/$(uid)).data.get('deviceHash', '') == firestore.get(/databases/(default)/documents/caregiver_security/$(request.auth.uid)).data.get('deviceHash', null);
     }
     function privateMediaAccess(uid) {
       // Storage permits at most two distinct Firestore document reads. Select

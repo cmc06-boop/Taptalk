@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/services.dart';
@@ -151,7 +153,25 @@ class CaregiverSecurityService {
     _emailLinks.setMethodCallHandler(null);
   }
 
-  Future<bool> completeRecoveryEmailLink(String link) async {
+  /// Hosting app links wrap the sign-in link in a `link` query parameter.
+  static String unwrapEmailLink(String link) {
+    var current = link.trim();
+    for (var depth = 0; depth < 3; depth++) {
+      final inner = Uri.tryParse(current)?.queryParameters['link'];
+      if (inner == null || inner.isEmpty) break;
+      current = inner;
+    }
+    return current;
+  }
+
+  static bool isRecoveryEmailLink(String link) {
+    final uri = Uri.tryParse(unwrapEmailLink(link));
+    return uri?.queryParameters['mode'] == 'signIn' &&
+        (uri?.queryParameters['oobCode']?.isNotEmpty ?? false);
+  }
+
+  Future<bool> completeRecoveryEmailLink(String rawLink) async {
+    final link = unwrapEmailLink(rawLink);
     if (!FirebaseAuth.instance.isSignInWithEmailLink(link)) return false;
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw StateError('Sign in again before recovery.');
@@ -165,6 +185,11 @@ class CaregiverSecurityService {
     await user.getIdToken(true);
     return true;
   }
+
+  /// Same value the server stores for this phone; parent link queries filter
+  /// on it because rules only expose learners bound to the trusted phone.
+  Future<String> deviceHash() async =>
+      sha256.convert(utf8.encode(await _secret())).toString();
 
   Future<String> _loadSecret() async {
     final prefs = await SharedPreferences.getInstance();

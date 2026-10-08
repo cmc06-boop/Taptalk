@@ -13,26 +13,31 @@ class NotificationSyncService {
   NotificationSyncService({
     required this._repository,
     CloudNotificationBackend? cloudBackend,
-  })  : _cloud = cloudBackend ?? UnconfiguredCloudNotificationBackend();
+  }) : _cloud = cloudBackend ?? UnconfiguredCloudNotificationBackend();
 
   final AppRepository _repository;
   CloudNotificationBackend _cloud;
   StreamSubscription<List<RemoteParentNotification>>? _parentSubscription;
-  StreamSubscription<List<RemoteClassEnrollment>>? _learnerEnrollmentSubscription;
-  StreamSubscription<List<RemoteClassEnrollment>>? _teacherEnrollmentSubscription;
-  StreamSubscription<List<RemoteClassJoinRequest>>? _teacherJoinRequestSubscription;
-  StreamSubscription<List<RemoteClassJoinRequest>>? _learnerJoinRequestSubscription;
+  StreamSubscription<List<RemoteClassEnrollment>>?
+  _learnerEnrollmentSubscription;
+  StreamSubscription<List<RemoteClassEnrollment>>?
+  _teacherEnrollmentSubscription;
+  StreamSubscription<List<RemoteClassJoinRequest>>?
+  _teacherJoinRequestSubscription;
+  StreamSubscription<List<RemoteClassJoinRequest>>?
+  _learnerJoinRequestSubscription;
   StreamSubscription<List<RemoteParentChildLink>>? _parentChildLinkSubscription;
   StreamSubscription<List<RemoteTeacherClass>>? _teacherClassSubscription;
   StreamSubscription<List<RemoteTeacherAlert>>? _teacherAlertSubscription;
-  StreamSubscription<RemoteLearnerPersonalBoardSnapshot>? _personalBoardSubscription;
+  StreamSubscription<RemoteLearnerPersonalBoardSnapshot>?
+  _personalBoardSubscription;
   StreamSubscription<RemoteUserProfile>? _userProfileSubscription;
   final Map<int, StreamSubscription<List<RemoteLearnerActivity>>>
-      _monitoredLearnerActivitySubscriptions = {};
+  _monitoredLearnerActivitySubscriptions = {};
   final Map<int, StreamSubscription<RemoteLearnerPersonalBoardSnapshot>>
-      _monitoredLearnerBoardSubscriptions = {};
+  _monitoredLearnerBoardSubscriptions = {};
   final Map<int, StreamSubscription<RemoteClassContent?>>
-      _classContentSubscriptions = {};
+  _classContentSubscriptions = {};
   final Map<int, int> _lastAppliedClassContentFingerprint = {};
   void Function()? _onParentNotificationsChanged;
   void Function()? _onLearnerEnrollmentsChanged;
@@ -94,25 +99,27 @@ class NotificationSyncService {
       return result;
     }
 
-    final teacherFirebaseUid =
-        await _repository.getFirebaseUidForUser(teacherUserId);
+    final teacherFirebaseUid = await _repository.getFirebaseUidForUser(
+      teacherUserId,
+    );
     if (teacherFirebaseUid == null || teacherFirebaseUid.isEmpty) {
       return result;
     }
 
     var cloudPublished = 0;
-    final resolvedLearnerUid =
-        await _resolveLearnerFirebaseUidForAlert(
-          learnerUserId,
-          providedUid: learnerFirebaseUid,
-        );
+    final resolvedLearnerUid = await _resolveLearnerFirebaseUidForAlert(
+      learnerUserId,
+      providedUid: learnerFirebaseUid,
+    );
 
     for (final notificationId in result.notificationIds) {
-      final parentId =
-          await _repository.parentUserIdForNotification(notificationId);
+      final parentId = await _repository.parentUserIdForNotification(
+        notificationId,
+      );
       if (parentId == null || parentId <= 0) continue;
-      final parentFirebaseUid =
-          await _repository.getFirebaseUidForUser(parentId);
+      final parentFirebaseUid = await _repository.getFirebaseUidForUser(
+        parentId,
+      );
       if (parentFirebaseUid == null || parentFirebaseUid.isEmpty) continue;
       try {
         final remoteId = await _cloud.publishTeacherAlert(
@@ -148,10 +155,12 @@ class NotificationSyncService {
 
     if (cloudPublished == 0) {
       if (resolvedLearnerUid != null && resolvedLearnerUid.isNotEmpty) {
-        final parentUids =
-            await _cloud.getLinkedParentFirebaseUids(resolvedLearnerUid);
-        final localNotificationId =
-            result.notificationIds.isNotEmpty ? result.notificationIds.first : -1;
+        final parentUids = await _cloud.getLinkedParentFirebaseUids(
+          resolvedLearnerUid,
+        );
+        final localNotificationId = result.notificationIds.isNotEmpty
+            ? result.notificationIds.first
+            : -1;
         for (final parentUid in parentUids) {
           try {
             final remoteId = await _cloud.publishTeacherAlert(
@@ -356,11 +365,11 @@ class NotificationSyncService {
     _teacherJoinRequestSubscription = _cloud
         .watchClassJoinRequestsForTeacher(teacherFirebaseUid)
         .listen(
-      (items) => _onTeacherJoinRequestsChanged?.call(items),
-      onError: (Object e, StackTrace st) {
-        debugPrint('Teacher join request sync error: $e\n$st');
-      },
-    );
+          (items) => _onTeacherJoinRequestsChanged?.call(items),
+          onError: (Object e, StackTrace st) {
+            debugPrint('Teacher join request sync error: $e\n$st');
+          },
+        );
   }
 
   Future<void> stopTeacherJoinRequestSync() async {
@@ -380,11 +389,11 @@ class NotificationSyncService {
     _learnerJoinRequestSubscription = _cloud
         .watchClassJoinRequestsForLearner(learnerFirebaseUid)
         .listen(
-      (items) => _onLearnerJoinRequestsChanged?.call(items),
-      onError: (Object e, StackTrace st) {
-        debugPrint('Learner join request sync error: $e\n$st');
-      },
-    );
+          (items) => _onLearnerJoinRequestsChanged?.call(items),
+          onError: (Object e, StackTrace st) {
+            debugPrint('Learner join request sync error: $e\n$st');
+          },
+        );
   }
 
   Future<void> stopLearnerJoinRequestSync() async {
@@ -396,9 +405,11 @@ class NotificationSyncService {
   Future<List<TeacherClassStudent>> getTeacherClassStudentsFromCloud(
     String teacherFirebaseUid,
   ) async {
-    if (!_cloud.isAvailable || teacherFirebaseUid.trim().isEmpty) return const [];
-    final enrollments =
-        await _cloud.getClassEnrollmentsForTeacher(teacherFirebaseUid);
+    if (!_cloud.isAvailable || teacherFirebaseUid.trim().isEmpty)
+      return const [];
+    final enrollments = await _cloud.getClassEnrollmentsForTeacher(
+      teacherFirebaseUid,
+    );
     final students = enrollments
         .where((e) => e.classId > 0 && e.learnerUserId > 0)
         .map(
@@ -466,7 +477,9 @@ class NotificationSyncService {
     return _cloud.getTeacherDeletedClassCodes(teacherFirebaseUid);
   }
 
-  Future<void> removeClassEnrollmentsForClass({required String classCode}) async {
+  Future<void> removeClassEnrollmentsForClass({
+    required String classCode,
+  }) async {
     if (!_cloud.isAvailable || classCode.trim().isEmpty) return;
     await _cloud.removeClassEnrollmentsForClass(classCode: classCode);
   }
@@ -474,21 +487,24 @@ class NotificationSyncService {
   Future<List<RemoteTeacherClass>> getTeacherClassesFromCloud(
     String teacherFirebaseUid,
   ) async {
-    if (!_cloud.isAvailable || teacherFirebaseUid.trim().isEmpty) return const [];
+    if (!_cloud.isAvailable || teacherFirebaseUid.trim().isEmpty)
+      return const [];
     return _cloud.getTeacherClassesForTeacher(teacherFirebaseUid);
   }
 
   Future<List<RemoteClassEnrollment>> getClassEnrollmentsFromCloud(
     String teacherFirebaseUid,
   ) async {
-    if (!_cloud.isAvailable || teacherFirebaseUid.trim().isEmpty) return const [];
+    if (!_cloud.isAvailable || teacherFirebaseUid.trim().isEmpty)
+      return const [];
     return _cloud.getClassEnrollmentsForTeacher(teacherFirebaseUid);
   }
 
   Future<List<RemoteClassEnrollment>> getClassEnrollmentsForLearnerFromCloud(
     String learnerFirebaseUid,
   ) async {
-    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return const [];
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty)
+      return const [];
     return _cloud.getClassEnrollmentsForLearner(learnerFirebaseUid);
   }
 
@@ -508,7 +524,8 @@ class NotificationSyncService {
     required DateTime rangeStart,
     required DateTime rangeEnd,
   }) async {
-    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return const [];
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty)
+      return const [];
     try {
       return await _cloud.getLearnerActivities(
         learnerFirebaseUid: learnerFirebaseUid,
@@ -525,7 +542,7 @@ class NotificationSyncService {
     required int learnerUserId,
     required String learnerFirebaseUid,
     required Future<void> Function(List<RemoteLearnerActivity> activities)
-        onChanged,
+    onChanged,
   }) async {
     await stopMonitoredLearnerActivitySync(learnerUserId);
     await _cloud.initialize();
@@ -534,25 +551,27 @@ class NotificationSyncService {
     _monitoredLearnerActivitySubscriptions[learnerUserId] = _cloud
         .watchLearnerActivities(learnerFirebaseUid)
         .listen(
-      (activities) async {
-        if (activities.isEmpty) return;
-        try {
-          await onChanged(activities);
-        } catch (e, st) {
-          debugPrint('Monitored learner activity handler failed: $e\n$st');
-        }
-      },
-      onError: (Object e, StackTrace st) {
-        debugPrint('Monitored learner activity sync error: $e\n$st');
-      },
-    );
+          (activities) async {
+            if (activities.isEmpty) return;
+            try {
+              await onChanged(activities);
+            } catch (e, st) {
+              debugPrint('Monitored learner activity handler failed: $e\n$st');
+            }
+          },
+          onError: (Object e, StackTrace st) {
+            debugPrint('Monitored learner activity sync error: $e\n$st');
+          },
+        );
   }
 
   bool isMonitoredLearnerActivitySyncActive(int learnerUserId) =>
       _monitoredLearnerActivitySubscriptions.containsKey(learnerUserId);
 
   Future<void> stopMonitoredLearnerActivitySync(int learnerUserId) async {
-    await _monitoredLearnerActivitySubscriptions.remove(learnerUserId)?.cancel();
+    await _monitoredLearnerActivitySubscriptions
+        .remove(learnerUserId)
+        ?.cancel();
   }
 
   /// Live learner monitoring sync (`learner_profiles` + `learner_activity`).
@@ -560,7 +579,7 @@ class NotificationSyncService {
     required int learnerUserId,
     required String learnerFirebaseUid,
     required Future<void> Function(RemoteLearnerPersonalBoardSnapshot snapshot)
-        onChanged,
+    onChanged,
   }) async {
     await stopMonitoredLearnerBoardSync(learnerUserId);
     await _cloud.initialize();
@@ -569,17 +588,17 @@ class NotificationSyncService {
     _monitoredLearnerBoardSubscriptions[learnerUserId] = _cloud
         .watchLearnerPersonalBoard(learnerFirebaseUid)
         .listen(
-      (snapshot) async {
-        try {
-          await onChanged(snapshot);
-        } catch (e, st) {
-          debugPrint('Monitored learner board handler failed: $e\n$st');
-        }
-      },
-      onError: (Object e, StackTrace st) {
-        debugPrint('Monitored learner board sync error: $e\n$st');
-      },
-    );
+          (snapshot) async {
+            try {
+              await onChanged(snapshot);
+            } catch (e, st) {
+              debugPrint('Monitored learner board handler failed: $e\n$st');
+            }
+          },
+          onError: (Object e, StackTrace st) {
+            debugPrint('Monitored learner board sync error: $e\n$st');
+          },
+        );
   }
 
   bool isMonitoredLearnerBoardSyncActive(int learnerUserId) =>
@@ -645,23 +664,23 @@ class NotificationSyncService {
     _classContentSubscriptions[classId] = _cloud
         .watchClassContentByCode(classCode)
         .listen(
-      (content) async {
-        if (content == null) return;
-        final fingerprint = _classContentFingerprint(content);
-        if (_lastAppliedClassContentFingerprint[classId] == fingerprint) {
-          return;
-        }
-        _lastAppliedClassContentFingerprint[classId] = fingerprint;
-        try {
-          await onChanged(content);
-        } catch (e, st) {
-          debugPrint('Class content handler failed: $e\n$st');
-        }
-      },
-      onError: (Object e, StackTrace st) {
-        debugPrint('Class content sync error: $e\n$st');
-      },
-    );
+          (content) async {
+            if (content == null) return;
+            final fingerprint = _classContentFingerprint(content);
+            if (_lastAppliedClassContentFingerprint[classId] == fingerprint) {
+              return;
+            }
+            _lastAppliedClassContentFingerprint[classId] = fingerprint;
+            try {
+              await onChanged(content);
+            } catch (e, st) {
+              debugPrint('Class content handler failed: $e\n$st');
+            }
+          },
+          onError: (Object e, StackTrace st) {
+            debugPrint('Class content sync error: $e\n$st');
+          },
+        );
   }
 
   int _classContentFingerprint(RemoteClassContent content) {
@@ -714,7 +733,8 @@ class NotificationSyncService {
   Future<List<RemoteParentChildLink>> getParentChildLinksFromCloud(
     String parentFirebaseUid,
   ) async {
-    if (!_cloud.isAvailable || parentFirebaseUid.trim().isEmpty) return const [];
+    if (!_cloud.isAvailable || parentFirebaseUid.trim().isEmpty)
+      return const [];
     return _cloud.getParentChildLinksForParent(parentFirebaseUid);
   }
 
@@ -769,16 +789,17 @@ class NotificationSyncService {
     final normalizedUid = firebaseUid.trim();
     final normalizedEmail = email.trim().toLowerCase();
     final existing = await getUserProfileFromCloud(normalizedUid);
-    if (existing != null) {
-      final hasName = existing.fullName.trim().isNotEmpty &&
-          !AppRepository.isGenericAccountName(existing.fullName);
-      final hasFirst = (existing.firstName?.trim().isNotEmpty ?? false);
-      if (hasName || hasFirst) return existing;
-    }
+    // A user can always read their own profile. Its role remains authoritative
+    // even when its display name is empty or generic.
+    if (existing != null && existing.role.trim().isNotEmpty) return existing;
 
     if (_cloud.isAvailable) {
-      final teacherClasses =
-          await _cloud.getTeacherClassesForTeacher(normalizedUid);
+      // Legacy profiles without a role may still be identified by a teacher's
+      // own classes. Parent links are deliberately not queried here because
+      // they require a trusted caregiver session.
+      final teacherClasses = await _cloud.getTeacherClassesForTeacher(
+        normalizedUid,
+      );
       if (teacherClasses.isNotEmpty) {
         return RemoteUserProfile(
           firebaseUid: normalizedUid,
@@ -787,19 +808,10 @@ class NotificationSyncService {
           role: 'teacher',
         );
       }
-
-      final parentLinks =
-          await _cloud.getParentChildLinksForParent(normalizedUid);
-      if (parentLinks.isNotEmpty) {
-        return RemoteUserProfile(
-          firebaseUid: normalizedUid,
-          email: normalizedEmail,
-          fullName: '',
-          role: 'parent',
-        );
-      }
     }
 
+    // Truly legacy accounts without a usable profile retain the old learner
+    // fallback. Current sign-up always writes a role-bearing user profile.
     return RemoteUserProfile(
       firebaseUid: normalizedUid,
       email: normalizedEmail,
@@ -843,7 +855,8 @@ class NotificationSyncService {
   Future<List<RemoteLearnerCategory>> getLearnerCategoriesFromCloud(
     String learnerFirebaseUid,
   ) async {
-    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return const [];
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty)
+      return const [];
     try {
       return await _cloud.getLearnerCategories(learnerFirebaseUid);
     } catch (e, st) {
@@ -870,7 +883,8 @@ class NotificationSyncService {
   Future<List<RemoteLearnerCustomPhrase>> getLearnerCustomPhrasesFromCloud(
     String learnerFirebaseUid,
   ) async {
-    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return const [];
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty)
+      return const [];
     try {
       return await _cloud.getLearnerCustomPhrases(learnerFirebaseUid);
     } catch (e, st) {
@@ -897,7 +911,8 @@ class NotificationSyncService {
   Future<List<RemoteLearnerFavorite>> getLearnerFavoritesFromCloud(
     String learnerFirebaseUid,
   ) async {
-    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return const [];
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty)
+      return const [];
     try {
       return await _cloud.getLearnerFavorites(learnerFirebaseUid);
     } catch (e, st) {
@@ -924,7 +939,8 @@ class NotificationSyncService {
   Future<List<RemoteLearnerSpeakHistory>> getLearnerSpeakHistoryFromCloud(
     String learnerFirebaseUid,
   ) async {
-    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty) return const [];
+    if (!_cloud.isAvailable || learnerFirebaseUid.trim().isEmpty)
+      return const [];
     try {
       return await _cloud.getLearnerSpeakHistory(learnerFirebaseUid);
     } catch (e, st) {
@@ -977,17 +993,17 @@ class NotificationSyncService {
           parentFirebaseUid: parentFirebaseUid,
         )
         .listen(
-      (remoteItems) async {
-        await _repository.upsertRemoteParentNotifications(
-          parentUserId: parentUserId,
-          items: remoteItems,
+          (remoteItems) async {
+            await _repository.upsertRemoteParentNotifications(
+              parentUserId: parentUserId,
+              items: remoteItems,
+            );
+            _onParentNotificationsChanged?.call();
+          },
+          onError: (Object e, StackTrace st) {
+            debugPrint('Parent notification sync error: $e\n$st');
+          },
         );
-        _onParentNotificationsChanged?.call();
-      },
-      onError: (Object e, StackTrace st) {
-        debugPrint('Parent notification sync error: $e\n$st');
-      },
-    );
   }
 
   Future<void> markRemoteNotificationRead(String remoteId) async {
@@ -1020,11 +1036,11 @@ class NotificationSyncService {
     _learnerEnrollmentSubscription = _cloud
         .watchClassEnrollmentsForLearner(learnerFirebaseUid)
         .listen(
-      (_) => _onLearnerEnrollmentsChanged?.call(),
-      onError: (Object e, StackTrace st) {
-        debugPrint('Learner enrollment sync error: $e\n$st');
-      },
-    );
+          (_) => _onLearnerEnrollmentsChanged?.call(),
+          onError: (Object e, StackTrace st) {
+            debugPrint('Learner enrollment sync error: $e\n$st');
+          },
+        );
   }
 
   Future<void> stopLearnerEnrollmentSync() async {
@@ -1047,20 +1063,20 @@ class NotificationSyncService {
     _teacherEnrollmentSubscription = _cloud
         .watchClassEnrollmentsForTeacher(teacherFirebaseUid)
         .listen(
-      (items) => _onTeacherEnrollmentsChanged?.call(items),
-      onError: (Object e, StackTrace st) {
-        debugPrint('Teacher enrollment sync error: $e\n$st');
-      },
-    );
+          (items) => _onTeacherEnrollmentsChanged?.call(items),
+          onError: (Object e, StackTrace st) {
+            debugPrint('Teacher enrollment sync error: $e\n$st');
+          },
+        );
 
     _teacherClassSubscription = _cloud
         .watchTeacherClassesForTeacher(teacherFirebaseUid)
         .listen(
-      (items) => _onTeacherClassesChanged?.call(items),
-      onError: (Object e, StackTrace st) {
-        debugPrint('Teacher class sync error: $e\n$st');
-      },
-    );
+          (items) => _onTeacherClassesChanged?.call(items),
+          onError: (Object e, StackTrace st) {
+            debugPrint('Teacher class sync error: $e\n$st');
+          },
+        );
   }
 
   Future<void> stopTeacherMonitoringSync() async {
@@ -1121,17 +1137,17 @@ class NotificationSyncService {
           teacherFirebaseUid: teacherFirebaseUid,
         )
         .listen(
-      (remoteItems) async {
-        await _repository.mergeRemoteTeacherAlerts(
-          teacherUserId: teacherUserId,
-          items: remoteItems,
+          (remoteItems) async {
+            await _repository.mergeRemoteTeacherAlerts(
+              teacherUserId: teacherUserId,
+              items: remoteItems,
+            );
+            _onTeacherAlertsChanged?.call();
+          },
+          onError: (Object e, StackTrace st) {
+            debugPrint('Teacher alert sync error: $e\n$st');
+          },
         );
-        _onTeacherAlertsChanged?.call();
-      },
-      onError: (Object e, StackTrace st) {
-        debugPrint('Teacher alert sync error: $e\n$st');
-      },
-    );
   }
 
   Future<void> stopTeacherAlertSync() async {
@@ -1152,11 +1168,11 @@ class NotificationSyncService {
     _parentChildLinkSubscription = _cloud
         .watchParentChildLinks(parentFirebaseUid)
         .listen(
-      (_) => _onParentChildLinksChanged?.call(),
-      onError: (Object e, StackTrace st) {
-        debugPrint('Parent child link sync error: $e\n$st');
-      },
-    );
+          (_) => _onParentChildLinksChanged?.call(),
+          onError: (Object e, StackTrace st) {
+            debugPrint('Parent child link sync error: $e\n$st');
+          },
+        );
   }
 
   Future<void> stopParentChildLinkSync() async {
@@ -1167,7 +1183,8 @@ class NotificationSyncService {
 
   Future<void> startPersonalBoardSync({
     required String learnerFirebaseUid,
-    required void Function(RemoteLearnerPersonalBoardSnapshot snapshot) onChanged,
+    required void Function(RemoteLearnerPersonalBoardSnapshot snapshot)
+    onChanged,
   }) async {
     await stopPersonalBoardSync();
     _onPersonalBoardChanged = onChanged;
@@ -1183,11 +1200,11 @@ class NotificationSyncService {
     _personalBoardSubscription = _cloud
         .watchLearnerPersonalBoard(learnerFirebaseUid)
         .listen(
-      (snapshot) => _onPersonalBoardChanged?.call(snapshot),
-      onError: (Object e, StackTrace st) {
-        debugPrint('Personal board sync error: $e\n$st');
-      },
-    );
+          (snapshot) => _onPersonalBoardChanged?.call(snapshot),
+          onError: (Object e, StackTrace st) {
+            debugPrint('Personal board sync error: $e\n$st');
+          },
+        );
   }
 
   Future<void> stopPersonalBoardSync() async {
@@ -1211,12 +1228,14 @@ class NotificationSyncService {
       return;
     }
 
-    _userProfileSubscription = _cloud.watchUserProfile(firebaseUid).listen(
-      (profile) => _onUserProfileChanged?.call(profile),
-      onError: (Object e, StackTrace st) {
-        debugPrint('User profile sync error: $e\n$st');
-      },
-    );
+    _userProfileSubscription = _cloud
+        .watchUserProfile(firebaseUid)
+        .listen(
+          (profile) => _onUserProfileChanged?.call(profile),
+          onError: (Object e, StackTrace st) {
+            debugPrint('User profile sync error: $e\n$st');
+          },
+        );
   }
 
   Future<void> stopUserProfileSync() async {

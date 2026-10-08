@@ -9,11 +9,18 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/caregiver_security/$(request.auth.uid)).data.sessionId != null
         && get(/databases/$(database)/documents/caregiver_security/$(request.auth.uid)).data.sessionId == request.auth.token.trustedSession;
     }
+    function trustedDeviceHash() {
+      return get(/databases/$(database)/documents/caregiver_security/$(request.auth.uid)).data.get('deviceHash', null);
+    }
+    // A learner is visible only on the phone that scanned their QR, and only
+    // while that phone is still the parent's trusted phone.
     function parentOf(uid) {
       return trustedParent()
         && exists(/databases/$(database)/documents/learner_caregivers/$(uid))
         && get(/databases/$(database)/documents/learner_caregivers/$(uid)).data.active == true
-        && get(/databases/$(database)/documents/learner_caregivers/$(uid)).data.parentUid == request.auth.uid;
+        && get(/databases/$(database)/documents/learner_caregivers/$(uid)).data.parentUid == request.auth.uid
+        && trustedDeviceHash() != null
+        && get(/databases/$(database)/documents/learner_caregivers/$(uid)).data.get('deviceHash', '') == trustedDeviceHash();
     }
     function teacherOf(uid) {
       return signedIn() && exists(/databases/$(database)/documents/teacher_learner_access/$(request.auth.uid + '_' + uid));
@@ -32,7 +39,9 @@ service cloud.firestore {
     match /teacher_learner_access/{id} { allow read, write: if false; }
     match /user_security/{id} { allow read, write: if false; }
     match /parent_child_links/{id} {
-      allow read: if (self(resource.data.parentFirebaseUid) && trustedParent())
+      allow read: if (self(resource.data.parentFirebaseUid) && trustedParent()
+          && trustedDeviceHash() != null
+          && resource.data.get('deviceHash', '') == trustedDeviceHash())
         || self(resource.data.learnerFirebaseUid) || teacherOf(resource.data.learnerFirebaseUid);
       allow create, delete: if false;
       allow update: if self(resource.data.learnerFirebaseUid)

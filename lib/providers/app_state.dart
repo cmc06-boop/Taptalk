@@ -56,6 +56,7 @@ import '../services/firebase_service.dart';
 import '../services/firestore_notification_backend.dart';
 import '../services/notification_sync_service.dart';
 import '../services/device_sms_service.dart';
+import '../services/caregiver_access.dart';
 import '../services/caregiver_security_service.dart';
 import '../services/negative_usage_sms_service.dart';
 import '../services/network_status.dart';
@@ -175,6 +176,16 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   final Set<String> _locallyRemovedFavoriteKeys = {};
   List<HistoryModel> _history = [];
   List<LinkedChildModel> _linkedChildren = [];
+  CaregiverAccess _caregiverAccess = CaregiverAccess.unknown;
+  bool _parentEmailChecked = false;
+  bool _parentEmailVerified = true;
+  bool _emailVerifiedPendingContinue = false;
+  bool _deviceRegisteredPendingContinue = false;
+  bool _deviceKnownTrusted = false;
+  String? _deviceRegistrationEmail;
+  List<Map<String, dynamic>> _legacyLearners = [];
+  Future<void>? _caregiverRefresh;
+  int _caregiverGeneration = 0;
   List<ParentNotification> _notifications = [];
   int? _selectedChildId;
   List<EnrolledClassModel> _enrolledClasses = [];
@@ -437,6 +448,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   List<LinkedChildModel> get linkedChildren => _linkedChildren;
+  CaregiverAccess get caregiverAccess => _caregiverAccess;
+  bool get parentNeedsEmailVerification =>
+      _user?.isParent == true &&
+      _user?.isPhoneAccount != true &&
+      _parentEmailChecked &&
+      (!_parentEmailVerified || _emailVerifiedPendingContinue);
+  List<Map<String, dynamic>> get legacyLearners => _legacyLearners;
+  bool get _caregiverTrusted => _caregiverAccess == CaregiverAccess.trusted;
   List<ParentNotification> get notifications =>
       List.unmodifiable(_notifications);
   int get unreadNotificationCount =>
@@ -719,6 +738,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         if (_user!.isLearner) {
           await _routeUserAfterOnboardingChecks();
         } else if (_user!.isParent) {
+          await _loadDeviceKnownTrusted();
           await _ensureStarterData();
           await _loadLinkedChildren(syncCloudInBackground: true);
           await _routeUserAfterOnboardingChecks();
@@ -837,7 +857,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
     }
-    if (_user!.isParent && CloudScope.notifications) {
+    if (_user!.isParent) {
       await _syncCloudDataAfterFirebaseReady();
     }
     if (_user!.isParent || _user!.isTeacher) {
@@ -1041,6 +1061,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _startParentChildLinkSync() async {
     if (_user == null || !_user!.isParent || !CloudScope.syncMonitoring) return;
+    if (!_caregiverTrusted) return;
     final parentFirebaseUid = await _resolveParentFirebaseUid();
     if (parentFirebaseUid == null) return;
     await _notificationSync.startParentChildLinkSync(
@@ -1130,8 +1151,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
     final teacherFirebaseUid =
         (FirebaseService.instance.currentUid?.trim().isNotEmpty ?? false)
-            ? FirebaseService.instance.currentUid!.trim()
-            : (await _resolveAccountFirebaseUid())?.trim() ?? '';
+        ? FirebaseService.instance.currentUid!.trim()
+        : (await _resolveAccountFirebaseUid())?.trim() ?? '';
     if (teacherFirebaseUid.isEmpty) return;
     await _loadDeletedClassCodes();
     await _syncJoinRequestsFromCloudForTeacher();
@@ -1189,8 +1210,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await _ensureCloudAuthSession();
     final teacherFirebaseUid =
         (FirebaseService.instance.currentUid?.trim().isNotEmpty ?? false)
-            ? FirebaseService.instance.currentUid!.trim()
-            : (await _resolveAccountFirebaseUid())?.trim() ?? '';
+        ? FirebaseService.instance.currentUid!.trim()
+        : (await _resolveAccountFirebaseUid())?.trim() ?? '';
     if (teacherFirebaseUid.isEmpty) return;
     await _loadDeletedClassCodes();
     try {
@@ -1271,16 +1292,17 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final learnerFirebaseUid = request.learnerFirebaseUid?.trim() ?? '';
     final teacherFirebaseUid =
         (FirebaseService.instance.currentUid?.trim().isNotEmpty ?? false)
-            ? FirebaseService.instance.currentUid!.trim()
-            : (request.teacherFirebaseUid?.trim() ?? '');
+        ? FirebaseService.instance.currentUid!.trim()
+        : (request.teacherFirebaseUid?.trim() ?? '');
     final respondedAt = DateTime.now();
     await _repo.updateJoinRequestStatus(
       requestId: requestId,
       status: ClassJoinRequestStatus.accepted,
       respondedAt: respondedAt,
     );
-    _pendingJoinRequests =
-        _pendingJoinRequests.where((item) => item.id != requestId).toList();
+    _pendingJoinRequests = _pendingJoinRequests
+        .where((item) => item.id != requestId)
+        .toList();
     _joinRequestsRevision++;
     notifyListeners();
     if (learnerFirebaseUid.isNotEmpty && teacherFirebaseUid.isNotEmpty) {
@@ -1345,15 +1367,16 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       status: ClassJoinRequestStatus.rejected,
       respondedAt: respondedAt,
     );
-    _pendingJoinRequests =
-        _pendingJoinRequests.where((item) => item.id != requestId).toList();
+    _pendingJoinRequests = _pendingJoinRequests
+        .where((item) => item.id != requestId)
+        .toList();
     _joinRequestsRevision++;
     notifyListeners();
     final learnerFirebaseUid = request.learnerFirebaseUid?.trim() ?? '';
     final teacherFirebaseUid =
         (FirebaseService.instance.currentUid?.trim().isNotEmpty ?? false)
-            ? FirebaseService.instance.currentUid!.trim()
-            : (request.teacherFirebaseUid?.trim() ?? '');
+        ? FirebaseService.instance.currentUid!.trim()
+        : (request.teacherFirebaseUid?.trim() ?? '');
     if (learnerFirebaseUid.isNotEmpty && teacherFirebaseUid.isNotEmpty) {
       _pushToCloudInBackground(
         'Join request reject',
@@ -1426,21 +1449,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _syncCloudDataAfterFirebaseReady() async {
-    if (_user == null || !CloudScope.notifications) return;
+    if (_user == null) return;
     try {
       if (_user!.isParent) {
-        await _syncLinkedChildrenFromCloud();
-        _linkedChildren = await _repo.getLinkedChildren(_user!.id);
-        if (_linkedChildren.isEmpty) {
-          _selectedChildId = null;
-        } else if (_selectedChildId == null ||
-            !_linkedChildren.any((c) => c.learnerId == _selectedChildId)) {
-          _selectedChildId = _linkedChildren.first.learnerId;
+        await _refreshParentEmailStatus();
+        if (_parentEmailVerified) {
+          await refreshCaregiverAccess();
         }
-        await _loadNotifications();
-        await _syncLinkedChildrenToCloud();
-        await _startParentNotificationSync();
-        await _startParentChildLinkSync();
       }
       notifyListeners();
     } catch (e, st) {
@@ -1495,7 +1510,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       await _ensureStarterData();
       await _goToRouteReplacingStack(AppRoute.chooseCategory);
     } else if (_user!.isParent) {
-      await _goToRouteReplacingStack(AppRoute.myChild);
+      await _goToRouteReplacingStack(AppRoute.home);
     } else if (_user!.isTeacher) {
       await _goToRouteReplacingStack(AppRoute.teacherDashboard);
     }
@@ -1526,6 +1541,16 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   void _resetAccountSession() {
     _resetLearnerSessionData();
     _linkedChildren = [];
+    _caregiverAccess = CaregiverAccess.unknown;
+    _parentEmailChecked = false;
+    _parentEmailVerified = true;
+    _emailVerifiedPendingContinue = false;
+    _deviceRegisteredPendingContinue = false;
+    _deviceKnownTrusted = false;
+    _deviceRegistrationEmail = null;
+    _legacyLearners = [];
+    _caregiverRefresh = null;
+    _caregiverGeneration++;
     _notifications = [];
     _selectedChildId = null;
     _teacherClasses = [];
@@ -1878,12 +1903,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         profile: profile,
         cloudSource: cloudSnapshot,
       );
-      if (_user?.id != account.id || FirebaseService.instance.currentUid != uid) return;
+      if (_user?.id != account.id || FirebaseService.instance.currentUid != uid)
+        return;
       final updated = await _repo.applyRemoteUserProfile(
         userId: account.id,
         profile: profile,
       );
-      if (updated != null && _user?.id == account.id && FirebaseService.instance.currentUid == uid) {
+      if (updated != null &&
+          _user?.id == account.id &&
+          FirebaseService.instance.currentUid == uid) {
         _user = updated;
         final settings = await _repo.getUserSettings(_user!.id);
         _welcomeFirstName = AppRepository.welcomeFirstNameFrom(
@@ -2349,9 +2377,19 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       await _notificationSync.initialize();
       var cloudProfile = await _notificationSync.getUserProfileFromCloud(uid);
       final cloudSnapshot = cloudProfile;
-      if (cloudProfile != null &&
-          AppRepository.isGenericAccountName(cloudProfile.fullName)) {
-        cloudProfile = null;
+      // The signed-in user's own profile is authoritative for their role.
+      // A generic display name ("Learner", "Parent", or "Teacher") must not
+      // discard that profile and trigger protected cross-collection lookups.
+      if (cloudProfile == null && user != null) {
+        // Same-device login can safely retain the role recorded at sign-up
+        // while a delayed/missing cloud profile is repaired in the background.
+        cloudProfile = RemoteUserProfile(
+          firebaseUid: uid,
+          email: normalizedEmail,
+          fullName: user.fullName,
+          role: user.role,
+          themeKey: user.themeKey,
+        );
       }
       cloudProfile ??= await _notificationSync.resolveUserProfileForLogin(
         firebaseUid: uid,
@@ -2392,6 +2430,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('user_id', _user!.id);
     await _applyCrossDevicePreferencesFromAccount();
+
+    if (_user!.isParent) {
+      // Settle the security step first so an unregistered phone goes straight
+      // to device verification instead of opening Home.
+      await _refreshParentEmailStatus();
+    }
 
     if (_user!.isLearner || _user!.isParent || _user!.isTeacher) {
       await _routeUserAfterOnboardingChecks();
@@ -2582,7 +2626,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           );
         }
       } else {
-        final existing = await _repo.findUserByEmail(normalizedEmail) ??
+        final existing =
+            await _repo.findUserByEmail(normalizedEmail) ??
             await _repo.findUserByFirebaseUid(firebaseUid);
         if (existing == null) {
           rethrow;
@@ -2610,6 +2655,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
         await _setLanguageOnboardingDone(_user!.id, false);
         await _goToRouteReplacingStack(AppRoute.chooseLanguage);
+        _parentEmailChecked = true;
+        _parentEmailVerified = false;
       } else if (role == 'teacher') {
         _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
         await _setLanguageOnboardingDone(_user!.id, false);
@@ -2764,7 +2811,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       if (profileEmail.isEmpty) {
         return AppStrings.loginFailedTryAgain(_language);
       }
-      final profileName = FirebaseService.instance.currentUserDisplayName ??
+      final profileName =
+          FirebaseService.instance.currentUserDisplayName ??
           profileEmail.split('@').first;
 
       if (resolvedRole == null || resolvedRole.isEmpty) {
@@ -2932,6 +2980,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('user_id', _user!.id);
     await _applyCrossDevicePreferencesFromAccount();
+
+    if (_user!.isParent) {
+      // Settle the security step first so an unregistered phone goes straight
+      // to device verification instead of opening Home.
+      await _refreshParentEmailStatus();
+    }
 
     if (_user!.isLearner || _user!.isParent || _user!.isTeacher) {
       await _routeUserAfterOnboardingChecks();
@@ -3322,7 +3376,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (_user?.isLearner ?? false) {
       await setRoute(AppRoute.chooseTheme, replace: true);
     } else if (_user?.isParent ?? false) {
-      await setRoute(AppRoute.myChild, replace: true);
+      await setRoute(AppRoute.home, replace: true);
     } else if (_user?.isTeacher ?? false) {
       await setRoute(AppRoute.teacherDashboard, replace: true);
     } else {
@@ -3630,7 +3684,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       if (!_notificationSync.isCloudAvailable) return;
       final uid = await _learnerFirebaseUidForSync();
       if (uid == null || uid.isEmpty) return;
-      final effectiveCategoryKey = AppRepository.isLessonCategoryKey(categoryKey)
+      final effectiveCategoryKey =
+          AppRepository.isLessonCategoryKey(categoryKey)
           ? categoryKey
           : AppRepository.normalizeCategoryKey(categoryKey);
       final syncKey = AppRepository.remoteActivitySyncKey(
@@ -3726,8 +3781,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       unawaited(_syncPendingLearnerActivityToCloud());
     }
     unawaited(_enforceFirebaseAccountStillExists());
-    if (_user != null && _user!.isParent && CloudScope.syncMonitoring) {
-      unawaited(refreshLinkedChildren(cloudSyncInBackground: true));
+    if (_user != null && _user!.isParent) {
+      unawaited(refreshCaregiverAccess());
     }
   }
 
@@ -3780,9 +3835,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (_user!.isParent || _user!.isTeacher) {
       await _syncFirebaseSessionAfterRestore();
       if (_user!.isParent) {
-        await refreshLinkedChildren(cloudSyncInBackground: false);
-        await _startParentNotificationSync();
-        await _startParentChildLinkSync();
+        await refreshCaregiverAccess();
       }
       if (_user!.isTeacher) {
         await refreshTeacherClasses(cloudSyncInBackground: false);
@@ -4278,6 +4331,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       if (!await _ensureCloudAuthSession()) return;
     }
     if (_user!.isParent) {
+      if (!_caregiverTrusted) return;
       if (_linkedChildren.isEmpty) {
         await _loadLinkedChildren(syncCloudInBackground: false);
       }
@@ -4350,6 +4404,23 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _loadLinkedChildren({bool syncCloudInBackground = false}) async {
     if (_user == null || !_user!.isParent) {
+      _linkedChildren = [];
+      _selectedChildId = null;
+      return;
+    }
+    if (!_caregiverTrusted) {
+      // A phone already confirmed as trusted shows its saved list right away
+      // while the background check runs; cloud sync still waits for it.
+      if (_showCachedChildren) {
+        _linkedChildren = await _repo.getLinkedChildren(_user!.id);
+        if (!_linkedChildren.any((c) => c.learnerId == _selectedChildId)) {
+          _selectedChildId = _linkedChildren.isEmpty
+              ? null
+              : _linkedChildren.first.learnerId;
+        }
+        await _loadNotifications();
+        return;
+      }
       _linkedChildren = [];
       _selectedChildId = null;
       return;
@@ -4461,7 +4532,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _syncLinkedChildrenFromCloud() async {
-    if (_user == null || !_user!.isParent) return;
+    if (_user == null || !_user!.isParent || !_caregiverTrusted) return;
     if (!_notificationSync.isCloudAvailable) return;
     if (await NetworkStatus.isOffline()) return;
     final parentFirebaseUid = await _resolveParentFirebaseUid();
@@ -4599,7 +4670,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
             fullName: student.fullName,
           ));
         }
-      } else {
+      } else if (_caregiverTrusted) {
         var children = _linkedChildren;
         if (children.isEmpty) {
           children = await _repo.getLinkedChildren(recipientUserId);
@@ -4804,6 +4875,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _startParentNotificationSync() async {
     if (_user == null || !_user!.isParent || !CloudScope.notifications) return;
+    if (!_caregiverTrusted) return;
     final firebaseUid = await _resolveParentFirebaseUid();
     if (firebaseUid == null) {
       debugPrint('Parent notification sync skipped: no Firebase UID.');
@@ -4875,8 +4947,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
-    final learnerUid =
-        _user!.isLearner ? (expectedUid.isNotEmpty ? expectedUid : authUser.uid) : '';
+    final learnerUid = _user!.isLearner
+        ? (expectedUid.isNotEmpty ? expectedUid : authUser.uid)
+        : '';
 
     Future<void> logoutDeletedLearner() async {
       if (learnerUid.isNotEmpty) {
@@ -4927,12 +5000,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final firebaseAuth = FirebaseService.instance.auth;
     if (firebaseAuth == null || firebaseAuth.currentUser == null) return;
 
-    _firebaseAccountInvalidationSubscription =
-        firebaseAuth.idTokenChanges().listen((user) {
-      if (_loggingOutDeletedFirebaseAccount || _user == null) return;
-      if (user != null) return;
-      unawaited(_logoutBecauseFirebaseAccountDeleted());
-    });
+    _firebaseAccountInvalidationSubscription = firebaseAuth
+        .idTokenChanges()
+        .listen((user) {
+          if (_loggingOutDeletedFirebaseAccount || _user == null) return;
+          if (user != null) return;
+          unawaited(_logoutBecauseFirebaseAccountDeleted());
+        });
   }
 
   Future<void> _logoutBecauseFirebaseAccountDeleted({
@@ -4943,7 +5017,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     debugPrint('Firebase account deleted; signing out local session.');
     try {
       if (!alreadyPurged && _user!.isLearner) {
-        final uid = _user!.firebaseUid?.trim() ??
+        final uid =
+            _user!.firebaseUid?.trim() ??
             FirebaseService.instance.currentUid?.trim();
         if (uid != null && uid.isNotEmpty) {
           await _notificationSync.purgeLearnerCloudPresence(uid);
@@ -5297,7 +5372,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
       var user = await _repo.findUserByFirebaseUid(uid);
-      if (user == null && fallbackLocalUserId != null && fallbackLocalUserId > 0) {
+      if (user == null &&
+          fallbackLocalUserId != null &&
+          fallbackLocalUserId > 0) {
         user = await _repo.findUserById(fallbackLocalUserId);
       }
       if (user != null && remoteName != user.fullName) {
@@ -5364,6 +5441,534 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       teacherUserId: _user!.id,
       limit: limit,
     );
+  }
+
+  Future<void> _refreshParentEmailStatus() async {
+    if (_user?.isParent != true || _user!.isPhoneAccount) {
+      _parentEmailChecked = true;
+      _parentEmailVerified = true;
+      return;
+    }
+    if (!_parentEmailChecked) await _loadDeviceKnownTrusted();
+    await FirebaseService.instance.initialize();
+    final authUser = FirebaseAuth.instance.currentUser;
+    if (authUser == null || (authUser.email?.trim().isEmpty ?? true)) {
+      _parentEmailChecked = true;
+      _parentEmailVerified = true;
+      notifyListeners();
+      return;
+    }
+    try {
+      await authUser.reload();
+    } catch (e, st) {
+      debugPrint('Parent email reload failed: $e\n$st');
+    }
+    final current = FirebaseAuth.instance.currentUser;
+    _parentEmailVerified = current?.emailVerified == true;
+    _parentEmailChecked = true;
+    notifyListeners();
+  }
+
+  Future<String?> sendParentVerificationEmail() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return AppStrings.notSignedIn(_language);
+      await user.sendEmailVerification();
+      return null;
+    } catch (e, st) {
+      debugPrint('Send verification email failed: $e\n$st');
+      return _language == AppLanguage.filipino
+          ? 'Hindi maipadala ang verification email. Subukan ulit mamaya.'
+          : 'Unable to send the verification email. Try again in a moment.';
+    }
+  }
+
+  Future<bool> confirmParentEmailVerified() async {
+    await _refreshParentEmailStatus();
+    if (_parentEmailVerified) {
+      _emailVerifiedPendingContinue = true;
+      notifyListeners();
+      unawaited(refreshCaregiverAccess());
+    }
+    return _parentEmailVerified;
+  }
+
+  void finishParentEmailVerification() {
+    _emailVerifiedPendingContinue = false;
+    notifyListeners();
+  }
+
+  Future<void> refreshCaregiverAccess() async {
+    if (_user?.isParent != true) return;
+    final inFlight = _caregiverRefresh;
+    if (inFlight != null) return inFlight;
+    final run = _refreshCaregiverAccessBody();
+    _caregiverRefresh = run;
+    try {
+      await run;
+    } finally {
+      if (identical(_caregiverRefresh, run)) _caregiverRefresh = null;
+    }
+  }
+
+  Future<void> _refreshCaregiverAccessBody() async {
+    if (_user?.isParent != true) return;
+    final generation = ++_caregiverGeneration;
+    if (!_parentEmailChecked) await _refreshParentEmailStatus();
+    if (generation != _caregiverGeneration) return;
+    if (!_parentEmailVerified) return;
+    try {
+      await FirebaseService.instance.initialize();
+      if (generation != _caregiverGeneration) return;
+      if (FirebaseAuth.instance.currentUser == null) {
+        _setCaregiverAccess(CaregiverAccess.unavailable);
+        return;
+      }
+      final result = await CaregiverSecurityService.instance.call('status');
+      if (generation != _caregiverGeneration) return;
+      final plan = CaregiverAccessPlan.fromStatus(result['state'] as String?);
+      _legacyLearners = (result['learners'] as List? ?? [])
+          .whereType<Map>()
+          .map((learner) => Map<String, dynamic>.from(learner))
+          .toList();
+      if (plan.access == CaregiverAccess.trusted) {
+        await applyVerifiedCaregiverLinks(result['links'] as List? ?? []);
+        if (generation != _caregiverGeneration) return;
+        _setCaregiverAccess(CaregiverAccess.trusted);
+        await _startProtectedParentMonitoring();
+        return;
+      }
+      await _stopProtectedParentMonitoring();
+      if (generation != _caregiverGeneration) return;
+      _setCaregiverAccess(plan.access);
+    } on FirebaseFunctionsException catch (error) {
+      debugPrint('Caregiver access check failed: ${error.code}');
+      if (generation != _caregiverGeneration) return;
+      if (_caregiverAccess != CaregiverAccess.trusted &&
+          _caregiverAccess != CaregiverAccess.verifyDevice) {
+        _setCaregiverAccess(CaregiverAccess.unavailable);
+      }
+    } catch (e, st) {
+      debugPrint('Caregiver access check failed: $e\n$st');
+      if (generation != _caregiverGeneration) return;
+      if (_caregiverAccess != CaregiverAccess.trusted &&
+          _caregiverAccess != CaregiverAccess.verifyDevice) {
+        _setCaregiverAccess(CaregiverAccess.unavailable);
+      }
+    }
+  }
+
+  bool get _showCachedChildren =>
+      _deviceKnownTrusted &&
+      (_caregiverAccess == CaregiverAccess.unknown ||
+          _caregiverAccess == CaregiverAccess.unavailable);
+
+  void _setCaregiverAccess(CaregiverAccess access) {
+    _caregiverAccess = access;
+    if (access != CaregiverAccess.trusted && !_showCachedChildren) {
+      _linkedChildren = [];
+      _selectedChildId = null;
+    }
+    if (access == CaregiverAccess.trusted ||
+        access == CaregiverAccess.verifyDevice ||
+        access == CaregiverAccess.setup) {
+      _deviceKnownTrusted = access == CaregiverAccess.trusted;
+      unawaited(_saveDeviceKnownTrusted(_deviceKnownTrusted));
+    }
+    notifyListeners();
+  }
+
+  String? _trustedDeviceKey() {
+    final userId = _user?.id;
+    return userId == null ? null : 'caregiver_trusted_device_$userId';
+  }
+
+  Future<void> _loadDeviceKnownTrusted() async {
+    final key = _trustedDeviceKey();
+    if (key == null) {
+      _deviceKnownTrusted = false;
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    _deviceKnownTrusted = prefs.getBool(key) == true;
+  }
+
+  Future<void> _saveDeviceKnownTrusted(bool trusted) async {
+    final key = _trustedDeviceKey();
+    if (key == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (trusted) {
+      await prefs.setBool(key, true);
+    } else {
+      await prefs.remove(key);
+    }
+  }
+
+  Future<void> _startProtectedParentMonitoring() async {
+    if (!_caregiverTrusted || _user?.isParent != true) return;
+    await _loadLinkedChildren(syncCloudInBackground: true);
+    await _startParentNotificationSync();
+    await _startParentChildLinkSync();
+    unawaited(_prefetchMonitoredLearnerCachesWithRetry());
+  }
+
+  Future<void> _stopProtectedParentMonitoring() async {
+    await _notificationSync.stopParentSync();
+    await _notificationSync.stopParentChildLinkSync();
+  }
+
+  /// Shown on an untrusted phone until it is registered through the email
+  /// link, and once more right after registration succeeds.
+  ///
+  /// A phone not yet confirmed as trusted also waits here while the check
+  /// runs or the server is unreachable, so it never reaches Home first.
+  bool get parentNeedsDeviceRegistration {
+    final user = _user;
+    if (user == null || !user.isParent) return false;
+    if (parentNeedsEmailVerification) return false;
+    if (!_parentEmailChecked) {
+      return !_deviceKnownTrusted &&
+          user.isOnlineAccount &&
+          !user.isPhoneAccount;
+    }
+    if (_caregiverAccess == CaregiverAccess.verifyDevice ||
+        _deviceRegisteredPendingContinue) {
+      return true;
+    }
+    final awaitingCheck =
+        _caregiverAccess == CaregiverAccess.unknown ||
+        _caregiverAccess == CaregiverAccess.unavailable;
+    return awaitingCheck &&
+        !_deviceKnownTrusted &&
+        user.isOnlineAccount &&
+        !user.isPhoneAccount;
+  }
+
+  bool get deviceCheckPending =>
+      _caregiverAccess == CaregiverAccess.unknown ||
+      _caregiverAccess == CaregiverAccess.unavailable;
+
+  bool get deviceCheckUnavailable =>
+      _caregiverAccess == CaregiverAccess.unavailable;
+
+  Future<void> retryDeviceCheck() => refreshCaregiverAccess();
+
+  bool get deviceRegistrationDone =>
+      _deviceRegisteredPendingContinue &&
+      _caregiverAccess == CaregiverAccess.trusted;
+
+  String? get deviceRegistrationEmail => _deviceRegistrationEmail;
+
+  String? _deviceRequestKey() {
+    final uid = FirebaseService.instance.currentUid;
+    return uid == null ? null : 'caregiver_device_request_$uid';
+  }
+
+  /// Starts replacing the trusted phone with this one. The server only sends
+  /// the link to the account's pinned recovery email, and only after a recent
+  /// sign-in, so a leaked password alone cannot move the trusted phone.
+  Future<({String? error, bool needsReauth})> sendDeviceRegistrationLink({
+    String? password,
+    bool google = false,
+  }) async {
+    String pick(String en, String fil) =>
+        _language == AppLanguage.filipino ? fil : en;
+    if (_user?.isParent != true) {
+      return (error: AppStrings.notSignedIn(_language), needsReauth: false);
+    }
+    final key = _deviceRequestKey();
+    if (key == null) {
+      return (error: AppStrings.notSignedIn(_language), needsReauth: false);
+    }
+    try {
+      if (google || (password?.isNotEmpty ?? false)) {
+        await CaregiverSecurityService.instance.reauthenticate(
+          password: password,
+          google: google,
+        );
+      }
+      final prefs = await SharedPreferences.getInstance();
+      final createdAt = prefs.getInt('${key}_at') ?? 0;
+      // Server requests last 15 minutes; never spend a send on an expired one.
+      final savedIsFresh =
+          DateTime.now().millisecondsSinceEpoch - createdAt <
+          const Duration(minutes: 14).inMilliseconds;
+      for (var attempt = 0; attempt < 2; attempt++) {
+        var requestId = attempt == 0 && savedIsFresh
+            ? prefs.getString(key)
+            : null;
+        if (requestId == null || requestId.isEmpty) {
+          final created = await CaregiverSecurityService.instance.call(
+            'requestReplacement',
+          );
+          requestId = created['requestId'] as String?;
+          if (requestId == null || requestId.isEmpty) break;
+          await prefs.setString(key, requestId);
+          await prefs.setInt(
+            '${key}_at',
+            DateTime.now().millisecondsSinceEpoch,
+          );
+        }
+        try {
+          final sent = await CaregiverSecurityService.instance.call(
+            'sendRecovery',
+            {'requestId': requestId},
+          );
+          final email = sent['recoveryEmail'] as String?;
+          if (email == null || email.isEmpty) break;
+          await CaregiverSecurityService.instance.sendRecoveryEmailLink(email);
+          _deviceRegistrationEmail = email;
+          notifyListeners();
+          return (error: null, needsReauth: false);
+        } on FirebaseFunctionsException catch (error) {
+          // A saved request expires after 15 minutes; start a fresh one once.
+          if (error.code == 'permission-denied' && attempt == 0) {
+            await prefs.remove(key);
+            continue;
+          }
+          rethrow;
+        }
+      }
+      return (
+        error: pick(
+          'Could not send the verification link. Try again.',
+          'Hindi maipadala ang verification link. Subukan ulit.',
+        ),
+        needsReauth: false,
+      );
+    } on FirebaseAuthException catch (error) {
+      debugPrint('Device registration reauth failed: ${error.code}');
+      return (
+        error: switch (error.code) {
+          'too-many-requests' => pick(
+            'Too many attempts. Please try again later.',
+            'Masyadong maraming subok. Subukan ulit mamaya.',
+          ),
+          'wrong-password' || 'invalid-credential' => pick(
+            'Wrong password. Try again.',
+            'Mali ang password. Subukan ulit.',
+          ),
+          _ => pick(
+            'Could not confirm your account. Try again.',
+            'Hindi makumpirma ang account. Subukan ulit.',
+          ),
+        },
+        needsReauth: true,
+      );
+    } on FirebaseFunctionsException catch (error) {
+      debugPrint('Device registration failed: ${error.code}');
+      return switch (error.code) {
+        'unauthenticated' => (
+          error: pick(
+            'For your security, confirm your account first.',
+            'Para sa seguridad, kumpirmahin muna ang iyong account.',
+          ),
+          needsReauth: true,
+        ),
+        'resource-exhausted' => (
+          error: () {
+            final details = error.details;
+            final seconds = details is Map
+                ? (details['retryAfterSeconds'] as num?)?.toInt()
+                : null;
+            final minutes = ((seconds ?? 900) / 60).ceil().clamp(1, 60);
+            return pick(
+              'Too many tries. Try again in $minutes min.',
+              'Masyadong maraming subok. Subukan ulit sa loob ng $minutes min.',
+            );
+          }(),
+          needsReauth: false,
+        ),
+        'failed-precondition' => (
+          error: pick(
+            'Your sign-in email no longer matches the email registered for this account.',
+            'Hindi tugma ang email mo sa naka-register na email ng account na ito.',
+          ),
+          needsReauth: false,
+        ),
+        _ => (
+          error: pick(
+            'Could not send the verification link. Check your connection and try again.',
+            'Hindi maipadala ang verification link. Suriin ang internet at subukan ulit.',
+          ),
+          needsReauth: false,
+        ),
+      };
+    } on StateError catch (error) {
+      return (error: error.message, needsReauth: true);
+    } catch (e, st) {
+      debugPrint('Device registration failed: $e\n$st');
+      return (
+        error: pick(
+          'Could not send the verification link. Check your connection and try again.',
+          'Hindi maipadala ang verification link. Suriin ang internet at subukan ulit.',
+        ),
+        needsReauth: false,
+      );
+    }
+  }
+
+  /// Finishes registration with the link from the email. On success this
+  /// phone becomes the only trusted phone and the old one loses access.
+  Future<String?> completeDeviceRegistration(String link) async {
+    String pick(String en, String fil) =>
+        _language == AppLanguage.filipino ? fil : en;
+    if (_user?.isParent != true) return AppStrings.notSignedIn(_language);
+    final key = _deviceRequestKey();
+    final prefs = await SharedPreferences.getInstance();
+    final requestId = key == null ? null : prefs.getString(key);
+    if (requestId == null || requestId.isEmpty) {
+      return pick(
+        'Send a new verification link from this phone first.',
+        'Magpadala muna ng bagong verification link mula sa phone na ito.',
+      );
+    }
+    try {
+      final valid = await CaregiverSecurityService.instance
+          .completeRecoveryEmailLink(link.trim());
+      if (!valid) {
+        return pick(
+          'That is not a TapTalk verification link. Copy the whole link from the email.',
+          'Hindi ito TapTalk verification link. Kopyahin ang buong link mula sa email.',
+        );
+      }
+      await CaregiverSecurityService.instance.call('verifyRecovery', {
+        'requestId': requestId,
+      });
+      await CaregiverSecurityService.instance.call('confirmReplacement', {
+        'requestId': requestId,
+      });
+      await prefs.remove(key!);
+      _deviceRegistrationEmail = null;
+      _deviceRegisteredPendingContinue = true;
+      final stale = _caregiverRefresh;
+      if (stale != null) await stale.catchError((Object _) {});
+      await refreshCaregiverAccess();
+      return null;
+    } on FirebaseAuthException catch (error) {
+      debugPrint('Device registration link failed: ${error.code}');
+      return switch (error.code) {
+        'invalid-action-code' || 'expired-action-code' => pick(
+          'This link expired or was already used. Send a new link.',
+          'Nag-expire na o nagamit na ang link na ito. Magpadala ng bago.',
+        ),
+        'user-mismatch' || 'invalid-email' => pick(
+          'This link belongs to a different email. Use the link sent to your account email.',
+          'Para sa ibang email ang link na ito. Gamitin ang link na ipinadala sa email ng account mo.',
+        ),
+        _ => pick(
+          'Could not verify the link. Send a new link and try again.',
+          'Hindi ma-verify ang link. Magpadala ng bago at subukan ulit.',
+        ),
+      };
+    } on FirebaseFunctionsException catch (error) {
+      debugPrint('Device registration confirm failed: ${error.code}');
+      if (error.code == 'permission-denied' && key != null) {
+        await prefs.remove(key);
+      }
+      return pick(
+        'This link expired or was already used. Send a new link.',
+        'Nag-expire na o nagamit na ang link na ito. Magpadala ng bago.',
+      );
+    } catch (e, st) {
+      debugPrint('Device registration confirm failed: $e\n$st');
+      return pick(
+        'Could not verify the link. Check your connection and try again.',
+        'Hindi ma-verify ang link. Suriin ang internet at subukan ulit.',
+      );
+    }
+  }
+
+  void finishDeviceRegistration() {
+    _deviceRegisteredPendingContinue = false;
+    notifyListeners();
+  }
+
+  /// Applies the account email check when the verification link opens TapTalk
+  /// instead of the browser.
+  Future<bool> applyParentEmailVerificationLink(String link) async {
+    final uri = Uri.tryParse(CaregiverSecurityService.unwrapEmailLink(link));
+    final code = uri?.queryParameters['oobCode'];
+    if (uri?.queryParameters['mode'] != 'verifyEmail' ||
+        code == null ||
+        code.isEmpty) {
+      return false;
+    }
+    try {
+      await FirebaseAuth.instance.applyActionCode(code);
+    } catch (e, st) {
+      debugPrint('Apply email verification failed: $e\n$st');
+    }
+    return confirmParentEmailVerified();
+  }
+
+  Future<String?> confirmLegacyCaregiverLinks(List<String> profileCodes) async {
+    if (_user?.isParent != true) return AppStrings.notSignedIn(_language);
+    try {
+      await CaregiverSecurityService.instance.call('confirmLegacy', {
+        'profileCodes': profileCodes,
+      });
+      await refreshCaregiverAccess();
+      return null;
+    } on FirebaseFunctionsException catch (error) {
+      return error.code == 'unauthenticated'
+          ? 'Sign in again, then confirm these links.'
+          : 'Could not confirm these links. Scan any conflicting learner code and try again.';
+    } catch (_) {
+      return 'Could not confirm these links. Check your connection and try again.';
+    }
+  }
+
+  Future<({String? requestId, String? error})>
+  requestCaregiverTransfer() async {
+    if (_user?.isParent != true) {
+      return (requestId: null, error: AppStrings.notSignedIn(_language));
+    }
+    try {
+      final result = await CaregiverSecurityService.instance.call(
+        'requestTransfer',
+      );
+      final requestId = result['requestId'] as String?;
+      if (requestId == null || requestId.isEmpty) {
+        return (requestId: null, error: 'Could not create a transfer request.');
+      }
+      return (requestId: requestId, error: null);
+    } on FirebaseFunctionsException catch (_) {
+      return (
+        requestId: null,
+        error:
+            'Could not create a transfer request. Verify your email and try again.',
+      );
+    } catch (_) {
+      return (
+        requestId: null,
+        error:
+            'Could not create a transfer request. Check your connection and try again.',
+      );
+    }
+  }
+
+  Future<String?> approveCaregiverTransfer({
+    required String requestId,
+    required int learnerId,
+  }) async {
+    if (_user?.isParent != true) return AppStrings.notSignedIn(_language);
+    final learnerUid = await linkedLearnerFirebaseUid(learnerId);
+    if (learnerUid == null || learnerUid.isEmpty) {
+      return 'Link the learner on this phone before transferring.';
+    }
+    try {
+      await CaregiverSecurityService.instance.call('transfer', {
+        'learnerUid': learnerUid,
+        'requestId': requestId.trim(),
+      });
+      await refreshCaregiverAccess();
+      return null;
+    } on FirebaseFunctionsException catch (_) {
+      return 'Transfer was not approved. Check the request code and try again.';
+    } catch (_) {
+      return 'Transfer was not approved. Check your connection and try again.';
+    }
   }
 
   void selectChild(int learnerId) {
@@ -5449,8 +6054,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       await _repo.linkParentToChild(parentId, learner.id);
       _linkedChildren = await _repo.getLinkedChildren(parentId);
       _selectedChildId = learner.id;
+      _caregiverGeneration++;
+      _caregiverAccess = CaregiverAccess.trusted;
       _bumpLiveDataRevision();
       notifyListeners();
+      unawaited(_startProtectedParentMonitoring());
       if (result['alreadyLinked'] == true) {
         return AppStrings.childAlreadyLinked(_language);
       }
@@ -5459,10 +6067,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       return switch (error.code) {
         'failed-precondition' =>
           'Verify your account email before scanning the learner QR.',
-        'unauthenticated' =>
-          'Sign in online, then scan the learner QR again.',
-        'permission-denied' =>
-          'Unable to link. This learner may already have a caregiver, or leftover conflicting links need confirmation on the trusted-device screen.',
+        'unauthenticated' => 'Sign in online, then scan the learner QR again.',
+        'permission-denied' => AppStrings.anotherCaregiverOwnsLearner(
+          _language,
+        ),
         _ =>
           'Unable to link. Connect to the internet, verify caregiver authorization, and verify your account email.',
       };
@@ -5480,11 +6088,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final previousSelected = _selectedChildId;
 
     // Reflect immediately in the UI; rollback below if cloud unlink fails.
-    _linkedChildren =
-        _linkedChildren.where((c) => c.learnerId != learnerId).toList();
+    _linkedChildren = _linkedChildren
+        .where((c) => c.learnerId != learnerId)
+        .toList();
     if (_selectedChildId == learnerId) {
-      _selectedChildId =
-          _linkedChildren.isEmpty ? null : _linkedChildren.first.learnerId;
+      _selectedChildId = _linkedChildren.isEmpty
+          ? null
+          : _linkedChildren.first.learnerId;
     }
     _bumpLiveDataRevision();
     notifyListeners();
@@ -5540,8 +6150,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
     _linkedChildren = await _repo.getLinkedChildren(_user!.id);
     if (_selectedChildId == learnerId) {
-      _selectedChildId =
-          _linkedChildren.isEmpty ? null : _linkedChildren.first.learnerId;
+      _selectedChildId = _linkedChildren.isEmpty
+          ? null
+          : _linkedChildren.first.learnerId;
     }
     _bumpLiveDataRevision();
     notifyListeners();
@@ -6078,13 +6689,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final className = (classRow['class_name'] as String?) ?? '';
     final teacherFirebaseUid =
         (FirebaseService.instance.currentUid?.trim().isNotEmpty ?? false)
-            ? FirebaseService.instance.currentUid!.trim()
-            : (_user!.firebaseUid ??
-                  await FirebaseService.instance.waitForAuthUid() ??
-                  '');
-    if (classCode.isEmpty ||
-        className.isEmpty ||
-        teacherFirebaseUid.isEmpty) {
+        ? FirebaseService.instance.currentUid!.trim()
+        : (_user!.firebaseUid ??
+              await FirebaseService.instance.waitForAuthUid() ??
+              '');
+    if (classCode.isEmpty || className.isEmpty || teacherFirebaseUid.isEmpty) {
       return false;
     }
     try {
@@ -6287,8 +6896,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         alertType == ParentAlertType.customMessage ||
         (trimmedCustom != null && trimmedCustom.isNotEmpty);
     final teacherName = _user!.fullName;
-    final effectiveAlertType =
-        isCustom ? ParentAlertType.customMessage : alertType;
+    final effectiveAlertType = isCustom
+        ? ParentAlertType.customMessage
+        : alertType;
 
     final title = isCustom
         ? AppStrings.teacherCustomAlertTitle(
@@ -6709,8 +7319,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       return AppStrings.classAlreadyEnrolled(_language);
     }
     final learnerFirebaseUid =
-        (FirebaseService.instance.currentUid ?? _user!.firebaseUid)
-            ?.trim() ??
+        (FirebaseService.instance.currentUid ?? _user!.firebaseUid)?.trim() ??
         '';
     final teacherUserId = classRow['teacher_user_id'] as int?;
     final teacherFirebaseUid =
@@ -7590,8 +8199,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
     if (_user!.isLearner) {
       try {
-        if (await NetworkStatus.isOffline()) throw StateError('Online review required');
-        await CaregiverSecurityService.instance.call('reviewEmergencyContacts', {'contacts': cleaned});
+        if (await NetworkStatus.isOffline())
+          throw StateError('Online review required');
+        await CaregiverSecurityService.instance.call(
+          'reviewEmergencyContacts',
+          {'contacts': cleaned},
+        );
       } catch (_) {
         return 'Contacts saved on this phone. Connect to the internet and save the reviewed contacts again to enable teacher SMS.';
       }

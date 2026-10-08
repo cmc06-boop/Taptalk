@@ -1,46 +1,65 @@
 # Caregiver account, trusted phone and active session
 
-The learner QR establishes the first caregiver relationship. The server records
-one active caregiver per learner and one trusted phone per caregiver account.
-Only a server-issued session claim matching that account's current security
-record allows protected Firestore reads. Password login on another phone does
-not grant learner access and does not revoke the previous phone.
+The parent verifies an account email once, then uses TapTalk normally. Home,
+Favorites, Settings, and Profile do not require a learner QR. My Child is the
+only place that asks for a learner.
 
-The parent must verify an account email before the first QR link. TapTalk pins
-that verified address for recovery; changing the Firebase Auth account email
-does not silently change the recovery address. Lost-phone recovery through
-Firebase email links requires the signed-in Auth email to still match that pin;
-otherwise use the old trusted phone to approve the new device. These flows
-require an email account. Mobile-number-only accounts need a verified email
-before onboarding or legacy migration; SMS OTP recovery is not implemented.
+The first caregiver link is automatic: a verified account scans the learner QR,
+the server creates the caregiver link, trusts that phone, and opens monitoring.
+There is no administrator, teacher, or manual Firebase registration in that
+path. A different account cannot take a learner that already has a caregiver
+just by scanning the QR. That move needs an explicit transfer from the current
+caregiver.
 
-## Phone replacement
+Each learner is bound to the account **and** the phone that scanned their QR
+(`learner_caregivers/{learner}.deviceHash`, mirrored on `parent_child_links`).
+Firestore and Storage rules only allow a parent to read a learner, their
+activity, notifications, media, or link record when that device hash equals the
+parent's current trusted phone. A verified phone replacement (email link or
+old-phone approval) moves every linked learner to the new phone in the same
+transaction, so no rescan is needed. The email link opens TapTalk directly via
+the App Link on `/__/auth/links` (`hosting/.well-known/assetlinks.json`); if a
+browser opens it instead, `hosting/caregiver-recovery` hands it to the app.
 
-After detecting an untrusted phone, the app creates an approval request automatically, valid for 15 minutes. The old phone
-checks pending requests while TapTalk is open, every 15 seconds and when the app
-returns to the foreground. The parent compares the request codes and approves
-on the old phone. That server transaction trusts the new phone and invalidates
-the old phone's protected session. Requests use in-app polling, not FCM or a
-background push notification; open TapTalk on the old phone to approve.
+A parent account has exactly one trusted phone. The first phone where a
+verified parent signs in becomes that phone automatically (`status` registers
+it). Reopening the app on the trusted phone checks in the background and does
+not show a security page.
 
-If the old phone is unavailable, the parent signs in again and requests a
-Firebase Auth sign-in link at the pinned recovery address, which must still
-match the signed-in account email. They open that link on the new phone.
-Recovery requires a recent login. Opening the email link does not revoke the
-old phone until the parent explicitly confirms replacement. Recovery does not
-require an administrator or a custom SMTP account.
+## Another phone, phone replacement and recovery
+
+On any other phone, `status` returns `verificationRequired` and TapTalk shows a
+full-screen "Verify this device" step. The parent account cannot be used there
+until the step finishes. A password alone never moves the trusted phone.
+
+1. `requestReplacement` creates a 15-minute request bound to this phone.
+2. `sendRecovery` requires a sign-in from the last 5 minutes (otherwise the
+   screen asks for the password or Google again) and an Auth email that matches
+   the pinned recovery address. TapTalk then sends an email sign-in link there.
+3. The parent opens the link on this phone (or pastes it). The link
+   reauthenticates with the `emailLink` provider, `verifyRecovery` approves the
+   request, and `confirmReplacement` makes this phone the trusted phone.
+4. The previous phone's session and device credential stop working at once. If
+   it opens TapTalk again, it is shown the same verification step.
+
+This is also the lost-phone recovery path: the old phone is not needed. A
+forgotten password is reset with Forgot password on the login screen first.
+The old trusted phone can still approve a pending replacement directly
+(`approveReplacement`).
+
+Requires Firebase Console → Authentication → Sign-in method → Email/Password →
+"Email link (passwordless sign-in)" enabled, and `taptalk-2d809.firebaseapp.com`
+in Authorized domains.
 
 Normal logout ends the protected session while keeping the phone credential.
-Reinstallation or removal of app data requires device verification again.
-Caregiver transfer requires the current trusted caregiver's explicit approval
-of a request created by the next caregiver, whose email is verified. Transfer
-revokes the former caregiver's protected session and learner relationship.
+Reinstallation or removal of app data makes the phone untrusted, so it needs the
+same email-link verification. Caregiver transfer still requires the current trusted caregiver
+to approve a request from the next caregiver. Transfer revokes the former
+caregiver's protected session and learner relationship.
 
-Protected parent screens are locked until an online server status check succeeds.
-Offline monitoring from cached learner information is not available. Firestore
-rules reject revoked session claims on subsequent server reads; an old phone's
-UI locks when it next checks status or returns to the foreground. Data already
-seen cannot be retroactively removed from a screenshot or another copy.
+Protected learner reads still require a server-issued session. Firestore rules
+reject revoked session claims. Data already seen cannot be retroactively
+removed from a screenshot or another copy.
 
 ## Backend setup and deployment
 
@@ -63,15 +82,14 @@ an unregistered token causes all caregiver and enrollment callables to fail.
 Enable Firebase email/password sign-in and email verification, and verify that
 the app is configured for the same project as the deployed backend.
 
-Mobile debug builds activate the App Check debug provider. Rebuild any APK made
-before that activation fix, start it on the test phone, and find the generated
-debug secret in Android Logcat (`DebugAppCheckProvider`). Register that phone's
-token under Firebase Console → App Check → Android app → Manage debug tokens.
-Restart the app after registration. Each test installation needs its own token;
-keep the token private. Sideloaded release test APKs can pass
-`--dart-define=TAPTALK_APP_CHECK_DEBUG_TOKEN=...` so Play Integrity is not
-required. Windows debug builds require `APP_CHECK_DEBUG_TOKEN` in the process
-environment. See the [Firebase debug-provider guide](https://firebase.google.com/docs/app-check/flutter/debug-provider).
+Mobile debug builds use one fixed token from the gitignored file
+`app_check_debug_token.local` at the repo root. Register that token once under
+Firebase Console → App Check → Android app → Manage debug tokens. Reinstalling
+a debug build keeps the same token, so it does not need to be registered again.
+Release builds use Play Integrity and ignore that file. Sideloaded release test
+APKs can still pass `--dart-define=TAPTALK_APP_CHECK_DEBUG_TOKEN=...`. Windows
+debug builds require `APP_CHECK_DEBUG_TOKEN` in the process environment. See the
+[Firebase debug-provider guide](https://firebase.google.com/docs/app-check/flutter/debug-provider).
 
 The runtime also needs permission to sign the custom tokens used for trusted
 sessions. Enable the IAM Service Account Credentials API, then grant Service

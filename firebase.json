@@ -8,6 +8,16 @@
   "functions": {
     "source": "functions"
   },
+  "hosting": {
+    "public": "hosting",
+    "ignore": ["firebase.json", "**/node_modules/**"],
+    "headers": [
+      {
+        "source": "/.well-known/assetlinks.json",
+        "headers": [{"key": "Content-Type", "value": "application/json"}]
+      }
+    ]
+  },
   "emulators": {
     "firestore": {
       "port": 8080

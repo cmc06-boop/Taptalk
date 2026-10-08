@@ -6,6 +6,7 @@ import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -169,6 +170,28 @@ class FirebaseService {
     }
   }
 
+  /// One local debug token, registered once in Firebase App Check.
+  /// Release builds ignore it and use Play Integrity / App Attest.
+  Future<String> _debugAppCheckToken() async {
+    const fromDefine = String.fromEnvironment(
+      'TAPTALK_APP_CHECK_DEBUG_TOKEN',
+    );
+    if (fromDefine.trim().isNotEmpty) return fromDefine.trim();
+    if (!kDebugMode || kIsWeb || !Platform.isAndroid) return '';
+    try {
+      final value = await const MethodChannel(
+        'com.taptalk/app_check',
+      ).invokeMethod<String>('debugToken');
+      final token = value?.trim() ?? '';
+      if (token.length >= 32) return token;
+    } on MissingPluginException {
+      return '';
+    } on PlatformException {
+      return '';
+    }
+    return '';
+  }
+
   Future<void> _activateAppCheck() async {
     if (_appCheckActivated) return;
 
@@ -178,9 +201,7 @@ class FirebaseService {
         ? Platform.environment['APP_CHECK_DEBUG_TOKEN']?.trim()
         : null;
 
-    const appCheckDebugToken = String.fromEnvironment(
-      'TAPTALK_APP_CHECK_DEBUG_TOKEN',
-    );
+    final appCheckDebugToken = await _debugAppCheckToken();
 
     // Mobile debug providers generate a token that the developer registers
     // in Firebase App Check. Never skip them: security callables require it.

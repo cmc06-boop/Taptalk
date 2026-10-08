@@ -7,6 +7,8 @@ import 'package:provider/provider.dart';
 import 'core/navigation/route_transitions.dart';
 import 'providers/app_state.dart';
 import 'widgets/caregiver_security_gate.dart';
+import 'widgets/device_registration_screen.dart';
+import 'widgets/email_verification_screen.dart';
 import 'screens/choose_category_screen.dart';
 import 'screens/choose_language_screen.dart';
 import 'screens/choose_role_screen.dart';
@@ -76,10 +78,15 @@ class TapTalkApp extends StatelessWidget {
                 },
                 child: ColoredBox(
                   color: theme.bgLight,
-                  child: app.user?.isParent == true
-                      ? CaregiverSecurityGate(
-                          key: ValueKey(app.user!.id),
-                          child: child ?? const SizedBox.shrink(),
+                  child: app.parentNeedsEmailVerification
+                      ? const _SecurityStepHost(
+                          key: ValueKey('email_verification'),
+                          child: EmailVerificationScreen(),
+                        )
+                      : app.parentNeedsDeviceRegistration
+                      ? const _SecurityStepHost(
+                          key: ValueKey('device_registration'),
+                          child: DeviceRegistrationScreen(),
                         )
                       : child ?? const SizedBox.shrink(),
                 ),
@@ -150,5 +157,25 @@ class TapTalkApp extends StatelessWidget {
       case AppRoute.phoneOtp:
         return const PhoneOtpScreen();
     }
+  }
+}
+
+/// Security steps render above the app navigator, so they get their own
+/// navigator for the overlay that text fields and dialogs need.
+class _SecurityStepHost extends StatelessWidget {
+  const _SecurityStepHost({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return HeroControllerScope.none(
+      child: Navigator(
+        onGenerateRoute: (_) => PageRouteBuilder<void>(
+          pageBuilder: (context, animation, secondaryAnimation) => child,
+          transitionDuration: Duration.zero,
+        ),
+      ),
+    );
   }
 }

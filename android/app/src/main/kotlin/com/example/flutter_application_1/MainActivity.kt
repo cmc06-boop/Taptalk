@@ -86,6 +86,23 @@ class MainActivity : FlutterActivity() {
             }
         }
 
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.taptalk/app_check",
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "debugToken" -> {
+                    val id = resources.getIdentifier(
+                        "taptalk_app_check_debug_token",
+                        "string",
+                        packageName,
+                    )
+                    result.success(if (id == 0) "" else getString(id))
+                }
+                else -> result.notImplemented()
+            }
+        }
+
         emailLinkChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "com.taptalk/email_links",

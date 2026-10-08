@@ -5,6 +5,13 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+val appCheckDebugTokenFile = rootProject.file("../app_check_debug_token.local")
+val appCheckDebugToken = if (appCheckDebugTokenFile.isFile) {
+    appCheckDebugTokenFile.readText().trim()
+} else {
+    ""
+}
+
 android {
     namespace = "com.example.flutter_application_1"
     compileSdk = flutter.compileSdkVersion
@@ -13,6 +20,12 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    // AGP 9 disables generated resource values unless this is on. The debug
+    // App Check token is injected with resValue.
+    buildFeatures {
+        resValues = true
     }
 
     defaultConfig {
@@ -29,6 +42,15 @@ android {
     }
 
     buildTypes {
+        debug {
+            if (appCheckDebugToken.length >= 32) {
+                resValue(
+                    "string",
+                    "taptalk_app_check_debug_token",
+                    appCheckDebugToken,
+                )
+            }
+        }
         release {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
