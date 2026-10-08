@@ -323,28 +323,31 @@ class _LinkedChildTile extends StatelessWidget {
                 ),
               ),
             ),
-            // The menu's own 24px height keeps the dots level with the name
-            // instead of centering against the whole two-line tile.
-            CompactPopupMenu(
-              iconColor: theme.textMain.withValues(alpha: 0.55),
-              onSelected: (value) {
-                if (value == 'unlink') onUnlink();
-                if (value == 'transfer') onTransfer();
-              },
-              actions: [
-                CompactMenuAction(
-                  value: 'transfer',
-                  label: AppStrings.transferCaregiver(lang),
-                  icon: Icons.swap_horiz_rounded,
-                  color: theme.textMain,
-                ),
-                CompactMenuAction(
-                  value: 'unlink',
-                  label: AppStrings.unlinkChild(lang),
-                  icon: Icons.link_off_rounded,
-                  color: const Color(0xFFC62828),
-                ),
-              ],
+            // Center the 24px dots button against the tile's 40px content.
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: CompactPopupMenu(
+                vertical: true,
+                iconColor: theme.textMain.withValues(alpha: 0.55),
+                onSelected: (value) {
+                  if (value == 'unlink') onUnlink();
+                  if (value == 'transfer') onTransfer();
+                },
+                actions: [
+                  CompactMenuAction(
+                    value: 'transfer',
+                    label: AppStrings.transferCaregiver(lang),
+                    icon: Icons.swap_horiz_rounded,
+                    color: theme.textMain,
+                  ),
+                  CompactMenuAction(
+                    value: 'unlink',
+                    label: AppStrings.unlinkChild(lang),
+                    icon: Icons.link_off_rounded,
+                    color: const Color(0xFFC62828),
+                  ),
+                ],
+              ),
             ),
           ],
         ),

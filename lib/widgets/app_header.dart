@@ -154,7 +154,6 @@ class AppHeader extends StatelessWidget {
                 onTap: onProfile,
                 accent: theme.bgAccent,
                 filled: true,
-                size: 48,
               )
             else
               const SizedBox(width: 48),

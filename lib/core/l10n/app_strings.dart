@@ -1508,9 +1508,7 @@ abstract final class AppStrings {
       : 'TapTalk parent transfer code: $code';
 
   static String transferCaregiver(AppLanguage lang) =>
-      lang == AppLanguage.filipino
-      ? 'Ilipat sa ibang parent'
-      : 'Transfer to another parent';
+      lang == AppLanguage.filipino ? 'Ilipat ang learner' : 'Transfer child';
 
   static String transferLearnerTitle(AppLanguage lang, String name) =>
       lang == AppLanguage.filipino ? 'Ilipat si $name?' : 'Transfer $name?';

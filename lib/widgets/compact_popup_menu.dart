@@ -36,8 +36,8 @@ class CompactPopupMenu extends StatefulWidget {
     required this.onSelected,
     required this.iconColor,
     this.vertical = false,
-    this.alignToEnd = false,
-    this.buttonWidth = 32,
+    this.alignToEnd = true,
+    this.buttonWidth = 40,
     this.buttonHeight = 24,
     this.dotsSize = 20,
     this.buttonBackground,
@@ -56,7 +56,8 @@ class CompactPopupMenu extends StatefulWidget {
   final bool vertical;
 
   /// Sit the sheet on the same end as the dots so it does not spill past a
-  /// card's right edge.
+  /// card's right edge. Actions menus are trailing controls throughout the app,
+  /// so this is the safe default.
   final bool alignToEnd;
   final double buttonWidth;
   final double buttonHeight;
