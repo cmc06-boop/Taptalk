@@ -53,9 +53,11 @@ in Authorized domains.
 
 Normal logout ends the protected session while keeping the phone credential.
 Reinstallation or removal of app data makes the phone untrusted, so it needs the
-same email-link verification. Caregiver transfer still requires the current trusted caregiver
-to approve a request from the next caregiver. Transfer revokes the former
-caregiver's protected session and learner relationship.
+same email-link verification. For caregiver transfer, the current caregiver
+reauthenticates and creates a child-specific, single-use code on their trusted
+phone. The next caregiver accepts it on their own trusted phone within 15
+minutes. Only that learner relationship moves; the former caregiver keeps their
+trusted phone and any other learners.
 
 Protected learner reads still require a server-issued session. Firestore rules
 reject revoked session claims. Data already seen cannot be retroactively

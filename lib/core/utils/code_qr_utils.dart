@@ -35,6 +35,16 @@ abstract final class CodeQrUtils {
     return null;
   }
 
+  static String? extractTransferCode(String raw) {
+    final upper = raw.trim().toUpperCase();
+    final direct = RegExp(r'^TR-?([A-HJ-NP-Z2-9]{8})$').firstMatch(upper);
+    if (direct != null) return 'TR-${direct.group(1)}';
+    final shared = RegExp(
+      r'(?:^|[^A-Z0-9])TR-([A-HJ-NP-Z2-9]{8})(?![A-Z0-9])',
+    ).firstMatch(upper);
+    return shared == null ? null : 'TR-${shared.group(1)}';
+  }
+
   static String? extractProfileCode(String raw) {
     final trimmed = raw.trim();
     if (trimmed.isEmpty) return null;

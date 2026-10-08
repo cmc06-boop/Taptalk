@@ -1,3 +1,4 @@
+const {randomBytes} = require('node:crypto');
 const {initializeApp} = require('firebase-admin/app');
 const {getAuth} = require('firebase-admin/auth');
 const {getFirestore, FieldValue} = require('firebase-admin/firestore');
@@ -8,13 +9,14 @@ const db = getFirestore();
 const deny = () => { throw new HttpsError('permission-denied', 'Verification required or request unavailable.'); };
 const emailOf = value => typeof value === 'string' ? value.trim().toLowerCase() : '';
 const recentLogin = auth => Number.isFinite(auth.token.auth_time) && Date.now() / 1000 - auth.token.auth_time <= 300;
-const signInProvider = auth => auth.token?.firebase?.sign_in_provider;
 const ref = (collection, id) => db.collection(collection).doc(id);
 const id = value => {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value)) deny();
   return value;
 };
 const securityRef = uid => ref('caregiver_security', uid);
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const transferCode = () => `TR-${[...randomBytes(8)].map(byte => CODE_ALPHABET[byte & 31]).join('')}`;
 async function activeAccount(uid) {
   try {
     const account = await getAuth().getUser(uid);
@@ -137,12 +139,16 @@ exports.caregiverSecurity = onCall(
       const learner = profiles.docs[0];
       const learnerUid = learner.id;
       const ownerRef = ref('learner_caregivers', learnerUid);
-      const owner = (await tx.get(ownerRef)).data();
+      // An unlinked learner (including older inactive records) is free to link again.
+      const stored = (await tx.get(ownerRef)).data();
+      const owner = stored?.active === true ? stored : null;
       const legacy = await tx.get(db.collection('parent_child_links').where('learnerFirebaseUid', '==', learnerUid));
       // Deployment migration pins existing verified email ownership. An old
       // QR never bootstraps trust on an unverified replacement phone.
       if (!owner && !legacy.empty) deny();
-      if (owner && (owner.parentUid !== uid || owner.active !== true)) deny();
+      if (owner && owner.parentUid !== uid) {
+        throw new HttpsError('already-exists', 'This learner already has a caregiver.');
+      }
       const previousLinks = await tx.get(db.collection('parent_child_links').where('parentFirebaseUid', '==', uid).limit(1));
       if (!sec && !previousLinks.empty) deny();
       const sessionId = sec?.sessionId || newId();
@@ -164,15 +170,39 @@ exports.caregiverSecurity = onCall(
     });
     return {...result, ...(await issue(uid, result.sessionId))};
   }
-  if (action === 'requestReplacement' || action === 'requestTransfer') {
+  if (action === 'requestTransfer') {
+    await rateLimit(uid, 'replacement', 10, 15 * 60000);
+    if (!recentLogin(request.auth)) {
+      throw new HttpsError('unauthenticated', 'Confirm your account before transferring.');
+    }
+    const learnerUid = id(data.learnerUid);
+    const requestId = transferCode();
+    await db.runTransaction(async tx => {
+      const sec = (await tx.get(secRef)).data();
+      const owner = (await tx.get(ref('learner_caregivers', learnerUid))).data();
+      // Reauthentication replaces the custom trusted-session token. For this
+      // one action, recent account proof plus the bound device secret is the
+      // equivalent (and avoids reissuing/signing in with another token first).
+      if (!deviceMatches(secret, sec) || owner?.parentUid !== uid ||
+          owner.active !== true) deny();
+      tx.create(ref('device_replacements', requestId), {
+        fromUid: uid, learnerUid, kind: 'transfer',
+        giverGeneration: sec.generation, status: 'pending',
+        expiresAt: Date.now() + 15 * 60000,
+      });
+      tx.set(db.collection('security_audit').doc(), {
+        action: 'createTransfer', actor: uid, learnerUid,
+        at: FieldValue.serverTimestamp(),
+      });
+    });
+    return {requestId};
+  }
+  if (action === 'requestReplacement') {
     await rateLimit(uid, 'replacement', 10, 15 * 60000);
     const sec = (await secRef.get()).data();
-    const account = await getAuth().getUser(uid);
-    if (action === 'requestTransfer' && (!account.emailVerified || !account.email)) deny();
     const requestId = newId();
-    await ref('device_replacements', requestId).set({uid, deviceHash: hash(secret),
-      kind: action === 'requestTransfer' ? 'transfer' : 'replacement',
-      recoveryEmail: sec?.recoveryEmail ?? (action === 'requestTransfer' ? account.email : null),
+    await ref('device_replacements', requestId).create({uid, deviceHash: hash(secret),
+      kind: 'replacement', recoveryEmail: sec?.recoveryEmail ?? null,
       generation: sec?.generation ?? 0, status: 'pending', expiresAt: Date.now() + 15 * 60000});
     return {requestId};
   }
@@ -214,7 +244,8 @@ exports.caregiverSecurity = onCall(
     });
     return {ok: true};
   }
-  // Unlink is a revocation tombstone; scanning the old QR cannot reopen it.
+  // Unlink fully releases the learner: no caregiver record remains, so the
+  // learner's QR can be linked again from a trusted phone.
   if (action === 'unlink') {
     const learnerUid = id(data.learnerUid);
     await db.runTransaction(async tx => {
@@ -222,8 +253,9 @@ exports.caregiverSecurity = onCall(
       const ownerRef = ref('learner_caregivers', learnerUid);
       const owner = (await tx.get(ownerRef)).data();
       if (!trusted(request.auth, sec) || !deviceMatches(secret, sec) || owner?.parentUid !== uid) deny();
-      tx.update(ownerRef, {active: false});
+      tx.delete(ownerRef);
       tx.delete(ref('parent_child_links', `${uid}_${learnerUid}`));
+      tx.set(db.collection('security_audit').doc(), {action: 'unlink', uid, learnerUid, at: FieldValue.serverTimestamp()});
     });
     return {ok: true};
   }
@@ -290,11 +322,11 @@ async function boundLinks(uid, deviceHash) {
 
 async function recover(request, secret) {
   const {data, auth} = request;
-  if (!recentLogin(auth)) throw new HttpsError('unauthenticated', 'Sign in again before recovery.');
   const target = ref('device_replacements', id(data.requestId));
   const account = await getAuth().getUser(auth.uid);
   const accountEmail = emailOf(account.email);
   if (data.action === 'sendRecovery') {
+    if (!recentLogin(auth)) throw new HttpsError('unauthenticated', 'Sign in again before recovery.');
     const recoveryEmail = await db.runTransaction(async tx => {
       const sec = (await tx.get(securityRef(auth.uid))).data();
       const pending = (await tx.get(target)).data();
@@ -313,11 +345,10 @@ async function recover(request, secret) {
     await rateLimit(auth.uid, 'recovery', 5, 15 * 60000);
     return {sent: true, recoveryEmail};
   }
-  if (signInProvider(auth) !== 'emailLink') {
-    throw new HttpsError('failed-precondition', 'Open the recovery link from your email on this phone.');
-  }
+  const oobCode = data.oobCode;
+  if (typeof oobCode !== 'string' || !/^[A-Za-z0-9_-]{10,512}$/.test(oobCode)) deny();
   const tokenEmail = emailOf(auth.token.email || account.email);
-  await db.runTransaction(async tx => {
+  const checkPending = async tx => {
     const pending = (await tx.get(target)).data();
     const sec = (await tx.get(securityRef(auth.uid))).data();
     const pinned = emailOf(sec?.recoveryEmail);
@@ -325,10 +356,40 @@ async function recover(request, secret) {
     if (pending?.uid !== auth.uid || pending.kind !== 'replacement' || pending.deviceHash !== hash(secret) ||
         pending.status !== 'pending' || pending.generation !== sec?.generation ||
         !pending.emailRecoveryPending || pending.expiresAt <= Date.now()) deny();
+    return pinned;
+  };
+  const pinned = await db.runTransaction(checkPending);
+  // ID tokens report "password" for both password and email-link sign-ins, so
+  // the one-time code from the email itself is the proof of email ownership.
+  await redeemEmailLink(pinned, oobCode, auth.uid);
+  await db.runTransaction(async tx => {
+    await checkPending(tx);
     tx.update(target, {status: 'approved', emailRecoveryPending: FieldValue.delete()});
   });
   return {verified: true};
 }
+
+async function redeemEmailLink(email, oobCode, uid) {
+  const response = await emailLinkSignIn(email, oobCode);
+  if (response.localId === uid) return;
+  if (response.error === 'INVALID_OOB_CODE' || response.error === 'EXPIRED_OOB_CODE') {
+    throw new HttpsError('failed-precondition', 'This link expired or was already used.', {reason: 'linkUsed'});
+  }
+  deny();
+}
+
+// Same public key the app ships with; Identity Toolkit only accepts it for this project.
+const AUTH_API_KEY = process.env.AUTH_API_KEY || 'AIzaSyC78hfq5hRC1f9i3jUpL3nHYCz5ONnRFx0';
+const emailLinkSignIn = async (email, oobCode) => {
+  const reply = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithEmailLink?key=${AUTH_API_KEY}`,
+    {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({email, oobCode})});
+  const body = await reply.json().catch(() => ({}));
+  if (reply.ok) return {localId: body.localId};
+  const message = String(body?.error?.message ?? '');
+  if (reply.status >= 500) throw new HttpsError('unavailable', 'Try again in a moment.');
+  return {error: message.split(' ')[0]};
+};
 
 // Leftover client-written links stay blocked until this parent confirms.
 // Conflicting learner records also require that learner's QR.
@@ -380,39 +441,40 @@ async function confirmLegacy(request, secret) {
   return issue(auth.uid, sessionId);
 }
 
-// Transfer requires the current trusted caregiver's explicit approval and a
-// request created by the next caregiver, who has verified their own email.
+// The current caregiver creates a child-specific offer only after recent
+// reauthentication. The next caregiver accepts it on their own trusted phone.
 async function transfer(request, secret) {
   const {data, auth} = request;
-  const learnerUid = id(data.learnerUid);
   const target = ref('device_replacements', id(data.requestId));
+  const receiver = await getAuth().getUser(auth.uid);
+  if (!receiver.emailVerified || !receiver.email) deny();
   return db.runTransaction(async tx => {
-    const currentRef = securityRef(auth.uid);
-    const current = (await tx.get(currentRef)).data();
+    const nextRef = securityRef(auth.uid);
+    const next = (await tx.get(nextRef)).data();
     const pending = (await tx.get(target)).data();
+    const learnerUid = id(pending?.learnerUid);
+    const currentRef = securityRef(id(pending?.fromUid));
+    const current = (await tx.get(currentRef)).data();
     const ownerRef = ref('learner_caregivers', learnerUid);
     const owner = (await tx.get(ownerRef)).data();
-    if (!trusted(auth, current) || !deviceMatches(secret, current) || owner?.parentUid !== auth.uid ||
-        owner.active !== true || pending?.kind !== 'transfer' || pending.uid === auth.uid ||
-        pending.status !== 'pending' || pending.expiresAt <= Date.now() || !pending.recoveryEmail) deny();
-    const nextRef = securityRef(pending.uid);
-    const next = (await tx.get(nextRef)).data();
+    if (!trusted(auth, next) || !deviceMatches(secret, next) ||
+        pending?.kind !== 'transfer' || pending.fromUid === auth.uid ||
+        pending.status !== 'pending' || pending.expiresAt <= Date.now() ||
+        pending.giverGeneration !== current?.generation ||
+        owner?.parentUid !== pending.fromUid || owner.active !== true) deny();
     const learner = (await tx.get(ref('learner_profiles', learnerUid))).data();
-    if (!learner || pending.generation !== (next?.generation ?? 0)) deny();
-    // Existing caregivers must use their already trusted phone for a transfer.
-    if (next && next.deviceHash !== pending.deviceHash) deny();
-    tx.set(currentRef, {...current, sessionId: null, deviceHash: null, generation: current.generation + 1});
-    tx.set(nextRef, {deviceHash: pending.deviceHash, sessionId: newId(),
-      generation: (next?.generation ?? 0) + 1, recoveryEmail: next?.recoveryEmail ?? pending.recoveryEmail});
-    tx.set(ownerRef, {parentUid: pending.uid, active: true, deviceHash: pending.deviceHash});
+    if (!learner) deny();
+    // Only this learner moves; the former caregiver keeps their trusted phone
+    // and any other learners. Rules stop their reads of this learner at once.
+    tx.set(ownerRef, {parentUid: auth.uid, active: true, deviceHash: next.deviceHash});
     tx.update(ref('learner_profiles', learnerUid), {emergencyContacts: [], emergencyContactsNeedReview: true});
-    tx.delete(ref('parent_child_links', `${auth.uid}_${learnerUid}`));
-    tx.set(ref('parent_child_links', `${pending.uid}_${learnerUid}`), {
-      parentFirebaseUid: pending.uid, learnerFirebaseUid: learnerUid, deviceHash: pending.deviceHash,
+    tx.delete(ref('parent_child_links', `${pending.fromUid}_${learnerUid}`));
+    tx.set(ref('parent_child_links', `${auth.uid}_${learnerUid}`), {
+      parentFirebaseUid: auth.uid, learnerFirebaseUid: learnerUid, deviceHash: next.deviceHash,
       learnerName: learner.learnerName ?? '', learnerProfileCode: learner.profileCode ?? '', linkedAt: FieldValue.serverTimestamp()});
     tx.update(target, {status: 'consumed'});
-    tx.set(db.collection('security_audit').doc(), {action: 'transfer', actor: auth.uid,
-      parentUid: pending.uid, learnerUid, at: FieldValue.serverTimestamp()});
+    tx.set(db.collection('security_audit').doc(), {action: 'transfer',
+      actor: pending.fromUid, parentUid: auth.uid, learnerUid, at: FieldValue.serverTimestamp()});
     return {transferred: true};
   });
 }

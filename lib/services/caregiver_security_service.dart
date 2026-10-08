@@ -170,14 +170,22 @@ class CaregiverSecurityService {
         (uri?.queryParameters['oobCode']?.isNotEmpty ?? false);
   }
 
+  /// One-time code from the email; the server redeems it as proof of email
+  /// ownership because ID tokens cannot tell an email-link sign-in apart.
+  static String? recoveryOobCode(String rawLink) {
+    final link = unwrapEmailLink(rawLink);
+    if (!FirebaseAuth.instance.isSignInWithEmailLink(link)) return null;
+    final code = Uri.tryParse(link)?.queryParameters['oobCode'];
+    return code == null || code.isEmpty ? null : code;
+  }
+
   Future<bool> completeRecoveryEmailLink(String rawLink) async {
     final link = unwrapEmailLink(rawLink);
     if (!FirebaseAuth.instance.isSignInWithEmailLink(link)) return false;
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw StateError('Sign in again before recovery.');
     final prefs = await SharedPreferences.getInstance();
-    final email =
-        prefs.getString(_pendingRecoveryEmailKey) ?? user.email ?? '';
+    final email = prefs.getString(_pendingRecoveryEmailKey) ?? user.email ?? '';
     if (email.isEmpty) throw StateError('Recovery email is unavailable.');
     await user.reauthenticateWithCredential(
       EmailAuthProvider.credentialWithLink(email: email, emailLink: link),

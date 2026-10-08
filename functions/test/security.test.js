@@ -14,6 +14,18 @@ const A = 'a'.repeat(64), B = 'b'.repeat(64), C = 'c'.repeat(64);
 const account = uid => ({uid, email: `${uid}@example.test`, emailVerified: true});
 getAuth().getUser = async uid => account(uid);
 getAuth().createCustomToken = async (uid, claims) => JSON.stringify({uid, ...claims});
+const emailCodes = new Map();
+const realFetch = global.fetch;
+global.fetch = async (url, init) => {
+  if (!String(url).includes('accounts:signInWithEmailLink')) return realFetch(url, init);
+  const {email, oobCode} = JSON.parse(init.body);
+  const issued = emailCodes.get(oobCode);
+  emailCodes.delete(oobCode);
+  return issued && `${issued}@example.test` === email
+    ? {ok: true, status: 200, json: async () => ({localId: issued})}
+    : {ok: false, status: 400, json: async () => ({error: {message: 'INVALID_OOB_CODE'}})};
+};
+const emailCode = uid => { const code = `code_${newId()}`; emailCodes.set(code, uid); return code; };
 let env;
 const call = (uid, action, deviceSecret = A, data = {}, session, provider = 'password') => caregiverSecurity.run({
   auth: {uid, token: {auth_time: Math.floor(Date.now()/1000), email: `${uid}@example.test`,
@@ -50,7 +62,7 @@ test('first QR creates one owner and trusted session; re-scan is idempotent', as
 test('stolen QR denies another caregiver with no learner data in error', async () => {
   await link(); await parent('other');
   await assert.rejects(call('other', 'link', B, {profileCode: 'TT-12345678'}), e =>
-    e.code === 'permission-denied' && !e.message.includes('Private learner'));
+    e.code === 'already-exists' && !e.message.includes('Private learner'));
 });
 test('simultaneous first QR scans have exactly one winner', async () => {
   await parent('other');
@@ -143,9 +155,13 @@ test('recovery email link is pinned to the verified Auth email and requires expl
   getAuth().getUser = async uid => account(uid);
   const sent = await call('parent', 'sendRecovery', B, {requestId});
   assert.equal(sent.recoveryEmail, 'parent@example.test');
-  await assert.rejects(call('parent', 'verifyRecovery', B, {requestId}), {code: 'failed-precondition'});
-  await assert.rejects(call('parent', 'verifyRecovery', C, {requestId}, undefined, 'emailLink'));
-  await call('parent', 'verifyRecovery', B, {requestId}, undefined, 'emailLink');
+  await assert.rejects(call('parent', 'verifyRecovery', B, {requestId}), {code: 'permission-denied'});
+  await assert.rejects(call('parent', 'verifyRecovery', B, {requestId, oobCode: 'code_not_from_email'}),
+    {code: 'failed-precondition'});
+  await assert.rejects(call('parent', 'verifyRecovery', C, {requestId, oobCode: emailCode('parent')}));
+  const code = emailCode('parent');
+  await call('parent', 'verifyRecovery', B, {requestId, oobCode: code});
+  await assert.rejects(call('parent', 'verifyRecovery', B, {requestId, oobCode: code}));
   assert.equal((await get('caregiver_security/parent')).sessionId, session);
   const confirmed = await call('parent', 'confirmReplacement', B, {requestId});
   const recovered = await call('parent', 'status', B, {}, JSON.parse(confirmed.token).trustedSession);
@@ -161,7 +177,7 @@ test('stale password sessions and expired recovery requests are denied', async (
   const {requestId} = await call('parent', 'requestReplacement', B);
   await call('parent', 'sendRecovery', B, {requestId});
   await db.doc(`device_replacements/${requestId}`).update({expiresAt: 0});
-  await assert.rejects(call('parent', 'verifyRecovery', B, {requestId}, undefined, 'emailLink'));
+  await assert.rejects(call('parent', 'verifyRecovery', B, {requestId, oobCode: emailCode('parent')}));
   await assert.rejects(caregiverSecurity.run({auth: {uid: 'parent', token: {auth_time: 1, email: 'parent@example.test',
     firebase: {sign_in_provider: 'password'}}},
     data: {action: 'sendRecovery', deviceSecret: B, requestId}}), {code: 'unauthenticated'});
@@ -210,22 +226,50 @@ test('normal logout invalidates session but preserves trust; reinstall secret re
   assert.equal((await call('parent', 'status', A)).state, 'trusted');
   assert.equal((await call('parent', 'status', newId())).state, 'verificationRequired');
 });
-test('trusted caregiver transfer revokes former caregiver, session and old QR', async () => {
+test('transfer moves only that learner; the former caregiver keeps their phone and other learners', async () => {
   const session = await link(); await parent('next');
-  const {requestId} = await call('next', 'requestTransfer', B);
-  await assert.rejects(call('parent', 'transfer', C, {learnerUid: 'learner', requestId}));
-  await call('parent', 'transfer', A, {learnerUid: 'learner', requestId}, session);
+  await db.doc('learner_profiles/second').set({learnerFirebaseUid: 'second', learnerName: 'Second', profileCode: 'TT-87654321'});
+  await call('parent', 'link', A, {profileCode: 'TT-87654321'}, session);
+  const nextSession = JSON.parse((await call('next', 'status', B)).token).trustedSession;
+  await assert.rejects(caregiverSecurity.run({auth: {uid: 'parent', token: {
+    auth_time: 1, email: 'parent@example.test', trustedSession: session,
+    firebase: {sign_in_provider: 'password'}}},
+  data: {action: 'requestTransfer', deviceSecret: A, learnerUid: 'learner'}}),
+  {code: 'unauthenticated'});
+  // Fresh account proof plus the bound device secret works even though
+  // reauthentication replaced the token and dropped its trusted claim.
+  await assert.rejects(call('parent', 'requestTransfer', C, {learnerUid: 'learner'}));
+  const {requestId} = await call('parent', 'requestTransfer', A, {learnerUid: 'learner'});
+  assert.match(requestId, /^TR-[A-HJ-NP-Z2-9]{8}$/);
+  await assert.rejects(call('next', 'transfer', C, {requestId}, nextSession));
+  await call('next', 'transfer', B, {requestId}, nextSession);
   assert.equal((await get('learner_caregivers/learner')).parentUid, 'next');
   assert.equal(await get('parent_child_links/parent_learner'), undefined);
-  await assertFails(getDoc(doc(env.authenticatedContext('parent', {trustedSession: session}).firestore(), 'learner_profiles/learner')));
-  assert.equal((await call('next', 'status', B)).state, 'trusted');
-  await assert.rejects(call('parent', 'link', A, {profileCode: 'TT-12345678'}, session));
+  const parentDb = env.authenticatedContext('parent', {trustedSession: session}).firestore();
+  await assertFails(getDoc(doc(parentDb, 'learner_profiles/learner')));
+  await assertSucceeds(getDoc(doc(parentDb, 'learner_profiles/second')));
+  const former = await call('parent', 'status', A, {}, session);
+  assert.equal(former.state, 'trusted');
+  assert.deepEqual(former.links.map(link => link.learnerFirebaseUid), ['second']);
+  assert.equal((await call('next', 'status', B, {}, nextSession)).state, 'trusted');
+  await assert.rejects(call('parent', 'link', A, {profileCode: 'TT-12345678'}, session), {code: 'already-exists'});
 });
-test('unlink tombstone prevents old QR from granting a different caregiver', async () => {
+test('unlink fully releases the learner so its QR can be linked again', async () => {
   const session = await link();
   await call('parent', 'unlink', A, {learnerUid: 'learner'}, session);
-  await parent('other');
-  await assert.rejects(call('other', 'link', B, {profileCode: 'TT-12345678'}));
+  assert.equal(await get('learner_caregivers/learner'), undefined);
+  assert.equal(await get('parent_child_links/parent_learner'), undefined);
+  await assertFails(getDoc(doc(env.authenticatedContext('parent', {trustedSession: session}).firestore(), 'learner_profiles/learner')));
+  const again = await call('parent', 'link', A, {profileCode: 'TT-12345678'}, session);
+  assert.equal(again.alreadyLinked, false);
+  assert.equal((await get('learner_caregivers/learner')).parentUid, 'parent');
+});
+test('learners left inactive by the old unlink can be linked again', async () => {
+  const session = await link();
+  await db.doc('learner_caregivers/learner').update({active: false});
+  await db.doc('parent_child_links/parent_learner').delete();
+  await call('parent', 'link', A, {profileCode: 'TT-12345678'}, session);
+  assert.equal((await get('learner_caregivers/learner')).active, true);
 });
 test('clients cannot forge owners, trusted sessions, links or teacher access', async () => {
   const attacker = env.authenticatedContext('attacker').firestore();
@@ -266,12 +310,12 @@ test('notifications require the current caregiver grant and a scoped learner que
   await assertSucceeds(getDocs(query(collection(parentDb, 'parent_notifications'), where('parentFirebaseUid', '==', 'parent'), where('learnerFirebaseUid', '==', 'learner'))));
   await assertFails(getDoc(doc(parentDb, 'parent_notifications/revoked')));
   await parent('next');
-  const {requestId} = await call('next', 'requestTransfer', B);
-  await call('parent', 'transfer', A, {learnerUid: 'learner', requestId}, session);
-  // A former parent may recover their own account but never this learner's
-  // old notifications after its authorization has moved.
-  await db.doc('caregiver_security/parent').update({sessionId: 'recovered'});
-  await assertFails(getDoc(doc(env.authenticatedContext('parent', {trustedSession: 'recovered'}).firestore(), 'parent_notifications/current')));
+  const nextSession = JSON.parse((await call('next', 'status', B)).token).trustedSession;
+  const {requestId} = await call('parent', 'requestTransfer', A, {learnerUid: 'learner'}, session);
+  await call('next', 'transfer', B, {requestId}, nextSession);
+  // The former parent stays trusted but never reads this learner's old
+  // notifications after its authorization has moved.
+  await assertFails(getDoc(doc(parentDb, 'parent_notifications/current')));
 });
 test('private phrase media denies strangers and stale sessions; teacher lesson media remains readable', async () => {
   const session = await link();
@@ -332,8 +376,9 @@ test('deleted and disabled Auth accounts cannot mint replacement sessions', asyn
 test('caregiver transfer pauses SMS recipients until the learner explicitly reviews them', async () => {
   const session = await link(); await parent('next');
   await db.doc('learner_profiles/learner').update({emergencyContacts: ['09123456789']});
-  const {requestId} = await call('next', 'requestTransfer', B);
-  await call('parent', 'transfer', A, {learnerUid: 'learner', requestId}, session);
+  const nextSession = JSON.parse((await call('next', 'status', B)).token).trustedSession;
+  const {requestId} = await call('parent', 'requestTransfer', A, {learnerUid: 'learner'}, session);
+  await call('next', 'transfer', B, {requestId}, nextSession);
   const profile = await get('learner_profiles/learner');
   assert.deepEqual(profile.emergencyContacts, []);
   assert.equal(profile.emergencyContactsNeedReview, true);

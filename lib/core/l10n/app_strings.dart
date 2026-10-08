@@ -863,43 +863,42 @@ abstract final class AppStrings {
 
   static String switchAccountSubtitle(AppLanguage lang) =>
       lang == AppLanguage.filipino
-          ? 'Pumili ng account na naka-save sa device na ito. Hindi na kailangan ang password.'
-          : 'Choose an account saved on this device. You will not need a password.';
+      ? 'Pumili ng account na naka-save sa device na ito. Hindi na kailangan ang password.'
+      : 'Choose an account saved on this device. You will not need a password.';
 
   static String switchAccountEmpty(AppLanguage lang) =>
       lang == AppLanguage.filipino
-          ? 'Wala pang ibang naka-save na account.'
-          : 'No other saved accounts yet.';
+      ? 'Wala pang ibang naka-save na account.'
+      : 'No other saved accounts yet.';
 
   static String addAnotherAccount(AppLanguage lang) =>
       lang == AppLanguage.filipino
-          ? 'Magdagdag ng account'
-          : 'Add another account';
+      ? 'Magdagdag ng account'
+      : 'Add another account';
 
-  static String manageAccounts(AppLanguage lang) =>
-      lang == AppLanguage.filipino
-          ? 'I-manage ang mga account'
-          : 'Manage accounts';
+  static String manageAccounts(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'I-manage ang mga account'
+      : 'Manage accounts';
 
   static String manageAccountsSubtitle(AppLanguage lang) =>
       lang == AppLanguage.filipino
-          ? 'Alisin ang naka-save na account sa device na ito. Puwede ka pa ring mag-login ulit.'
-          : 'Remove a saved account from this device. You can sign in again anytime.';
+      ? 'Alisin ang naka-save na account sa device na ito. Puwede ka pa ring mag-login ulit.'
+      : 'Remove a saved account from this device. You can sign in again anytime.';
 
   static String removeFromThisDevice(AppLanguage lang) =>
       lang == AppLanguage.filipino
-          ? 'Alisin sa device na ito'
-          : 'Remove from this device';
+      ? 'Alisin sa device na ito'
+      : 'Remove from this device';
 
   static String removeAccountConfirmTitle(AppLanguage lang) =>
       lang == AppLanguage.filipino
-          ? 'Alisin ang account na ito?'
-          : 'Remove this account?';
+      ? 'Alisin ang account na ito?'
+      : 'Remove this account?';
 
   static String removeAccountConfirmMessage(AppLanguage lang) =>
       lang == AppLanguage.filipino
-          ? 'Mawawala lang ito sa device na ito. Hindi mabubura ang account, at puwede kang mag-login ulit.'
-          : 'It will only be removed from this device. Your account is not deleted, and you can sign in again later.';
+      ? 'Mawawala lang ito sa device na ito. Hindi mabubura ang account, at puwede kang mag-login ulit.'
+      : 'It will only be removed from this device. Your account is not deleted, and you can sign in again later.';
 
   static String accountsSection(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Mga Account' : 'Accounts';
@@ -909,8 +908,7 @@ abstract final class AppStrings {
 
   static String accountRoleLabel(AppLanguage lang, String role) =>
       switch (role) {
-        'learner' =>
-          lang == AppLanguage.filipino ? 'Mag-aaral' : 'Learner',
+        'learner' => lang == AppLanguage.filipino ? 'Mag-aaral' : 'Learner',
         'parent' => lang == AppLanguage.filipino ? 'Magulang' : 'Parent',
         'teacher' => lang == AppLanguage.filipino ? 'Guro' : 'Teacher',
         _ => role,
@@ -1071,38 +1069,37 @@ abstract final class AppStrings {
 
   static String chooseRoleTitle(AppLanguage lang) =>
       lang == AppLanguage.filipino
-          ? 'Piliin ang Iyong Role'
-          : 'Choose Your Role';
+      ? 'Piliin ang Iyong Role'
+      : 'Choose Your Role';
 
-  static String chooseRoleSub(AppLanguage lang) =>
-      lang == AppLanguage.filipino
-          ? 'Bago magpatuloy, piliin kung paano mo gagamitin ang TapTalk.'
-          : 'Before you continue, choose how you will use TapTalk.';
+  static String chooseRoleSub(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Bago magpatuloy, piliin kung paano mo gagamitin ang TapTalk.'
+      : 'Before you continue, choose how you will use TapTalk.';
 
   static String chooseRoleLearnerSub(AppLanguage lang) =>
       lang == AppLanguage.filipino
-          ? 'Gamitin ang TapTalk para mag-communicate.'
-          : 'Use TapTalk to communicate.';
+      ? 'Gamitin ang TapTalk para mag-communicate.'
+      : 'Use TapTalk to communicate.';
 
   static String chooseRoleParentSub(AppLanguage lang) =>
       lang == AppLanguage.filipino
-          ? 'I-monitor at suportahan ang iyong anak.'
-          : 'Monitor and support your child.';
+      ? 'I-monitor at suportahan ang iyong anak.'
+      : 'Monitor and support your child.';
 
   static String chooseRoleTeacherSub(AppLanguage lang) =>
       lang == AppLanguage.filipino
-          ? 'Pamahalaan ang klase at mga mag-aaral.'
-          : 'Manage your class and learners.';
+      ? 'Pamahalaan ang klase at mga mag-aaral.'
+      : 'Manage your class and learners.';
 
   static String chooseRoleFooter(AppLanguage lang) =>
       lang == AppLanguage.filipino
-          ? 'Hindi na ito mababago pagkatapos gawin ang account.'
-          : 'This cannot be changed after your account is created.';
+      ? 'Hindi na ito mababago pagkatapos gawin ang account.'
+      : 'This cannot be changed after your account is created.';
 
   static String continueWithThisAccount(AppLanguage lang) =>
       lang == AppLanguage.filipino
-          ? 'Mga account sa device na ito'
-          : 'Accounts on this device';
+      ? 'Mga account sa device na ito'
+      : 'Accounts on this device';
 
   static String chooseLanguageTitle(AppLanguage lang) =>
       lang == AppLanguage.filipino
@@ -1332,16 +1329,20 @@ abstract final class AppStrings {
   static String linkLearner(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'I-link ang learner' : 'Link learner';
 
-  static String linkLearnerBody(AppLanguage lang) => lang == AppLanguage.filipino
+  static String linkLearnerBody(AppLanguage lang) =>
+      lang == AppLanguage.filipino
       ? 'I-link ang learner para makita ang communication activity at monitoring sa phone na ito.'
       : 'Link a learner to view communication activity and monitoring information.';
 
-  static String learnerLinkedBody(AppLanguage lang) => lang == AppLanguage.filipino
+  static String learnerLinkedBody(AppLanguage lang) =>
+      lang == AppLanguage.filipino
       ? 'Naka-link na ang learner. Puwede mo nang buksan ang monitoring sa phone na ito.'
       : 'You can now access this learner\'s monitoring information on this phone.';
 
   static String verifyEmailTitle(AppLanguage lang) =>
-      lang == AppLanguage.filipino ? 'I-verify ang email mo' : 'Verify your email';
+      lang == AppLanguage.filipino
+      ? 'I-verify ang email mo'
+      : 'Verify your email';
 
   static String verifyEmailBody(AppLanguage lang, String email) =>
       lang == AppLanguage.filipino
@@ -1349,7 +1350,9 @@ abstract final class AppStrings {
       : 'Open the link we sent to $email.';
 
   static String sendVerificationEmail(AppLanguage lang) =>
-      lang == AppLanguage.filipino ? 'Ipadala ang verification' : 'Send verification email';
+      lang == AppLanguage.filipino
+      ? 'Ipadala ang verification'
+      : 'Send verification email';
 
   static String resendVerificationEmail(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Ipadala ulit' : 'Resend email';
@@ -1359,29 +1362,38 @@ abstract final class AppStrings {
       ? 'Naipadala ulit ang email.'
       : 'Email sent again.';
 
-  static String iVerifiedMyEmail(AppLanguage lang) => lang == AppLanguage.filipino
+  static String iVerifiedMyEmail(AppLanguage lang) =>
+      lang == AppLanguage.filipino
       ? 'Na-verify ko na ang email'
       : 'I verified my email';
 
-  static String emailNotVerifiedYet(AppLanguage lang) => lang == AppLanguage.filipino
+  static String emailNotVerifiedYet(AppLanguage lang) =>
+      lang == AppLanguage.filipino
       ? 'Hindi pa na-verify. Buksan muna ang link sa email.'
       : 'Not verified yet. Open the link in your email first.';
 
   static String emailVerifiedTitle(AppLanguage lang) =>
-      lang == AppLanguage.filipino ? 'Na-verify na ang email' : 'Email verified';
+      lang == AppLanguage.filipino
+      ? 'Na-verify na ang email'
+      : 'Email verified';
 
-  static String emailVerifiedBody(AppLanguage lang) => lang == AppLanguage.filipino
+  static String emailVerifiedBody(AppLanguage lang) =>
+      lang == AppLanguage.filipino
       ? 'Handa na ang account mo.'
       : 'Your account is ready.';
 
   static String continueToTapTalk(AppLanguage lang) =>
-      lang == AppLanguage.filipino ? 'Magpatuloy sa TapTalk' : 'Continue to TapTalk';
+      lang == AppLanguage.filipino
+      ? 'Magpatuloy sa TapTalk'
+      : 'Continue to TapTalk';
 
-  static String verifyThisDevice(AppLanguage lang) => lang == AppLanguage.filipino
+  static String verifyThisDevice(AppLanguage lang) =>
+      lang == AppLanguage.filipino
       ? 'I-verify ang phone na ito'
       : 'Verify this phone';
 
-  static String verifyThisDeviceBody(AppLanguage lang) => lang == AppLanguage.filipino
+  static String verifyThisDeviceBody(AppLanguage lang) =>
+      lang == AppLanguage.filipino
       ? 'Naka-set up ang account mo sa ibang phone. Magpapadala kami ng link sa email mo para lumipat dito.'
       : 'Your account is set up on another phone. We\'ll email you a link to switch to this one.';
 
@@ -1391,8 +1403,9 @@ abstract final class AppStrings {
   static String resendDeviceLink(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Ipadala ulit' : 'Send again';
 
-  static String checkYourEmail(AppLanguage lang) =>
-      lang == AppLanguage.filipino ? 'Tingnan ang email mo' : 'Check your email';
+  static String checkYourEmail(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Tingnan ang email mo'
+      : 'Check your email';
 
   static String deviceLinkSent(AppLanguage lang, String email) =>
       lang == AppLanguage.filipino
@@ -1402,45 +1415,49 @@ abstract final class AppStrings {
   static String emailConfirmedTitle(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Nakumpirma ang email' : 'Email confirmed';
 
-  static String emailConfirmedBody(AppLanguage lang) => lang == AppLanguage.filipino
+  static String emailConfirmedBody(AppLanguage lang) =>
+      lang == AppLanguage.filipino
       ? 'Isang tap na lang para magamit ang phone na ito.'
       : 'One more tap to start using this phone.';
 
-  static String completeVerification(AppLanguage lang) => lang == AppLanguage.filipino
+  static String completeVerification(AppLanguage lang) =>
+      lang == AppLanguage.filipino
       ? 'Tapusin ang verification'
       : 'Complete verification';
 
-  static String confirmItsYou(AppLanguage lang) =>
-      lang == AppLanguage.filipino ? 'Kumpirmahin na ikaw ito' : 'Confirm it\'s you';
+  static String confirmItsYou(AppLanguage lang) => lang == AppLanguage.filipino
+      ? 'Kumpirmahin na ikaw ito'
+      : 'Confirm it\'s you';
 
-  static String confirmItsYouBody(AppLanguage lang) => lang == AppLanguage.filipino
+  static String confirmItsYouBody(AppLanguage lang) =>
+      lang == AppLanguage.filipino
       ? 'Ilagay ulit ang password mo.'
       : 'Enter your password again.';
 
   static String confirmAccountPassword(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'Password' : 'Password';
 
-  static String confirmWithGoogle(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Gamitin ang Google'
-      : 'Use Google';
+  static String confirmWithGoogle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Gamitin ang Google' : 'Use Google';
 
-  static String phoneRegisteredTitle(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Na-verify ang phone'
-      : 'Phone verified';
+  static String phoneRegisteredTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Na-verify ang phone' : 'Phone verified';
 
-  static String phoneRegisteredBody(AppLanguage lang) => lang == AppLanguage.filipino
+  static String phoneRegisteredBody(AppLanguage lang) =>
+      lang == AppLanguage.filipino
       ? 'Makikita mo na rito ang activity ng anak mo.'
       : 'Your child\'s activity is now on this phone.';
 
-  static String checkingThisPhone(AppLanguage lang) => lang == AppLanguage.filipino
+  static String checkingThisPhone(AppLanguage lang) =>
+      lang == AppLanguage.filipino
       ? 'Sinusuri ang phone'
       : 'Checking this phone';
 
-  static String checkingThisPhoneBody(AppLanguage lang) => lang == AppLanguage.filipino
-      ? 'Sandali lang.'
-      : 'Just a moment.';
+  static String checkingThisPhoneBody(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Sandali lang.' : 'Just a moment.';
 
-  static String deviceCheckUnavailable(AppLanguage lang) => lang == AppLanguage.filipino
+  static String deviceCheckUnavailable(AppLanguage lang) =>
+      lang == AppLanguage.filipino
       ? 'Walang internet. Kumonekta at subukan ulit.'
       : 'No connection. Connect and try again.';
 
@@ -1452,18 +1469,114 @@ abstract final class AppStrings {
       ? 'Pansamantalang hindi available ang protected monitoring. Puwede mo pa ring gamitin ang iba pang bahagi ng TapTalk.'
       : 'Protected monitoring is temporarily unavailable. The rest of TapTalk is still available.';
 
-  static String checkingLearnerLink(AppLanguage lang) => lang == AppLanguage.filipino
+  static String checkingLearnerLink(AppLanguage lang) =>
+      lang == AppLanguage.filipino
       ? 'Tinitingnan ang learner link...'
       : 'Checking your learner link...';
 
-  static String confirmLeftoverLinks(AppLanguage lang) => lang == AppLanguage.filipino
+  static String confirmLeftoverLinks(AppLanguage lang) =>
+      lang == AppLanguage.filipino
       ? 'Kumpirmahin ang dating caregiver links'
       : 'Confirm leftover caregiver links';
 
+  static String learnerHasCaregiverTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'May caregiver na'
+      : 'Already has a caregiver';
+
+  static String learnerHasCaregiverBody(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Naka-link na ang learner na ito sa caregiver.'
+      : 'This learner is already linked to a caregiver.';
+
+  static String requestTransfer(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Humiling ng transfer'
+      : 'Request transfer';
+
+  static String transferCodeTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Transfer code' : 'Transfer code';
+
+  static String transferCodeHint(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Ipakita ito sa bagong caregiver. Gagana ito sa loob ng 15 minuto.'
+      : 'Show this to the new caregiver. It works for 15 minutes.';
+
+  static String shareTransferCodeMessage(AppLanguage lang, String code) =>
+      lang == AppLanguage.filipino
+      ? 'TapTalk caregiver transfer code: $code'
+      : 'TapTalk caregiver transfer code: $code';
+
+  static String transferCaregiver(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Ilipat ang caregiver'
+      : 'Transfer caregiver';
+
+  static String transferLearnerTitle(AppLanguage lang, String name) =>
+      lang == AppLanguage.filipino ? 'Ilipat si $name?' : 'Transfer $name?';
+
+  static String transferLearnerBody(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Kumpirmahin ang account mo para gumawa ng code. Kapag na-scan ito, lilipat ang learner pero hindi maaapektuhan ang iba mong anak.'
+      : 'Confirm your account to create a code. Once scanned, this learner moves but your other children stay the same.';
+
+  static String createTransferCode(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Gumawa ng transfer code'
+      : 'Create transfer code';
+
+  static String receiveTransfer(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Tumanggap ng transfer'
+      : 'Receive transfer';
+
+  static String scanTransferCode(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'I-scan ang transfer code'
+      : 'Scan transfer code';
+
+  static String scanChildOrTransfer(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'I-scan ang learner code'
+      : 'Scan learner code';
+
+  static String scanChildOrTransferHint(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'I-scan ang learner QR o caregiver transfer QR.'
+      : 'Scan a learner QR or caregiver transfer QR.';
+
+  static String enterChildOrTransferCode(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Ilagay ang learner o transfer code.'
+      : 'Enter a learner or transfer code.';
+
+  static String scanTransferHint(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'I-scan ang code na ipinakita ng kasalukuyang caregiver.'
+      : 'Scan the code shown by the current caregiver.';
+
+  static String enterTransferCodeHint(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Ilagay ang code na ibinigay ng kasalukuyang caregiver.'
+      : 'Enter the code the current caregiver gave you.';
+
+  static String learnerTransferredTitle(AppLanguage lang) =>
+      lang == AppLanguage.filipino ? 'Nailipat na' : 'Transferred';
+
+  static String learnerTransferredBody(AppLanguage lang, String name) =>
+      lang == AppLanguage.filipino
+      ? 'Nasa bagong caregiver na si $name.'
+      : '$name is now with the new caregiver.';
+
+  static String transferReceivedBody(AppLanguage lang) =>
+      lang == AppLanguage.filipino
+      ? 'Naka-link na sa account mo ang learner.'
+      : 'The learner is now linked to your account.';
+
   static String anotherCaregiverOwnsLearner(AppLanguage lang) =>
       lang == AppLanguage.filipino
-      ? 'May caregiver na ang learner na ito. Hindi awtomatikong ililipat ang access. Kailangan ng transfer mula sa kasalukuyang caregiver.'
-      : 'This learner already has a caregiver. TapTalk will not transfer them automatically. The current caregiver has to approve a transfer.';
+      ? 'Naka-link na ang learner na ito sa caregiver.'
+      : 'This learner is already linked to a caregiver.';
 
   static String noPhraseUsage(AppLanguage lang) {
     final min = MonitoringConstants.frequentlyUsedMinCount;
@@ -1660,9 +1773,7 @@ abstract final class AppStrings {
             ? 'Persistent Pattern'
             : 'Persistent Pattern';
       case 3:
-        return lang == AppLanguage.filipino
-            ? 'Needs Review'
-            : 'Needs Review';
+        return lang == AppLanguage.filipino ? 'Needs Review' : 'Needs Review';
       default:
         return lang == AppLanguage.filipino
             ? 'Needs Attention'
@@ -2030,8 +2141,7 @@ abstract final class AppStrings {
   static String verifyOtp(AppLanguage lang) =>
       lang == AppLanguage.filipino ? 'I-verify ang OTP' : 'Verify OTP';
 
-  static String enterOtp(AppLanguage lang) =>
-      lang == AppLanguage.filipino
+  static String enterOtp(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Ilagay ang 6-digit na OTP'
       : 'Enter 6-digit OTP';
 
@@ -2048,13 +2158,11 @@ abstract final class AppStrings {
       ? 'Ipadala ulit sa ${seconds}s'
       : 'Resend in ${seconds}s';
 
-  static String invalidOtp(AppLanguage lang) =>
-      lang == AppLanguage.filipino
+  static String invalidOtp(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Mali o expired na OTP. Subukang muli.'
       : 'Invalid or expired OTP. Please try again.';
 
-  static String invalidPhone(AppLanguage lang) =>
-      lang == AppLanguage.filipino
+  static String invalidPhone(AppLanguage lang) => lang == AppLanguage.filipino
       ? 'Maglagay ng wastong numero ng telepono.'
       : 'Enter a valid phone number.';
 

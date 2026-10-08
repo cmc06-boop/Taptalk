@@ -12,6 +12,7 @@ import '../data/models/monitored_learner.dart';
 import '../providers/app_state.dart';
 import '../services/caregiver_access.dart';
 import '../services/caregiver_security_service.dart';
+import '../widgets/caregiver_transfer_flow.dart';
 import '../widgets/compact_popup_menu.dart';
 import '../widgets/learner_scaffold.dart';
 import '../widgets/link_child_dialog.dart';
@@ -80,9 +81,9 @@ class _MyChildScreenState extends State<MyChildScreen> {
     final error = await app.unlinkChild(child.learnerId);
     if (!context.mounted) return;
     if (error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error)));
       return;
     }
     await TapTalkResultDialog.showSuccess(
@@ -133,30 +134,28 @@ class _MyChildScreenState extends State<MyChildScreen> {
             onRefresh: () => _refresh(context),
             color: theme.bgAccent,
             child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.only(
-              left: AppSpacing.lg,
-              right: AppSpacing.lg,
-              top: AppSpacing.md,
-              bottom: 88,
-            ),
-            children: [
-              ..._accessCards(context, app, theme, lang, children),
-            ],
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.only(
+                left: AppSpacing.lg,
+                right: AppSpacing.lg,
+                top: AppSpacing.md,
+                bottom: 88,
+              ),
+              children: [..._accessCards(context, app, theme, lang, children)],
             ),
           ),
           if (app.caregiverAccess != CaregiverAccess.verifyDevice &&
               app.caregiverAccess != CaregiverAccess.legacy)
             Positioned(
-            right: AppSpacing.lg,
-            bottom: AppSpacing.md,
-            child: FloatingActionButton(
-              onPressed: () => _showLinkChildDialog(context),
-              backgroundColor: theme.bgAccent,
-              foregroundColor: Colors.white,
-              child: const Icon(Icons.add_rounded),
+              right: AppSpacing.lg,
+              bottom: AppSpacing.md,
+              child: FloatingActionButton(
+                onPressed: () => _showLinkChildDialog(context),
+                backgroundColor: theme.bgAccent,
+                foregroundColor: Colors.white,
+                child: const Icon(Icons.add_rounded),
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -224,50 +223,8 @@ class _MyChildScreenState extends State<MyChildScreen> {
     }
   }
 
-  Future<void> _transferLearner(
-    BuildContext context,
-    LinkedChildModel child,
-  ) async {
-    final requestId = TextEditingController();
-    final approved = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Transfer this learner'),
-        content: TextField(
-          controller: requestId,
-          decoration: const InputDecoration(
-            labelText: 'Transfer request code',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Transfer'),
-          ),
-        ],
-      ),
-    );
-    final code = requestId.text.trim();
-    requestId.dispose();
-    if (approved != true || !context.mounted || code.isEmpty) return;
-    final error = await context.read<AppState>().approveCaregiverTransfer(
-      requestId: code,
-      learnerId: child.learnerId,
-    );
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          error ??
-              'Learner transferred. This phone no longer has that access.',
-        ),
-      ),
-    );
-  }
+  Future<void> _transferLearner(BuildContext context, LinkedChildModel child) =>
+      CaregiverTransferFlow.create(context, child);
 }
 
 class _LinkedChildTile extends StatelessWidget {
@@ -377,9 +334,7 @@ class _LinkedChildTile extends StatelessWidget {
               actions: [
                 CompactMenuAction(
                   value: 'transfer',
-                  label: lang == AppLanguage.filipino
-                      ? 'Ilipat ang caregiver'
-                      : 'Transfer caregiver',
+                  label: AppStrings.transferCaregiver(lang),
                   icon: Icons.swap_horiz_rounded,
                   color: theme.textMain,
                 ),
@@ -518,7 +473,9 @@ class _LegacyLinksPanelState extends State<_LegacyLinksPanel> {
               });
             },
             child: Text(
-              _codes.isEmpty ? 'Save learner code' : 'Saved: ${_codes.join(', ')}',
+              _codes.isEmpty
+                  ? 'Save learner code'
+                  : 'Saved: ${_codes.join(', ')}',
             ),
           ),
         ],

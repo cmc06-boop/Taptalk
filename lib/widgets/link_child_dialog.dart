@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/l10n/app_strings.dart';
+import '../core/utils/code_qr_utils.dart';
 import '../providers/app_state.dart';
 import 'code_scan_flow_screen.dart';
 import 'taptalk_result_dialog.dart';
@@ -14,24 +15,34 @@ class LinkChildDialog {
   static Future<bool?> show(BuildContext context) async {
     final app = context.read<AppState>();
     final lang = app.language;
+    var receivedTransfer = false;
 
     final linked = await CodeScanFlowScreen.open(
       context,
-      kind: QrScanKind.profileCode,
-      title: AppStrings.linkChildCode(lang),
-      scanHint: AppStrings.qrScanProfileHint(lang),
-      manualTitle: AppStrings.linkChildCode(lang),
-      manualHint: AppStrings.enterChildCodeHint(lang),
-      manualHintText: 'TT-XXXXXXXX',
-      onSubmit: app.linkChildByProfileCode,
+      kind: QrScanKind.caregiverCode,
+      title: AppStrings.scanChildOrTransfer(lang),
+      scanHint: AppStrings.scanChildOrTransferHint(lang),
+      manualTitle: AppStrings.scanChildOrTransfer(lang),
+      manualHint: AppStrings.enterChildOrTransferCode(lang),
+      manualHintText: 'TT-XXXXXXXX / TR-XXXXXXXX',
+      onSubmit: (code) {
+        receivedTransfer = CodeQrUtils.extractTransferCode(code) != null;
+        return receivedTransfer
+            ? app.receiveCaregiverTransfer(code)
+            : app.linkChildByProfileCode(code);
+      },
     );
 
     if (!context.mounted || !linked) return linked ? true : null;
 
     await TapTalkResultDialog.showSuccess(
       context,
-      title: AppStrings.childLinkedTitle(lang),
-      message: AppStrings.childLinked(lang),
+      title: receivedTransfer
+          ? AppStrings.learnerTransferredTitle(lang)
+          : AppStrings.childLinkedTitle(lang),
+      message: receivedTransfer
+          ? AppStrings.transferReceivedBody(lang)
+          : AppStrings.childLinked(lang),
     );
     return true;
   }

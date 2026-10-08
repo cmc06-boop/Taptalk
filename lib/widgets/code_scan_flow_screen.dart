@@ -13,7 +13,7 @@ import '../providers/app_state.dart';
 import 'code_manual_entry_sheet.dart';
 import 'qr_viewfinder_overlay.dart';
 
-enum QrScanKind { classCode, profileCode }
+enum QrScanKind { classCode, profileCode, caregiverCode }
 
 typedef CodeSubmitHandler = Future<String?> Function(String code);
 
@@ -60,9 +60,9 @@ class CodeScanFlowScreen extends StatefulWidget {
       final error = await onSubmit(code);
       if (!context.mounted) return false;
       if (error != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error)));
         return false;
       }
       return true;
@@ -131,9 +131,13 @@ class _CodeScanFlowScreenState extends State<CodeScanFlowScreen> {
   }
 
   String? _extractCode(String raw) {
-    return widget.kind == QrScanKind.classCode
-        ? CodeQrUtils.extractClassCode(raw)
-        : CodeQrUtils.extractProfileCode(raw);
+    return switch (widget.kind) {
+      QrScanKind.classCode => CodeQrUtils.extractClassCode(raw),
+      QrScanKind.profileCode => CodeQrUtils.extractProfileCode(raw),
+      QrScanKind.caregiverCode =>
+        CodeQrUtils.extractTransferCode(raw) ??
+            CodeQrUtils.extractProfileCode(raw),
+    };
   }
 
   Future<void> _completeWithCode(String code) async {
@@ -202,8 +206,7 @@ class _CodeScanFlowScreenState extends State<CodeScanFlowScreen> {
   Future<void> _pickQrFromGallery() async {
     if (_busy) return;
     final lang = context.read<AppState>().language;
-    final picked =
-        await ImagePicker().pickImage(source: ImageSource.gallery);
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
     if (picked == null || !mounted) return;
 
     setState(() {
@@ -286,10 +289,7 @@ class _CodeScanFlowScreenState extends State<CodeScanFlowScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          MobileScanner(
-            controller: _controller,
-            onDetect: _onDetect,
-          ),
+          MobileScanner(controller: _controller, onDetect: _onDetect),
           QrScanMaskOverlay(cutoutRect: _cutoutRect),
           SafeArea(
             child: Column(
@@ -351,7 +351,9 @@ class _CodeScanFlowScreenState extends State<CodeScanFlowScreen> {
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.xxl,
+                  ),
                   child: Text(
                     _error ?? widget.scanHint,
                     textAlign: TextAlign.center,
@@ -394,10 +396,12 @@ class _CodeScanFlowScreenState extends State<CodeScanFlowScreen> {
                           style: FilledButton.styleFrom(
                             backgroundColor: Colors.white,
                             foregroundColor: const Color(0xFF1A1A1A),
-                            disabledBackgroundColor:
-                                Colors.white.withValues(alpha: 0.55),
-                            disabledForegroundColor:
-                                const Color(0xFF1A1A1A).withValues(alpha: 0.45),
+                            disabledBackgroundColor: Colors.white.withValues(
+                              alpha: 0.55,
+                            ),
+                            disabledForegroundColor: const Color(
+                              0xFF1A1A1A,
+                            ).withValues(alpha: 0.45),
                             elevation: 0,
                             minimumSize: const Size.fromHeight(52),
                             shape: RoundedRectangleBorder(
@@ -417,8 +421,9 @@ class _CodeScanFlowScreenState extends State<CodeScanFlowScreen> {
                               color: Colors.white54,
                               width: 1.5,
                             ),
-                            disabledForegroundColor:
-                                Colors.white.withValues(alpha: 0.45),
+                            disabledForegroundColor: Colors.white.withValues(
+                              alpha: 0.45,
+                            ),
                             elevation: 0,
                             minimumSize: const Size.fromHeight(52),
                             shape: RoundedRectangleBorder(

@@ -12,6 +12,7 @@ import '../core/l10n/app_strings.dart';
 import '../core/utils/negative_phrases.dart';
 import '../core/utils/phrase_usage_calculator.dart';
 import '../core/utils/auth_validation.dart';
+import '../core/utils/code_qr_utils.dart';
 import '../core/utils/phrase_image_storage.dart';
 import '../core/utils/phrase_video_speak_sync.dart';
 import '../core/l10n/content_localization.dart';
@@ -781,6 +782,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       }
       // Auth (sign up / log in) needs Firebase even when no user is logged in yet.
       await FirebaseService.instance.initialize();
+      if (parentNeedsDeviceRegistration && deviceCheckPending) {
+        // The phone check screen is waiting on this; don't queue it behind
+        // the account restore below.
+        unawaited(refreshCaregiverAccess());
+      }
       if (_user != null &&
           (_user!.isLearner || _user!.isParent || _user!.isTeacher) &&
           !await NetworkStatus.isOffline()) {
@@ -2435,6 +2441,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       // Settle the security step first so an unregistered phone goes straight
       // to device verification instead of opening Home.
       await _refreshParentEmailStatus();
+      if (_parentEmailVerified) unawaited(refreshCaregiverAccess());
     }
 
     if (_user!.isLearner || _user!.isParent || _user!.isTeacher) {
@@ -2985,6 +2992,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       // Settle the security step first so an unregistered phone goes straight
       // to device verification instead of opening Home.
       await _refreshParentEmailStatus();
+      if (_parentEmailVerified) unawaited(refreshCaregiverAccess());
     }
 
     if (_user!.isLearner || _user!.isParent || _user!.isTeacher) {
@@ -5532,9 +5540,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           .map((learner) => Map<String, dynamic>.from(learner))
           .toList();
       if (plan.access == CaregiverAccess.trusted) {
+        _setCaregiverAccess(CaregiverAccess.trusted);
         await applyVerifiedCaregiverLinks(result['links'] as List? ?? []);
         if (generation != _caregiverGeneration) return;
-        _setCaregiverAccess(CaregiverAccess.trusted);
         await _startProtectedParentMonitoring();
         return;
       }
@@ -5824,16 +5832,16 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       );
     }
     try {
-      final valid = await CaregiverSecurityService.instance
-          .completeRecoveryEmailLink(link.trim());
-      if (!valid) {
+      final oobCode = CaregiverSecurityService.recoveryOobCode(link);
+      if (oobCode == null) {
         return pick(
-          'That is not a TapTalk verification link. Copy the whole link from the email.',
-          'Hindi ito TapTalk verification link. Kopyahin ang buong link mula sa email.',
+          'That is not a TapTalk verification link. Open the link from the email.',
+          'Hindi ito TapTalk verification link. Buksan ang link mula sa email.',
         );
       }
       await CaregiverSecurityService.instance.call('verifyRecovery', {
         'requestId': requestId,
+        'oobCode': oobCode,
       });
       await CaregiverSecurityService.instance.call('confirmReplacement', {
         'requestId': requestId,
@@ -5865,6 +5873,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       debugPrint('Device registration confirm failed: ${error.code}');
       if (error.code == 'permission-denied' && key != null) {
         await prefs.remove(key);
+      }
+      if (error.code == 'unavailable' || error.code == 'internal') {
+        return pick(
+          'Could not verify the link. Check your connection and try again.',
+          'Hindi ma-verify ang link. Suriin ang internet at subukan ulit.',
+        );
       }
       return pick(
         'This link expired or was already used. Send a new link.',
@@ -5919,55 +5933,86 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  Future<({String? requestId, String? error})>
-  requestCaregiverTransfer() async {
+  Future<({String? requestId, String? error})> requestCaregiverTransfer({
+    required int learnerId,
+    String? password,
+    bool google = false,
+  }) async {
     if (_user?.isParent != true) {
       return (requestId: null, error: AppStrings.notSignedIn(_language));
     }
+    final learnerUid = await linkedLearnerFirebaseUid(learnerId);
+    if (learnerUid == null || learnerUid.isEmpty) {
+      return (
+        requestId: null,
+        error: 'This learner is not linked on this phone.',
+      );
+    }
     try {
+      await CaregiverSecurityService.instance.reauthenticate(
+        password: password,
+        google: google,
+      );
       final result = await CaregiverSecurityService.instance.call(
         'requestTransfer',
+        {'learnerUid': learnerUid},
       );
       final requestId = result['requestId'] as String?;
       if (requestId == null || requestId.isEmpty) {
-        return (requestId: null, error: 'Could not create a transfer request.');
+        return (requestId: null, error: 'Could not create a transfer code.');
       }
       return (requestId: requestId, error: null);
+    } on FirebaseAuthException catch (error) {
+      return (
+        requestId: null,
+        error: switch (error.code) {
+          'wrong-password' ||
+          'invalid-credential' => 'Incorrect password. Try again.',
+          'too-many-requests' =>
+            'Too many attempts. Please wait before trying again.',
+          _ => 'Could not confirm your account. Try again.',
+        },
+      );
     } on FirebaseFunctionsException catch (_) {
       return (
         requestId: null,
-        error:
-            'Could not create a transfer request. Verify your email and try again.',
+        error: 'Could not create a transfer code. Confirm your account again.',
       );
     } catch (_) {
       return (
         requestId: null,
-        error:
-            'Could not create a transfer request. Check your connection and try again.',
+        error: 'Could not create a transfer code. Check your connection.',
       );
     }
   }
 
-  Future<String?> approveCaregiverTransfer({
-    required String requestId,
-    required int learnerId,
-  }) async {
+  Future<String?> receiveCaregiverTransfer(String requestId) async {
     if (_user?.isParent != true) return AppStrings.notSignedIn(_language);
-    final learnerUid = await linkedLearnerFirebaseUid(learnerId);
-    if (learnerUid == null || learnerUid.isEmpty) {
-      return 'Link the learner on this phone before transferring.';
+    String pick(String en, String fil) =>
+        _language == AppLanguage.filipino ? fil : en;
+    final code = CodeQrUtils.extractTransferCode(requestId);
+    if (code == null) {
+      return pick(
+        'That is not a transfer code. It looks like TR-XXXXXXXX.',
+        'Hindi ito transfer code. Ganito ang itsura: TR-XXXXXXXX.',
+      );
     }
     try {
       await CaregiverSecurityService.instance.call('transfer', {
-        'learnerUid': learnerUid,
-        'requestId': requestId.trim(),
+        'requestId': code,
       });
       await refreshCaregiverAccess();
       return null;
     } on FirebaseFunctionsException catch (_) {
-      return 'Transfer was not approved. Check the request code and try again.';
+      return pick(
+        'This code expired or is not valid. Ask for a new code.',
+        'Nag-expire o hindi valid ang code. Humingi ng bagong code.',
+      );
     } catch (_) {
-      return 'Transfer was not approved. Check your connection and try again.';
+      return pick(
+        'Could not transfer. Check your connection and try again.',
+        'Hindi mailipat. Suriin ang internet at subukan ulit.',
+      );
     }
   }
 
@@ -6068,9 +6113,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         'failed-precondition' =>
           'Verify your account email before scanning the learner QR.',
         'unauthenticated' => 'Sign in online, then scan the learner QR again.',
-        'permission-denied' => AppStrings.anotherCaregiverOwnsLearner(
-          _language,
-        ),
+        'already-exists' => AppStrings.anotherCaregiverOwnsLearner(_language),
+        'permission-denied' =>
+          _language == AppLanguage.filipino
+              ? 'Hindi ma-link ang learner na ito. Suriin ang QR at subukan ulit.'
+              : 'Could not link this learner. Check the QR and try again.',
         _ =>
           'Unable to link. Connect to the internet, verify caregiver authorization, and verify your account email.',
       };
