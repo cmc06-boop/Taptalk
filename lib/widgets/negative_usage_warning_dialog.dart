@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -12,6 +15,8 @@ import '../data/models/parent_notification.dart';
 import '../data/models/teacher_negative_usage_warning.dart';
 import '../providers/app_state.dart';
 
+const _warningFeedback = MethodChannel('com.taptalk/warning_feedback');
+
 Future<void> showNegativeUsageWarningDialog(
   BuildContext context, {
   required List<TeacherNegativeUsageWarning> warnings,
@@ -21,6 +26,11 @@ Future<void> showNegativeUsageWarningDialog(
   final theme = context.read<AppState>().theme;
   for (final warning in warnings) {
     if (!context.mounted) return;
+    unawaited(
+      _warningFeedback
+          .invokeMethod<void>('play', const {'durationMs': 3000})
+          .catchError((Object _) {}),
+    );
     await showGeneralDialog<void>(
       context: context,
       barrierDismissible: true,
@@ -35,7 +45,10 @@ Future<void> showNegativeUsageWarningDialog(
           child: _NegativeUsageWarningPopup(
             title: warning.title.isNotEmpty
                 ? warning.title
-                : AppStrings.negativeUsageWarningLevelTitle(lang, warning.level),
+                : AppStrings.negativeUsageWarningLevelTitle(
+                    lang,
+                    warning.level,
+                  ),
             body: _firstParagraph(
               warning.body.isNotEmpty
                   ? warning.body

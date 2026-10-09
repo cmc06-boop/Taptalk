@@ -330,20 +330,20 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                     lang,
                                   ),
                                   icon: _iconFor(notification.alertType),
-                                  onTap: app.user?.isTeacher == true
-                                      ? null
-                                      : () async {
-                                          await app.markNotificationRead(
-                                            notification.id,
-                                          );
-                                          if (!context.mounted) return;
-                                          await _showNotificationDetail(
-                                            context,
-                                            notification: notification,
-                                            theme: theme,
-                                            lang: lang,
-                                          );
-                                        },
+                                  onTap: () async {
+                                    if (!notification.isRead) {
+                                      await app.markNotificationRead(
+                                        notification.id,
+                                      );
+                                    }
+                                    if (!context.mounted) return;
+                                    await _showNotificationDetail(
+                                      context,
+                                      notification: notification,
+                                      theme: theme,
+                                      lang: lang,
+                                    );
+                                  },
                                 ),
                               ),
                           ],
@@ -595,6 +595,11 @@ class _NotificationDetailPopup extends StatelessWidget {
     final accent = theme.bgAccent;
     final iconColor = ParentAlertIcons.iconColor(notification.alertType);
     final iconBg = ParentAlertIcons.iconBackground(notification.alertType);
+    final typeLabel = AppStrings.alertTypeLabel(lang, notification.alertType);
+    final trimmedBody = body.trim();
+    final showBody =
+        trimmedBody.isNotEmpty &&
+        trimmedBody.toLowerCase() != typeLabel.trim().toLowerCase();
     final maxHeight = MediaQuery.sizeOf(context).height * 0.72;
 
     return Material(
@@ -691,10 +696,10 @@ class _NotificationDetailPopup extends StatelessWidget {
                         horizontal: AppSpacing.lg,
                       ),
                       child: Text(
-                        AppStrings.alertTypeLabel(lang, notification.alertType),
+                        typeLabel,
                         textAlign: TextAlign.center,
                         style: GoogleFonts.poppins(
-                          fontSize: 12,
+                          fontSize: 14,
                           fontWeight: FontWeight.w600,
                           color: iconColor,
                         ),
@@ -703,25 +708,26 @@ class _NotificationDetailPopup extends StatelessWidget {
                     const SizedBox(height: AppSpacing.md),
                   ] else
                     const SizedBox(height: AppSpacing.md),
-                  Flexible(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(
-                        AppSpacing.lg,
-                        0,
-                        AppSpacing.lg,
-                        AppSpacing.md,
-                      ),
-                      child: Text(
-                        body,
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: theme.textMain.withValues(alpha: 0.82),
-                          height: 1.45,
+                  if (showBody)
+                    Flexible(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(
+                          AppSpacing.lg,
+                          0,
+                          AppSpacing.lg,
+                          AppSpacing.md,
+                        ),
+                        child: Text(
+                          body,
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            color: theme.textMain.withValues(alpha: 0.82),
+                            height: 1.45,
+                          ),
                         ),
                       ),
                     ),
-                  ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(
                       AppSpacing.lg,
