@@ -296,16 +296,11 @@ class FirebaseService {
         if (uid != null && uid.isNotEmpty) return uid;
         final lateUser = _uidForEmail(firebaseAuth, email);
         if (lateUser != null) return lateUser;
-        // A wrong password fails immediately. Android can publish the signed-in
-        // user just after the call returns empty, so watch briefly.
+        // A wrong password fails immediately. Otherwise Android often publishes
+        // the signed-in user after the call returns empty, so keep waiting on
+        // this same sign-in instead of showing "Could not sign in".
         if (_hardAuthFailure(lastAuthErrorCode)) return null;
-        final grace = DateTime.now().add(const Duration(seconds: 2));
-        while (DateTime.now().isBefore(grace)) {
-          await Future<void>.delayed(const Duration(milliseconds: 200));
-          final published = _uidForEmail(firebaseAuth, email);
-          if (published != null) return published;
-        }
-        return null;
+        continue;
       } on TimeoutException {
         continue;
       }
@@ -317,6 +312,12 @@ class FirebaseService {
     required String password,
   }) async {
     if (!_initialized) return null;
+    final pendingSignOut = _signOutFlight;
+    if (pendingSignOut != null) {
+      try {
+        await pendingSignOut;
+      } catch (_) {}
+    }
     _authEpoch++;
     final firebaseAuth = auth;
     if (firebaseAuth == null) return null;
@@ -456,9 +457,21 @@ class FirebaseService {
     return createAccount(email: email, password: password);
   }
 
+  Future<void>? _signOutFlight;
+
   Future<void> signOut() async {
     if (!_initialized) return;
     final epoch = ++_authEpoch;
+    final run = _finishSignOut(epoch);
+    _signOutFlight = run;
+    try {
+      await run;
+    } finally {
+      if (identical(_signOutFlight, run)) _signOutFlight = null;
+    }
+  }
+
+  Future<void> _finishSignOut(int epoch) async {
     // The server logout can take many seconds. Local sign-out must not wait
     // for it, and a newer sign-in must not be wiped by this call.
     unawaited(CaregiverSecurityService.instance.endSession());

@@ -222,7 +222,13 @@ class _DeviceRegistrationScreenState extends State<DeviceRegistrationScreen>
       message: _message,
       messageIsError: _messageIsError,
       primaryLabel: AppStrings.sendDeviceLink(lang),
-      onPrimary: _send,
+      onPrimary: () {
+        setState(() {
+          _needsReauth = true;
+          _message = null;
+          _messageIsError = false;
+        });
+      },
       footerLabel: logout,
       onFooter: () => app.logout(),
     );
