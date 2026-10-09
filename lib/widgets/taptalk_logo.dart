@@ -85,15 +85,31 @@ class TapTalkWordmark extends StatelessWidget {
   }
 }
 
+/// Full logo sized for the app header bar. Same 85px block as the wordmark
+/// so the page body stays aligned.
+class TapTalkHeaderFullLogo extends StatelessWidget {
+  const TapTalkHeaderFullLogo({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      height: 85,
+      child: Center(child: TapTalkFullLogo(width: 56)),
+    );
+  }
+}
+
 /// Compact wordmark for the app header bar.
 class TapTalkHeaderWordmark extends StatelessWidget {
   const TapTalkHeaderWordmark({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Transform.translate(
-      offset: const Offset(0, -2),
-      child: const TapTalkWordmark(height: 85, maxWidth: 405),
+    return const SizedBox(
+      height: 85,
+      child: Center(
+        child: TapTalkWordmark(height: 52, maxWidth: 220),
+      ),
     );
   }
 }

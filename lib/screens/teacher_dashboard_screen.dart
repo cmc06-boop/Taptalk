@@ -69,11 +69,12 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
   }
 
   List<String> _subjectsFor(AppState app) {
-    final subjects = app.teacherClasses
-        .map((c) => ClassNameUtils.subjectFrom(c.name))
-        .toSet()
-        .toList()
-      ..sort();
+    final subjects =
+        app.teacherClasses
+            .map((c) => ClassNameUtils.subjectFrom(c.name))
+            .toSet()
+            .toList()
+          ..sort();
     return subjects;
   }
 
@@ -140,20 +141,23 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
   int _classCountForFilter(AppState app, String? selectedSubject) {
     if (selectedSubject == null) return app.teacherClasses.length;
     return app.teacherClasses
-        .where(
-          (c) => ClassNameUtils.subjectFrom(c.name) == selectedSubject,
-        )
+        .where((c) => ClassNameUtils.subjectFrom(c.name) == selectedSubject)
         .length;
   }
 
-  int _studentCountForFilter(AppState app, Map<String, int> subjectStudentCounts) {
+  int _studentCountForFilter(
+    AppState app,
+    Map<String, int> subjectStudentCounts,
+  ) {
     if (_selectedSubject == null) return app.teacherStudentCount;
     return subjectStudentCounts[_selectedSubject] ?? 0;
   }
 
   void _openRecentLesson(TeacherRecentLesson lesson) {
     final app = context.read<AppState>();
-    final teacherClass = app.teacherClasses.where((c) => c.id == lesson.classId);
+    final teacherClass = app.teacherClasses.where(
+      (c) => c.id == lesson.classId,
+    );
     if (teacherClass.isEmpty) return;
     final classInfo = teacherClass.first;
 
@@ -189,15 +193,15 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
     final subjectStudentCounts = _subjectStudentCountsFor(app);
     final selectedSubject =
         _selectedSubject != null && subjects.contains(_selectedSubject)
-            ? _selectedSubject
-            : null;
+        ? _selectedSubject
+        : null;
     final classCount = _classCountForFilter(app, selectedSubject);
     final studentCount = _studentCountForFilter(app, subjectStudentCounts);
     final accent = theme.bgAccent;
 
     return LearnerScaffold(
       title: AppStrings.appName(lang),
-      titleWidget: const TapTalkHeaderWordmark(),
+      titleWidget: const TapTalkHeaderFullLogo(),
       currentRoute: AppRoute.teacherDashboard,
       headerBottomSpacing: 0,
       bodyTopOffset: -4,
@@ -254,11 +258,11 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                   ),
                   const SizedBox(height: AppSpacing.lg),
                   IntrinsicHeight(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Expanded(
-                            child: _ClassesStatCard(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(
+                          child: _ClassesStatCard(
                             theme: theme,
                             label: AppStrings.totalClasses(lang),
                             value: '$classCount',
@@ -271,17 +275,17 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                           ),
                         ),
                         const SizedBox(width: AppSpacing.sm),
-                          Expanded(
-                            child: _ModernStatCard(
-                              theme: theme,
-                              label: AppStrings.totalStudents(lang),
-                              value: '$studentCount',
-                              icon: Icons.groups_rounded,
-                            ),
+                        Expanded(
+                          child: _ModernStatCard(
+                            theme: theme,
+                            label: AppStrings.totalStudents(lang),
+                            value: '$studentCount',
+                            icon: Icons.groups_rounded,
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
+                  ),
                 ],
               ),
             ),
@@ -300,7 +304,6 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
               _EmptySectionCard(
                 theme: theme,
                 message: AppStrings.noRecentAlerts(lang),
-                icon: Icons.notifications_none_rounded,
               )
             else
               ..._recentAlerts.map(
@@ -316,7 +319,10 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                     alertType: alert.alertType,
                     studentName: alert.childName.trim(),
                     timeLabel: AppStrings.timeAgo(alert.createdAt, lang),
-                    description: AppStrings.alertTypeLabel(lang, alert.alertType),
+                    description: AppStrings.alertTypeLabel(
+                      lang,
+                      alert.alertType,
+                    ),
                     onTap: () => app.setRoute(AppRoute.notifications),
                   ),
                 ),
@@ -334,23 +340,28 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
               _EmptySectionCard(
                 theme: theme,
                 message: AppStrings.noRecentLessons(lang),
-                icon: Icons.menu_book_outlined,
               )
             else
               SizedBox(
                 height: 168,
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.lg,
+                  ),
                   itemCount: _recentLessons.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
+                  separatorBuilder: (_, _) =>
+                      const SizedBox(width: AppSpacing.sm),
                   itemBuilder: (context, index) {
                     final lesson = _recentLessons[index];
                     return ClassColorCard(
                       classId: lesson.classId,
                       title: lesson.title,
                       badge: lesson.className,
-                      subtitle: AppStrings.phrasesCount(lesson.phraseCount, lang),
+                      subtitle: AppStrings.phrasesCount(
+                        lesson.phraseCount,
+                        lang,
+                      ),
                       icon: Icons.auto_stories_rounded,
                       layout: ClassColorCardLayout.tile,
                       onTap: () => _openRecentLesson(lesson),
@@ -467,15 +478,10 @@ class _SectionHeader extends StatelessWidget {
 }
 
 class _EmptySectionCard extends StatelessWidget {
-  const _EmptySectionCard({
-    required this.theme,
-    required this.message,
-    required this.icon,
-  });
+  const _EmptySectionCard({required this.theme, required this.message});
 
   final TapTalkThemeToken theme;
   final String message;
-  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
@@ -488,21 +494,13 @@ class _EmptySectionCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0xFFE9EEF2)),
       ),
-      child: Row(
-        children: [
-          Icon(icon, color: theme.textMain.withValues(alpha: 0.35), size: 22),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Text(
-              message,
-              style: GoogleFonts.poppins(
-                fontSize: 12,
-                color: theme.textMain.withValues(alpha: 0.68),
-                height: 1.35,
-              ),
-            ),
-          ),
-        ],
+      child: Text(
+        message,
+        style: GoogleFonts.poppins(
+          fontSize: 12,
+          color: theme.textMain.withValues(alpha: 0.68),
+          height: 1.35,
+        ),
       ),
     );
   }

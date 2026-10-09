@@ -88,20 +88,24 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
     messenger.hideCurrentSnackBar();
     var undone = false;
     final snackBar = messenger.showSnackBar(
-          SnackBar(
-            duration: const Duration(seconds: 5),
-            content: Text(deleting.length == 1 ? 'Deleting category in 5 seconds' : 'Deleting ${deleting.length} categories in 5 seconds'),
-            action: SnackBarAction(
-              label: 'Undo',
-              onPressed: () {
-                undone = true;
-                if (mounted) {
-                  setState(() => _pendingDeletedKeys.removeAll(deleting));
-                }
-              },
-            ),
-          ),
-        );
+      SnackBar(
+        duration: const Duration(seconds: 5),
+        content: Text(
+          deleting.length == 1
+              ? 'Deleting category in 5 seconds'
+              : 'Deleting ${deleting.length} categories in 5 seconds',
+        ),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            undone = true;
+            if (mounted) {
+              setState(() => _pendingDeletedKeys.removeAll(deleting));
+            }
+          },
+        ),
+      ),
+    );
     await Future<void>.delayed(const Duration(seconds: 5));
     snackBar.close();
     if (undone) {
@@ -151,7 +155,9 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
 
     return LearnerScaffold(
       title: AppStrings.appName(lang),
-      titleWidget: const TapTalkHeaderWordmark(),
+      titleWidget: (app.user?.isTeacher ?? false)
+          ? const TapTalkHeaderFullLogo()
+          : const TapTalkHeaderWordmark(),
       currentRoute: AppRoute.chooseCategory,
       headerBottomSpacing: 0,
       bodyTopOffset: -4,
@@ -247,11 +253,17 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
                         physics: const NeverScrollableScrollPhysics(),
                         gridDelegate: AppSpacing.categoryGridDelegate(context),
                         itemCount: app.topLevelCategories
-                            .where((category) => !_pendingDeletedKeys.contains(category.key))
+                            .where(
+                              (category) =>
+                                  !_pendingDeletedKeys.contains(category.key),
+                            )
                             .length,
                         itemBuilder: (context, i) {
                           final visibleCategories = app.topLevelCategories
-                              .where((category) => !_pendingDeletedKeys.contains(category.key))
+                              .where(
+                                (category) =>
+                                    !_pendingDeletedKeys.contains(category.key),
+                              )
                               .toList();
                           final cat = visibleCategories[i];
                           final isCustom = app.isCustomCategory(cat);
@@ -263,7 +275,9 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
                             onDelete: isCustom
                                 ? () => _deleteCategories(app, [cat.key])
                                 : null,
-                            onEdit: isCustom ? () => _editCategory(app, cat) : null,
+                            onEdit: isCustom
+                                ? () => _editCategory(app, cat)
+                                : null,
                             selectionMode: _selecting && isCustom,
                             multiSelected: _selectedKeys.contains(cat.key),
                             onSelectionToggle: isCustom
@@ -287,24 +301,22 @@ class _ChooseCategoryScreenState extends State<ChooseCategoryScreen> {
             right: AppSpacing.lg,
             bottom: AppSpacing.md,
             child: FloatingActionButton(
-                  onPressed: _selecting
-                      ? () {
-                          if (_selectedKeys.isNotEmpty) {
-                            _deleteCategories(app, _selectedKeys);
-                          }
-                        }
-                      : () => _showAddCategoryDialog(context),
-                  backgroundColor: theme.bgAccent,
-                  foregroundColor: Colors.white,
-                  tooltip: _selecting
-                      ? AppStrings.delete(lang)
-                      : AppStrings.addCategoryShort(lang),
-                  child: Icon(
-                    _selecting
-                        ? Icons.delete_outline_rounded
-                        : Icons.add_rounded,
-                  ),
-                ),
+              onPressed: _selecting
+                  ? () {
+                      if (_selectedKeys.isNotEmpty) {
+                        _deleteCategories(app, _selectedKeys);
+                      }
+                    }
+                  : () => _showAddCategoryDialog(context),
+              backgroundColor: theme.bgAccent,
+              foregroundColor: Colors.white,
+              tooltip: _selecting
+                  ? AppStrings.delete(lang)
+                  : AppStrings.addCategoryShort(lang),
+              child: Icon(
+                _selecting ? Icons.delete_outline_rounded : Icons.add_rounded,
+              ),
+            ),
           ),
           if (_selecting && _showFloatingSelect)
             Positioned(

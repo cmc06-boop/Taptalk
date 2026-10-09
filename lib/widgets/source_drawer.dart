@@ -6,6 +6,7 @@ import '../core/constants/app_spacing.dart';
 import '../core/l10n/app_strings.dart';
 import '../core/theme/theme_tokens.dart';
 import '../providers/app_state.dart';
+import 'taptalk_logo.dart';
 
 Widget _settingsDrawerItem({
   required TapTalkThemeToken theme,
@@ -54,38 +55,41 @@ class SourceDrawer extends StatelessWidget {
             curve: Curves.easeOutCubic,
             offset: Offset.zero,
             child: SizedBox(
-                  height: MediaQuery.sizeOf(context).height,
-                  width: 238,
-                  child: Container(
-                  decoration: BoxDecoration(
-                    color: theme.bgMid,
-                    borderRadius: const BorderRadius.horizontal(
-                      right: Radius.circular(24),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: theme.textMain.withValues(alpha: 0.20),
-                        blurRadius: 24,
-                        offset: const Offset(8, 0),
-                      ),
-                      BoxShadow(
-                        color: theme.bgAccent.withValues(alpha: 0.10),
-                        blurRadius: 30,
-                        offset: const Offset(10, 0),
-                      ),
-                    ],
+              height: MediaQuery.sizeOf(context).height,
+              width: 238,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: theme.bgMid,
+                  borderRadius: const BorderRadius.horizontal(
+                    right: Radius.circular(24),
                   ),
-                  child: SafeArea(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(
-                        AppSpacing.md,
-                        AppSpacing.lg,
-                        AppSpacing.md,
-                        AppSpacing.lg,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
+                  boxShadow: [
+                    BoxShadow(
+                      color: theme.textMain.withValues(alpha: 0.20),
+                      blurRadius: 24,
+                      offset: const Offset(8, 0),
+                    ),
+                    BoxShadow(
+                      color: theme.bgAccent.withValues(alpha: 0.10),
+                      blurRadius: 30,
+                      offset: const Offset(10, 0),
+                    ),
+                  ],
+                ),
+                child: SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.md,
+                      AppSpacing.lg,
+                      AppSpacing.md,
+                      AppSpacing.lg,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (app.user?.isTeacher ?? false)
+                          const Center(child: TapTalkFullLogo(width: 104))
+                        else
                           Text(
                             'TapTalk',
                             textAlign: TextAlign.center,
@@ -95,140 +99,138 @@ class SourceDrawer extends StatelessWidget {
                               color: theme.textMain,
                             ),
                           ),
-                          const SizedBox(height: AppSpacing.md),
-                          Text(
-                            AppStrings.sources(lang).toUpperCase(),
-                            style: GoogleFonts.poppins(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 1,
-                              color: theme.textMain.withValues(alpha: 0.52),
-                            ),
+                        const SizedBox(height: AppSpacing.md),
+                        Text(
+                          AppStrings.sources(lang).toUpperCase(),
+                          style: GoogleFonts.poppins(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1,
+                            color: theme.textMain.withValues(alpha: 0.52),
                           ),
-                          const SizedBox(height: AppSpacing.sm),
-                          if (app.user?.isParent ?? false) ...[
-                            _DrawerItem(
-                              theme: theme,
-                              icon: Icons.home_rounded,
-                              label: AppStrings.home(lang),
-                              active: app.route == AppRoute.chooseCategory,
-                              onTap: () =>
-                                  app.setRoute(AppRoute.chooseCategory),
-                            ),
-                            _DrawerItem(
-                              theme: theme,
-                              icon: Icons.child_care_outlined,
-                              label: AppStrings.myChild(lang),
-                              active: app.route == AppRoute.myChild,
-                              onTap: () => app.setRoute(AppRoute.myChild),
-                            ),
-                            _DrawerItem(
-                              theme: theme,
-                              icon: Icons.person_outline_rounded,
-                              label: AppStrings.profile(lang),
-                              active: app.route == AppRoute.profile,
-                              onTap: () => app.setRoute(AppRoute.profile),
-                            ),
-                            _settingsDrawerItem(
-                              theme: theme,
-                              lang: lang,
-                              app: app,
-                            ),
-                          ] else if (app.user?.isLearner ?? false) ...[
-                            _DrawerItem(
-                              theme: theme,
-                              icon: Icons.home_rounded,
-                              label: AppStrings.home(lang),
-                              active: app.route == AppRoute.chooseCategory,
-                              onTap: () => app.setRoute(AppRoute.chooseCategory),
-                            ),
-                            _DrawerItem(
-                              theme: theme,
-                              icon: Icons.school_outlined,
-                              label: AppStrings.classes(lang),
-                              active: app.route == AppRoute.classes,
-                              onTap: () => app.setRoute(AppRoute.classes),
-                            ),
-                            _settingsDrawerItem(
-                              theme: theme,
-                              lang: lang,
-                              app: app,
-                            ),
-                          ] else if (app.user?.isTeacher ?? false) ...[
-                            _DrawerItem(
-                              theme: theme,
-                              icon: Icons.dashboard_outlined,
-                              label: AppStrings.dashboard(lang),
-                              active: app.route == AppRoute.teacherDashboard,
-                              onTap: () =>
-                                  app.setRoute(AppRoute.teacherDashboard),
-                            ),
-                            _DrawerItem(
-                              theme: theme,
-                              icon: Icons.home_rounded,
-                              label: AppStrings.home(lang),
-                              active: app.route == AppRoute.chooseCategory,
-                              onTap: () =>
-                                  app.setRoute(AppRoute.chooseCategory),
-                            ),
-                            _DrawerItem(
-                              theme: theme,
-                              icon: Icons.class_outlined,
-                              label: AppStrings.myClasses(lang),
-                              active: app.route == AppRoute.teacherMyClasses,
-                              onTap: () =>
-                                  app.setRoute(AppRoute.teacherMyClasses),
-                            ),
-                            _DrawerItem(
-                              theme: theme,
-                              icon: Icons.monitor_heart_outlined,
-                              label: AppStrings.monitoring(lang),
-                              active: app.route == AppRoute.teacherMonitoring,
-                              onTap: () =>
-                                  app.setRoute(AppRoute.teacherMonitoring),
-                            ),
-                            _DrawerItem(
-                              theme: theme,
-                              icon: Icons.person_outline_rounded,
-                              label: AppStrings.profile(lang),
-                              active: app.route == AppRoute.profile,
-                              onTap: () => app.setRoute(AppRoute.profile),
-                            ),
-                            _settingsDrawerItem(
-                              theme: theme,
-                              lang: lang,
-                              app: app,
-                            ),
-                          ] else ...[
-                            _DrawerItem(
-                              theme: theme,
-                              icon: Icons.person_outline_rounded,
-                              label: AppStrings.profile(lang),
-                              active: app.route == AppRoute.profile,
-                              onTap: () => app.setRoute(AppRoute.profile),
-                            ),
-                            _settingsDrawerItem(
-                              theme: theme,
-                              lang: lang,
-                              app: app,
-                            ),
-                          ],
-                          const Spacer(),
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        if (app.user?.isParent ?? false) ...[
                           _DrawerItem(
                             theme: theme,
-                            icon: Icons.logout_rounded,
-                            label: AppStrings.logout(lang),
-                            onTap: app.logout,
-                            compact: true,
+                            icon: Icons.home_rounded,
+                            label: AppStrings.home(lang),
+                            active: app.route == AppRoute.chooseCategory,
+                            onTap: () => app.setRoute(AppRoute.chooseCategory),
+                          ),
+                          _DrawerItem(
+                            theme: theme,
+                            icon: Icons.child_care_outlined,
+                            label: AppStrings.myChild(lang),
+                            active: app.route == AppRoute.myChild,
+                            onTap: () => app.setRoute(AppRoute.myChild),
+                          ),
+                          _DrawerItem(
+                            theme: theme,
+                            icon: Icons.person_outline_rounded,
+                            label: AppStrings.profile(lang),
+                            active: app.route == AppRoute.profile,
+                            onTap: () => app.setRoute(AppRoute.profile),
+                          ),
+                          _settingsDrawerItem(
+                            theme: theme,
+                            lang: lang,
+                            app: app,
+                          ),
+                        ] else if (app.user?.isLearner ?? false) ...[
+                          _DrawerItem(
+                            theme: theme,
+                            icon: Icons.home_rounded,
+                            label: AppStrings.home(lang),
+                            active: app.route == AppRoute.chooseCategory,
+                            onTap: () => app.setRoute(AppRoute.chooseCategory),
+                          ),
+                          _DrawerItem(
+                            theme: theme,
+                            icon: Icons.school_outlined,
+                            label: AppStrings.classes(lang),
+                            active: app.route == AppRoute.classes,
+                            onTap: () => app.setRoute(AppRoute.classes),
+                          ),
+                          _settingsDrawerItem(
+                            theme: theme,
+                            lang: lang,
+                            app: app,
+                          ),
+                        ] else if (app.user?.isTeacher ?? false) ...[
+                          _DrawerItem(
+                            theme: theme,
+                            icon: Icons.dashboard_outlined,
+                            label: AppStrings.dashboard(lang),
+                            active: app.route == AppRoute.teacherDashboard,
+                            onTap: () =>
+                                app.setRoute(AppRoute.teacherDashboard),
+                          ),
+                          _DrawerItem(
+                            theme: theme,
+                            icon: Icons.home_rounded,
+                            label: AppStrings.home(lang),
+                            active: app.route == AppRoute.chooseCategory,
+                            onTap: () => app.setRoute(AppRoute.chooseCategory),
+                          ),
+                          _DrawerItem(
+                            theme: theme,
+                            icon: Icons.class_outlined,
+                            label: AppStrings.myClasses(lang),
+                            active: app.route == AppRoute.teacherMyClasses,
+                            onTap: () =>
+                                app.setRoute(AppRoute.teacherMyClasses),
+                          ),
+                          _DrawerItem(
+                            theme: theme,
+                            icon: Icons.monitor_heart_outlined,
+                            label: AppStrings.monitoring(lang),
+                            active: app.route == AppRoute.teacherMonitoring,
+                            onTap: () =>
+                                app.setRoute(AppRoute.teacherMonitoring),
+                          ),
+                          _DrawerItem(
+                            theme: theme,
+                            icon: Icons.person_outline_rounded,
+                            label: AppStrings.profile(lang),
+                            active: app.route == AppRoute.profile,
+                            onTap: () => app.setRoute(AppRoute.profile),
+                          ),
+                          _settingsDrawerItem(
+                            theme: theme,
+                            lang: lang,
+                            app: app,
+                          ),
+                        ] else ...[
+                          _DrawerItem(
+                            theme: theme,
+                            icon: Icons.person_outline_rounded,
+                            label: AppStrings.profile(lang),
+                            active: app.route == AppRoute.profile,
+                            onTap: () => app.setRoute(AppRoute.profile),
+                          ),
+                          _settingsDrawerItem(
+                            theme: theme,
+                            lang: lang,
+                            app: app,
                           ),
                         ],
-                      ),
+                        const Spacer(),
+                        _DrawerItem(
+                          theme: theme,
+                          icon: Icons.logout_rounded,
+                          label: AppStrings.logout(lang),
+                          onTap: app.logout,
+                          compact: true,
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ),
             ),
           ),
+        ),
       ],
     );
   }
@@ -257,7 +259,9 @@ class _DrawerItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = theme.bgAccent;
     final accentStrong = theme.accentEmphasis;
-    final textColor = active ? accentStrong : theme.textMain.withValues(alpha: 0.78);
+    final textColor = active
+        ? accentStrong
+        : theme.textMain.withValues(alpha: 0.78);
     final iconBg = active
         ? Color.lerp(Colors.white, accent, 0.48)!
         : Colors.white.withValues(alpha: 0.22);
@@ -291,67 +295,65 @@ class _DrawerItem extends StatelessWidget {
               excludeSemantics: true,
               onTap: onTap,
               child: Material(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: onTap,
+                color: Colors.transparent,
                 borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                child: AnimatedContainer(
-                  duration: AppSpacing.drawerAnimation,
-                  curve: Curves.easeOutCubic,
-                  padding: EdgeInsets.symmetric(
-                    horizontal: AppSpacing.md,
-                    vertical: compact ? AppSpacing.xs : AppSpacing.md,
-                  ),
-                  decoration: BoxDecoration(
-                    color: rowHighlight,
-                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                    border: Border.all(
-                      color: active
-                          ? accent.withValues(alpha: 0.55)
-                          : Colors.transparent,
-                      width: 1,
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: onTap,
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                  child: AnimatedContainer(
+                    duration: AppSpacing.drawerAnimation,
+                    curve: Curves.easeOutCubic,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md,
+                      vertical: compact ? AppSpacing.xs : AppSpacing.md,
                     ),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: iconBg,
-                          borderRadius:
-                              BorderRadius.circular(AppSpacing.radiusSm),
-                          border: active
-                              ? Border.all(
-                                  color: Colors.white.withValues(alpha: 0.75),
-                                )
-                              : null,
-                        ),
-                        child: Icon(
-                          icon,
-                          color: textColor,
-                          size: 19,
-                        ),
+                    decoration: BoxDecoration(
+                      color: rowHighlight,
+                      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                      border: Border.all(
+                        color: active
+                            ? accent.withValues(alpha: 0.55)
+                            : Colors.transparent,
+                        width: 1,
                       ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: Text(
-                          label,
-                          style: GoogleFonts.poppins(
-                            fontSize: 14,
-                            fontWeight:
-                                active ? FontWeight.w800 : FontWeight.w600,
-                            color: textColor,
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: iconBg,
+                            borderRadius: BorderRadius.circular(
+                              AppSpacing.radiusSm,
+                            ),
+                            border: active
+                                ? Border.all(
+                                    color: Colors.white.withValues(alpha: 0.75),
+                                  )
+                                : null,
+                          ),
+                          child: Icon(icon, color: textColor, size: 19),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          child: Text(
+                            label,
+                            style: GoogleFonts.poppins(
+                              fontSize: 14,
+                              fontWeight: active
+                                  ? FontWeight.w800
+                                  : FontWeight.w600,
+                              color: textColor,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
             ),
           ),
         ],

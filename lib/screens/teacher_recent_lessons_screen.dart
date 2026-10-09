@@ -73,7 +73,9 @@ class _TeacherRecentLessonsScreenState
 
   void _openLesson(TeacherRecentLesson lesson) {
     final app = context.read<AppState>();
-    final teacherClass = app.teacherClasses.where((c) => c.id == lesson.classId);
+    final teacherClass = app.teacherClasses.where(
+      (c) => c.id == lesson.classId,
+    );
     if (teacherClass.isEmpty) return;
     final classInfo = teacherClass.first;
 
@@ -109,94 +111,76 @@ class _TeacherRecentLessonsScreenState
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              0,
-              AppSpacing.lg,
-              AppSpacing.sm,
-            ),
-            child: Text(
-              AppStrings.recentLessonsSubtitle(lang),
-              style: GoogleFonts.poppins(
-                fontSize: 12,
-                color: theme.textMain.withValues(alpha: 0.65),
-                height: 1.35,
-              ),
-            ),
-          ),
           Expanded(
             child: _loading
                 ? Center(
                     child: CircularProgressIndicator(color: theme.bgAccent),
                   )
                 : _lessons.isEmpty
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(AppSpacing.xxl),
-                          child: Text(
-                            AppStrings.noRecentLessons(lang),
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.poppins(
-                              fontSize: 14,
-                              color: theme.textMain.withValues(alpha: 0.7),
-                            ),
-                          ),
-                        ),
-                      )
-                    : RefreshIndicator(
-                        onRefresh: () => _load(userRefresh: true),
-                        color: theme.bgAccent,
-                        child: ListView.builder(
-                          padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
-                          itemCount: sectionKeys.length,
-                          itemBuilder: (context, sectionIndex) {
-                            final section = sectionKeys[sectionIndex];
-                            final sectionItems = grouped[section]!;
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    AppSpacing.lg,
-                                    AppSpacing.md,
-                                    AppSpacing.lg,
-                                    AppSpacing.sm,
-                                  ),
-                                  child: Text(
-                                    section,
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w700,
-                                      color: theme.textMain.withValues(
-                                        alpha: 0.55,
-                                      ),
-                                      letterSpacing: 0.2,
-                                    ),
-                                  ),
-                                ),
-                                for (final lesson in sectionItems)
-                                  Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      AppSpacing.lg,
-                                      0,
-                                      AppSpacing.lg,
-                                      AppSpacing.sm,
-                                    ),
-                                    child: ClassColorCard(
-                                      classId: lesson.classId,
-                                      title: lesson.title,
-                                      subtitle:
-                                          '${app.localizedContent(lesson.className)}\n${AppStrings.phrasesCount(lesson.phraseCount, lang)}',
-                                      icon: Icons.auto_stories_rounded,
-                                      onTap: () => _openLesson(lesson),
-                                    ),
-                                  ),
-                              ],
-                            );
-                          },
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppSpacing.xxl),
+                      child: Text(
+                        AppStrings.noRecentLessons(lang),
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          color: theme.textMain.withValues(alpha: 0.7),
                         ),
                       ),
+                    ),
+                  )
+                : RefreshIndicator(
+                    onRefresh: () => _load(userRefresh: true),
+                    color: theme.bgAccent,
+                    child: ListView.builder(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
+                      itemCount: sectionKeys.length,
+                      itemBuilder: (context, sectionIndex) {
+                        final section = sectionKeys[sectionIndex];
+                        final sectionItems = grouped[section]!;
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                AppSpacing.lg,
+                                AppSpacing.md,
+                                AppSpacing.lg,
+                                AppSpacing.sm,
+                              ),
+                              child: Text(
+                                section,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: theme.textMain.withValues(alpha: 0.55),
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                            ),
+                            for (final lesson in sectionItems)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  AppSpacing.lg,
+                                  0,
+                                  AppSpacing.lg,
+                                  AppSpacing.sm,
+                                ),
+                                child: ClassColorCard(
+                                  classId: lesson.classId,
+                                  title: lesson.title,
+                                  subtitle:
+                                      '${app.localizedContent(lesson.className)}\n${AppStrings.phrasesCount(lesson.phraseCount, lang)}',
+                                  icon: Icons.auto_stories_rounded,
+                                  onTap: () => _openLesson(lesson),
+                                ),
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
           ),
         ],
       ),
