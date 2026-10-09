@@ -24,6 +24,11 @@ class FirebaseService {
   bool _appCheckActivated = false;
   bool _appCheckSkipLogged = false;
   String? _lastAuthErrorCode;
+  int _authEpoch = 0;
+  Future<String?>? _emailSignInFlight;
+  String? _emailSignInEmail;
+  Future<String?>? _createAccountFlight;
+  String? _createAccountEmail;
 
   static const _authTimeout = Duration(seconds: 30);
   static const _initTimeout = Duration(seconds: 10);
@@ -104,16 +109,15 @@ class FirebaseService {
   /// On Windows, Auth restores asynchronously and auth-state EventChannel
   /// callbacks may arrive off the platform thread, so we poll [currentUser]
   /// instead of relying on [authStateChanges] alone.
-  Future<String?> waitForAuthUid({
-    Duration? timeout,
-  }) async {
+  Future<String?> waitForAuthUid({Duration? timeout}) async {
     if (!_initialized) return null;
     final firebaseAuth = auth;
     if (firebaseAuth == null) return null;
 
     final isWindows =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
-    final effectiveTimeout = timeout ??
+    final effectiveTimeout =
+        timeout ??
         (isWindows ? const Duration(seconds: 20) : const Duration(seconds: 8));
 
     if (isWindows) {
@@ -173,9 +177,7 @@ class FirebaseService {
   /// One local debug token, registered once in Firebase App Check.
   /// Release builds ignore it and use Play Integrity / App Attest.
   Future<String> _debugAppCheckToken() async {
-    const fromDefine = String.fromEnvironment(
-      'TAPTALK_APP_CHECK_DEBUG_TOKEN',
-    );
+    const fromDefine = String.fromEnvironment('TAPTALK_APP_CHECK_DEBUG_TOKEN');
     if (fromDefine.trim().isNotEmpty) return fromDefine.trim();
     if (!kDebugMode || kIsWeb || !Platform.isAndroid) return '';
     try {
@@ -228,8 +230,7 @@ class FirebaseService {
 
     try {
       await FirebaseAppCheck.instance.activate(
-        providerAndroid:
-            androidDebug ?? const AndroidPlayIntegrityProvider(),
+        providerAndroid: androidDebug ?? const AndroidPlayIntegrityProvider(),
         providerApple: appleDebug ?? const AppleAppAttestProvider(),
         providerWindows: WindowsDebugProvider(
           debugToken: windowsDebugToken != null && windowsDebugToken.isNotEmpty
@@ -246,18 +247,98 @@ class FirebaseService {
     }
   }
 
+  bool _hardAuthFailure(String? code) {
+    switch (code) {
+      case 'wrong-password':
+      case 'invalid-credential':
+      case 'invalid-login-credentials':
+      case 'user-not-found':
+      case 'user-disabled':
+      case 'invalid-email':
+      case 'weak-password':
+      case 'operation-not-allowed':
+      case 'email-already-in-use':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  String? _uidForEmail(FirebaseAuth firebaseAuth, String email) {
+    final user = firebaseAuth.currentUser;
+    final userEmail = user?.email?.trim().toLowerCase();
+    if (user != null && userEmail == email.trim().toLowerCase()) {
+      return user.uid;
+    }
+    return null;
+  }
+
+  /// The native Auth call keeps running after a short Dart timeout. A second
+  /// call stacks behind it, so both look like "Could not sign in". Wait on the
+  /// one call already sent, and succeed as soon as that account is signed in.
+  Future<String?> _waitForSignedInUser({
+    required FirebaseAuth firebaseAuth,
+    required String email,
+    required Future<String?> native,
+    Duration limit = const Duration(seconds: 20),
+  }) async {
+    final deadline = DateTime.now().add(limit);
+    while (true) {
+      final ready = _uidForEmail(firebaseAuth, email);
+      if (ready != null) return ready;
+      final remaining = deadline.difference(DateTime.now());
+      if (remaining <= Duration.zero) return _uidForEmail(firebaseAuth, email);
+      final slice = remaining < const Duration(milliseconds: 300)
+          ? remaining
+          : const Duration(milliseconds: 300);
+      try {
+        final uid = await native.timeout(slice);
+        if (uid != null && uid.isNotEmpty) return uid;
+        final lateUser = _uidForEmail(firebaseAuth, email);
+        if (lateUser != null) return lateUser;
+        // A wrong password fails immediately. Android can publish the signed-in
+        // user just after the call returns empty, so watch briefly.
+        if (_hardAuthFailure(lastAuthErrorCode)) return null;
+        final grace = DateTime.now().add(const Duration(seconds: 2));
+        while (DateTime.now().isBefore(grace)) {
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+          final published = _uidForEmail(firebaseAuth, email);
+          if (published != null) return published;
+        }
+        return null;
+      } on TimeoutException {
+        continue;
+      }
+    }
+  }
+
   Future<String?> signIn({
     required String email,
     required String password,
   }) async {
     if (!_initialized) return null;
-    _clearAuthError();
+    _authEpoch++;
     final firebaseAuth = auth;
     if (firebaseAuth == null) return null;
-    final uid = await _withAuthTimeout<String?>(() async {
+    final normalized = email.trim().toLowerCase();
+    final already = _uidForEmail(firebaseAuth, normalized);
+    if (already != null) return already;
+
+    final inFlight = _emailSignInFlight;
+    if (inFlight != null && _emailSignInEmail == normalized) {
+      return _waitForSignedInUser(
+        firebaseAuth: firebaseAuth,
+        email: normalized,
+        native: inFlight,
+      );
+    }
+
+    _clearAuthError();
+    CaregiverSecurityService.instance.holdSessionChanges();
+    final native = () async {
       try {
         final credential = await firebaseAuth.signInWithEmailAndPassword(
-          email: email.trim().toLowerCase(),
+          email: normalized,
           password: password,
         );
         return credential.user?.uid;
@@ -270,8 +351,24 @@ class FirebaseService {
         debugPrint('Firebase sign-in error: $e\n$st');
         return null;
       }
-    }, label: 'sign-in');
+    }();
+    _emailSignInFlight = native;
+    _emailSignInEmail = normalized;
+    native.whenComplete(() {
+      if (identical(_emailSignInFlight, native)) {
+        _emailSignInFlight = null;
+        _emailSignInEmail = null;
+      }
+      CaregiverSecurityService.instance.releaseSessionChanges();
+    });
+
+    final uid = await _waitForSignedInUser(
+      firebaseAuth: firebaseAuth,
+      email: normalized,
+      native: native,
+    );
     if (uid != null && uid.isNotEmpty) {
+      _clearAuthError();
       await _tryRegisterActiveSession();
     }
     return uid;
@@ -282,11 +379,24 @@ class FirebaseService {
     required String password,
   }) async {
     if (!_initialized) return null;
-    _clearAuthError();
     final firebaseAuth = auth;
     if (firebaseAuth == null) return null;
     final normalizedEmail = email.trim().toLowerCase();
-    var uid = await _withAuthTimeout<String?>(() async {
+    final already = _uidForEmail(firebaseAuth, normalizedEmail);
+    if (already != null) return already;
+
+    final inFlight = _createAccountFlight;
+    if (inFlight != null && _createAccountEmail == normalizedEmail) {
+      return _waitForSignedInUser(
+        firebaseAuth: firebaseAuth,
+        email: normalizedEmail,
+        native: inFlight,
+      );
+    }
+
+    _clearAuthError();
+    CaregiverSecurityService.instance.holdSessionChanges();
+    final native = () async {
       try {
         final credential = await firebaseAuth.createUserWithEmailAndPassword(
           email: normalizedEmail,
@@ -302,72 +412,38 @@ class FirebaseService {
         debugPrint('Firebase create account error: $e\n$st');
         return null;
       }
-    }, label: 'create-account', timeout: const Duration(seconds: 25));
+    }();
+    _createAccountFlight = native;
+    _createAccountEmail = normalizedEmail;
+    native.whenComplete(() {
+      if (identical(_createAccountFlight, native)) {
+        _createAccountFlight = null;
+        _createAccountEmail = null;
+      }
+      CaregiverSecurityService.instance.releaseSessionChanges();
+    });
 
-    if (uid == null || uid.isEmpty) {
-      uid = await _recoverUidAfterCreate(
-        firebaseAuth: firebaseAuth,
-        email: normalizedEmail,
-        password: password,
-      );
-    }
-
+    final uid = await _waitForSignedInUser(
+      firebaseAuth: firebaseAuth,
+      email: normalizedEmail,
+      native: native,
+    );
     if (uid != null && uid.isNotEmpty) {
       _clearAuthError();
       await _tryRegisterActiveSession();
+      return uid;
     }
-    return uid;
-  }
-
-  /// createUser can succeed in Firebase after a client timeout, leaving the
-  /// new Auth user in Console while this app still thinks sign-up failed.
-  Future<String?> _recoverUidAfterCreate({
-    required FirebaseAuth firebaseAuth,
-    required String email,
-    required String password,
-  }) async {
-    String? matchingUid() {
-      final user = firebaseAuth.currentUser;
-      final userEmail = user?.email?.trim().toLowerCase();
-      if (user != null && userEmail == email) return user.uid;
-      return null;
-    }
-
-    final immediate = matchingUid();
-    if (immediate != null) return immediate;
-
-    final createError = lastAuthErrorCode;
-    if (createError == 'weak-password' ||
-        createError == 'invalid-email' ||
-        createError == 'operation-not-allowed') {
-      return null;
-    }
-
-    if (createError != 'email-already-in-use') {
-      for (var i = 0; i < 8; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 400));
-        final polled = matchingUid();
-        if (polled != null) return polled;
+    // The account already exists. Sign in once, after create has finished,
+    // so the two Auth calls do not block each other.
+    if (lastAuthErrorCode == 'email-already-in-use') {
+      final signedIn = await signIn(email: normalizedEmail, password: password);
+      if (signedIn != null && signedIn.isNotEmpty) {
+        _clearAuthError();
+        return signedIn;
       }
-    }
-
-    if (createError != null &&
-        createError != 'unknown' &&
-        createError != 'email-already-in-use' &&
-        createError != 'network-request-failed') {
-      return matchingUid();
-    }
-
-    final signedIn = await signIn(email: email, password: password);
-    if (signedIn != null && signedIn.isNotEmpty) {
-      _clearAuthError();
-      return signedIn;
-    }
-
-    if (createError == 'email-already-in-use') {
       _setAuthError('email-already-in-use');
     }
-    return matchingUid();
+    return _uidForEmail(firebaseAuth, normalizedEmail);
   }
 
   /// Signs in existing Firebase users or creates one for legacy local accounts.
@@ -382,12 +458,18 @@ class FirebaseService {
 
   Future<void> signOut() async {
     if (!_initialized) return;
+    final epoch = ++_authEpoch;
+    // The server logout can take many seconds. Local sign-out must not wait
+    // for it, and a newer sign-in must not be wiped by this call.
+    unawaited(CaregiverSecurityService.instance.endSession());
+    if (_authEpoch != epoch) return;
     try {
-      await CaregiverSecurityService.instance.endSession();
       await auth?.signOut();
-    } finally {
-      await _clearSessionState();
+    } catch (e, st) {
+      debugPrint('Firebase sign-out failed: $e\n$st');
     }
+    if (_authEpoch != epoch) return;
+    unawaited(_clearSessionState());
   }
 
   /// True when Firebase Auth says the persisted user no longer exists.
@@ -427,20 +509,23 @@ class FirebaseService {
     if (firebaseAuth == null) {
       return FirebasePasswordResetResult.failed(errorCode: 'unavailable');
     }
-    final result = await _withAuthTimeout<FirebasePasswordResetResult>(() async {
-      try {
-        await firebaseAuth.sendPasswordResetEmail(
-          email: email.trim().toLowerCase(),
-        );
-        return FirebasePasswordResetResult.sent();
-      } on FirebaseAuthException catch (e) {
-        debugPrint('Firebase reset email failed: ${e.code} — ${e.message}');
-        return FirebasePasswordResetResult.failed(errorCode: e.code);
-      } catch (e, st) {
-        debugPrint('Firebase reset email error: $e\n$st');
-        return FirebasePasswordResetResult.failed(errorCode: 'unknown');
-      }
-    }, label: 'password-reset-email');
+    final result = await _withAuthTimeout<FirebasePasswordResetResult>(
+      () async {
+        try {
+          await firebaseAuth.sendPasswordResetEmail(
+            email: email.trim().toLowerCase(),
+          );
+          return FirebasePasswordResetResult.sent();
+        } on FirebaseAuthException catch (e) {
+          debugPrint('Firebase reset email failed: ${e.code} — ${e.message}');
+          return FirebasePasswordResetResult.failed(errorCode: e.code);
+        } catch (e, st) {
+          debugPrint('Firebase reset email error: $e\n$st');
+          return FirebasePasswordResetResult.failed(errorCode: 'unknown');
+        }
+      },
+      label: 'password-reset-email',
+    );
     return result ?? FirebasePasswordResetResult.failed(errorCode: 'timeout');
   }
 
@@ -509,9 +594,7 @@ class FirebaseService {
       final account = await googleSignIn.authenticate();
 
       final auth = account.authentication;
-      final credential = GoogleAuthProvider.credential(
-        idToken: auth.idToken,
-      );
+      final credential = GoogleAuthProvider.credential(idToken: auth.idToken);
 
       final result = await firebaseAuth.signInWithCredential(credential);
       return result.user?.uid;

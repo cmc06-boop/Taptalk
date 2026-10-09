@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TapTalk</title>
+  <style>
+    body { margin: 0; font-family: Poppins, Roboto, sans-serif; background: #eaf7ef; color: #1e3a2c;
+           display: flex; min-height: 100vh; align-items: center; justify-content: center; text-align: center; }
+    main { padding: 24px; max-width: 360px; }
+    h1 { font-size: 24px; margin: 0 0 8px; }
+    p { font-size: 14px; color: #4f6c5d; margin: 0; line-height: 1.45; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Email confirmed</h1>
+    <p>Return to TapTalk. It will finish automatically.</p>
+  </main>
+  <script>
+    setTimeout(function () {
+      location.href = 'intent://open#Intent;scheme=taptalk;package=com.example.flutter_application_1;end';
+    }, 400);
+  </script>
+</body>
+</html>

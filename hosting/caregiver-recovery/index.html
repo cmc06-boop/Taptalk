@@ -61,7 +61,8 @@
           });
           if (!result.ok) throw new Error('rejected');
           title.textContent = 'Phone confirmed';
-          message.textContent = 'Return to your new phone. TapTalk will finish automatically.';
+          message.textContent = 'Return to TapTalk. It will finish automatically.';
+          openTapTalk();
         } catch (_) {
           failed('This link expired, was already used, or could not be confirmed. Send a new link from your new phone.');
         }
@@ -71,6 +72,12 @@
         title.textContent = 'Could not confirm';
         message.textContent = text;
         retry.hidden = false;
+      }
+
+      function openTapTalk() {
+        setTimeout(function () {
+          location.href = 'intent://open#Intent;scheme=taptalk;package=com.example.flutter_application_1;end';
+        }, 400);
       }
 
       retry.addEventListener('click', confirm);

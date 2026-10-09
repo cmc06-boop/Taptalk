@@ -21,6 +21,7 @@ Future<void> showNegativeUsageWarningDialog(
   BuildContext context, {
   required List<TeacherNegativeUsageWarning> warnings,
   required AppLanguage lang,
+  bool emphasizeTypeLabel = false,
 }) async {
   if (warnings.isEmpty) return;
   final theme = context.read<AppState>().theme;
@@ -41,14 +42,16 @@ Future<void> showNegativeUsageWarningDialog(
         final alertType = ParentNotification.alertTypeFromKey(
           MonitoringConstants.negativeUsageAlertType,
         );
+        final levelTitle = warning.title.isNotEmpty
+            ? warning.title
+            : AppStrings.negativeUsageWarningLevelTitle(lang, warning.level);
+        final childName = warning.childName.trim();
         return Center(
           child: _NegativeUsageWarningPopup(
-            title: warning.title.isNotEmpty
-                ? warning.title
-                : AppStrings.negativeUsageWarningLevelTitle(
-                    lang,
-                    warning.level,
-                  ),
+            title: emphasizeTypeLabel && childName.isNotEmpty
+                ? childName
+                : levelTitle,
+            typeLabel: emphasizeTypeLabel ? levelTitle : null,
             body: _firstParagraph(
               warning.body.isNotEmpty
                   ? warning.body
@@ -115,10 +118,12 @@ class _NegativeUsageWarningPopup extends StatelessWidget {
     required this.alertType,
     required this.icon,
     required this.onClose,
+    this.typeLabel,
   });
 
   final String title;
   final String body;
+  final String? typeLabel;
   final TapTalkThemeToken theme;
   final AppLanguage lang;
   final String timeLabel;
@@ -131,6 +136,15 @@ class _NegativeUsageWarningPopup extends StatelessWidget {
     final accent = theme.bgAccent;
     final iconColor = ParentAlertIcons.iconColor(alertType);
     final iconBg = ParentAlertIcons.iconBackground(alertType);
+    final label = typeLabel?.trim() ?? '';
+    final showTypeLabel = label.isNotEmpty;
+    final showHeadline =
+        title.trim().isNotEmpty &&
+        title.trim().toLowerCase() != label.toLowerCase();
+    final trimmedBody = body.trim();
+    final showBody =
+        trimmedBody.isNotEmpty &&
+        trimmedBody.toLowerCase() != label.toLowerCase();
     final maxHeight = MediaQuery.sizeOf(context).height * 0.72;
 
     return Material(
@@ -182,18 +196,19 @@ class _NegativeUsageWarningPopup extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                title,
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.poppins(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                  color: theme.textMain,
-                                  height: 1.25,
+                              if (showHeadline)
+                                Text(
+                                  title,
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: theme.textMain,
+                                    height: 1.25,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 4),
+                              if (showHeadline) const SizedBox(height: 4),
                               Text(
                                 timeLabel,
                                 style: GoogleFonts.poppins(
@@ -221,26 +236,44 @@ class _NegativeUsageWarningPopup extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const SizedBox(height: AppSpacing.md),
-                  Flexible(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(
-                        AppSpacing.lg,
-                        0,
-                        AppSpacing.lg,
-                        AppSpacing.md,
+                  if (showTypeLabel) ...[
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.lg,
                       ),
                       child: Text(
-                        body,
+                        label,
+                        textAlign: TextAlign.center,
                         style: GoogleFonts.poppins(
                           fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: theme.textMain.withValues(alpha: 0.82),
-                          height: 1.45,
+                          fontWeight: FontWeight.w600,
+                          color: iconColor,
                         ),
                       ),
                     ),
-                  ),
+                    const SizedBox(height: AppSpacing.md),
+                  ] else
+                    const SizedBox(height: AppSpacing.md),
+                  if (showBody)
+                    Flexible(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(
+                          AppSpacing.lg,
+                          0,
+                          AppSpacing.lg,
+                          AppSpacing.md,
+                        ),
+                        child: Text(
+                          body,
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            color: theme.textMain.withValues(alpha: 0.82),
+                            height: 1.45,
+                          ),
+                        ),
+                      ),
+                    ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(
                       AppSpacing.lg,

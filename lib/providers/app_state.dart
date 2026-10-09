@@ -183,10 +183,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   bool _emailVerifiedPendingContinue = false;
   bool _deviceRegisteredPendingContinue = false;
   bool _deviceKnownTrusted = false;
+  bool _signupPhone = false;
   String? _deviceRegistrationEmail;
   List<Map<String, dynamic>> _legacyLearners = [];
   Future<void>? _caregiverRefresh;
   int _caregiverGeneration = 0;
+  Timer? _trustedDevicePoll;
   List<ParentNotification> _notifications = [];
   int? _selectedChildId;
   List<EnrolledClassModel> _enrolledClasses = [];
@@ -450,8 +452,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   List<LinkedChildModel> get linkedChildren => _linkedChildren;
   CaregiverAccess get caregiverAccess => _caregiverAccess;
+
+  /// Parent and teacher accounts share one trusted phone. Phone-number
+  /// accounts stay on the existing login path.
+  bool get _trustedDeviceAccount =>
+      _user?.isParent == true || _user?.isTeacher == true;
+
   bool get parentNeedsEmailVerification =>
-      _user?.isParent == true &&
+      _trustedDeviceAccount &&
       _user?.isPhoneAccount != true &&
       _parentEmailChecked &&
       (!_parentEmailVerified || _emailVerifiedPendingContinue);
@@ -744,6 +752,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           await _loadLinkedChildren(syncCloudInBackground: true);
           await _routeUserAfterOnboardingChecks();
         } else if (_user!.isTeacher) {
+          await _loadDeviceKnownTrusted();
           await _ensureStarterData();
           await refreshTeacherClasses(cloudSyncInBackground: true);
           await _routeUserAfterOnboardingChecks();
@@ -838,18 +847,19 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       _startPendingActivitySyncTimer();
     }
 
+    if (_user == null) return;
     if (_user!.isOnlineAccount &&
         _hasPersonalBoardRole() &&
         CloudScope.syncMonitoring) {
       await _syncFirebaseSessionAfterRestore();
+      if (_user == null) return;
       await _startPersonalBoardSync();
     }
 
-    if (_user!.isOnlineAccount) {
-      await _startUserProfileSync();
-    }
+    if (_user == null || !_user!.isOnlineAccount) return;
+    await _startUserProfileSync();
 
-    if (!needsFullCloud) return;
+    if (_user == null || !needsFullCloud) return;
 
     await _syncFirebaseSessionAfterRestore();
     if (_user!.isParent || _user!.isTeacher) {
@@ -863,7 +873,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
     }
-    if (_user!.isParent) {
+    if (_user!.isParent || _user!.isTeacher) {
       await _syncCloudDataAfterFirebaseReady();
     }
     if (_user!.isParent || _user!.isTeacher) {
@@ -1457,7 +1467,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _syncCloudDataAfterFirebaseReady() async {
     if (_user == null) return;
     try {
-      if (_user!.isParent) {
+      if (_trustedDeviceAccount) {
         await _refreshParentEmailStatus();
         if (_parentEmailVerified) {
           await refreshCaregiverAccess();
@@ -1553,10 +1563,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _emailVerifiedPendingContinue = false;
     _deviceRegisteredPendingContinue = false;
     _deviceKnownTrusted = false;
+    _signupPhone = false;
     _deviceRegistrationEmail = null;
     _legacyLearners = [];
     _caregiverRefresh = null;
     _caregiverGeneration++;
+    _trustedDevicePoll?.cancel();
+    _trustedDevicePoll = null;
     _notifications = [];
     _selectedChildId = null;
     _teacherClasses = [];
@@ -2381,14 +2394,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         );
       }
       await _notificationSync.initialize();
-      var cloudProfile = await _notificationSync.getUserProfileFromCloud(uid);
-      final cloudSnapshot = cloudProfile;
-      // The signed-in user's own profile is authoritative for their role.
-      // A generic display name ("Learner", "Parent", or "Teacher") must not
-      // discard that profile and trigger protected cross-collection lookups.
-      if (cloudProfile == null && user != null) {
-        // Same-device login can safely retain the role recorded at sign-up
-        // while a delayed/missing cloud profile is repaired in the background.
+      RemoteUserProfile cloudProfile;
+      RemoteUserProfile? cloudSnapshot;
+      if (user != null && user.role.trim().isNotEmpty) {
         cloudProfile = RemoteUserProfile(
           firebaseUid: uid,
           email: normalizedEmail,
@@ -2396,22 +2404,52 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           role: user.role,
           themeKey: user.themeKey,
         );
+      } else {
+        RemoteUserProfile? loaded;
+        try {
+          loaded = await _notificationSync
+              .getUserProfileFromCloud(uid)
+              .timeout(const Duration(seconds: 6));
+          loaded ??= await _notificationSync
+              .resolveUserProfileForLogin(
+                firebaseUid: uid,
+                email: normalizedEmail,
+              )
+              .timeout(const Duration(seconds: 6));
+        } catch (e, st) {
+          debugPrint('Login profile read failed: $e\n$st');
+        }
+        cloudSnapshot = loaded;
+        cloudProfile =
+            loaded ??
+            RemoteUserProfile(
+              firebaseUid: uid,
+              email: normalizedEmail,
+              fullName: '',
+              role: 'learner',
+            );
       }
-      cloudProfile ??= await _notificationSync.resolveUserProfileForLogin(
-        firebaseUid: uid,
-        email: normalizedEmail,
-      );
       cloudProfile = _mergeCloudAccountPreferences(
         profile: cloudProfile,
         cloudSource: cloudSnapshot,
       );
-      user = await _repo.finalizeCloudLoginUser(
-        userByEmail: user,
-        email: normalizedEmail,
-        password: password,
-        firebaseUid: uid,
-        profile: cloudProfile,
-      );
+      final previous = user;
+      try {
+        user = await _repo.finalizeCloudLoginUser(
+          userByEmail: user,
+          email: normalizedEmail,
+          password: password,
+          firebaseUid: uid,
+          profile: cloudProfile,
+        );
+      } catch (e, st) {
+        debugPrint('Finalize login failed: $e\n$st');
+        user =
+            previous ??
+            await _repo.findUserByFirebaseUid(uid) ??
+            await _repo.findUserByEmail(normalizedEmail);
+        if (user == null) return AppStrings.loginFailedTryAgain(_language);
+      }
     }
 
     _user = user;
@@ -2420,28 +2458,37 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<String?> _activateSignedInUser({required bool offline}) async {
     if (_user == null) return AppStrings.loginFailed(_language);
+    try {
+      return await _openSignedInUser(offline: offline);
+    } catch (e, st) {
+      debugPrint('Open signed-in user failed: $e\n$st');
+      if (_user == null) return AppStrings.loginFailedTryAgain(_language);
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<String?> _openSignedInUser({required bool offline}) async {
+    if (_user == null) return AppStrings.loginFailed(_language);
 
     _resetAccountSession();
-
-    if (!offline && FirebaseService.instance.isAvailable) {
-      try {
-        await _notificationSync.initialize();
-        await _restoreAccountFromCloud();
-        await _refreshPersonalBoard();
-      } catch (e, st) {
-        debugPrint('Account restore from cloud failed: $e\n$st');
-      }
-    }
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('user_id', _user!.id);
     await _applyCrossDevicePreferencesFromAccount();
 
-    if (_user!.isParent) {
-      // Settle the security step first so an unregistered phone goes straight
-      // to device verification instead of opening Home.
-      await _refreshParentEmailStatus();
-      if (_parentEmailVerified) unawaited(refreshCaregiverAccess());
+    if (_trustedDeviceAccount) {
+      await _loadDeviceKnownTrusted();
+      final authUser = FirebaseAuth.instance.currentUser;
+      final hasEmail = authUser?.email?.trim().isNotEmpty == true;
+      if (authUser == null || !hasEmail || authUser.emailVerified) {
+        _parentEmailVerified = true;
+        _parentEmailChecked = true;
+        unawaited(refreshCaregiverAccess());
+      } else {
+        _parentEmailVerified = false;
+        _parentEmailChecked = true;
+      }
     }
 
     if (_user!.isLearner || _user!.isParent || _user!.isTeacher) {
@@ -2452,25 +2499,51 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       return AppStrings.parentTeacherComingSoon(_language);
     }
     notifyListeners();
+    unawaited(_finishLoginSetup(offline: offline));
+    unawaited(_recordCurrentAccount());
+    return null;
+  }
+
+  Future<void> _finishLoginSetup({required bool offline}) async {
+    if (!offline && FirebaseService.instance.isAvailable) {
+      try {
+        await _notificationSync.initialize();
+        await _restoreAccountFromCloud();
+        await _refreshPersonalBoard();
+      } catch (e, st) {
+        debugPrint('Account restore from cloud failed: $e\n$st');
+      }
+    }
+
+    if (_trustedDeviceAccount) {
+      final alreadyVerified =
+          FirebaseAuth.instance.currentUser?.emailVerified == true;
+      if (!alreadyVerified) {
+        await _refreshParentEmailStatus();
+      }
+      if (_parentEmailVerified) unawaited(refreshCaregiverAccess());
+    }
 
     try {
+      if (_user == null) return;
       if (_user!.isLearner) {
-        await _loadLearnerData(cloudSyncInBackground: false);
+        await _loadLearnerData(cloudSyncInBackground: true);
         await _ensureStarterData();
       } else if (_user!.isParent) {
-        await _loadLearnerData(cloudSyncInBackground: false);
+        await _loadLearnerData(cloudSyncInBackground: true);
         await _ensureStarterData();
         await _loadLinkedChildren(syncCloudInBackground: true);
         await _notificationSync.initialize();
         await _syncFirebaseSessionAfterRestore();
         await _syncCloudDataAfterFirebaseReady();
       } else if (_user!.isTeacher) {
-        await _loadLearnerData(cloudSyncInBackground: false);
+        await _loadLearnerData(cloudSyncInBackground: true);
         await _ensureStarterData();
-        await refreshTeacherClasses(cloudSyncInBackground: false);
+        await refreshTeacherClasses(cloudSyncInBackground: true);
         await _notificationSync.initialize();
         await _syncFirebaseSessionAfterRestore();
       }
+      if (_user == null) return;
       if (!offline && FirebaseService.instance.isAvailable) {
         await _pullPersonalBoardFromCloud();
         await _refreshPersonalBoard();
@@ -2481,10 +2554,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     } catch (e, st) {
       debugPrint('Post-login data load failed (session is saved): $e\n$st');
     }
-
-    await _recordCurrentAccount();
     notifyListeners();
-    return null;
   }
 
   Future<String> _loginFailureMessage({
@@ -2658,50 +2728,48 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         await _setLanguageOnboardingDone(_user!.id, false);
         await _setCategoryOnboardingDone(_user!.id, false);
         await _goToRouteReplacingStack(AppRoute.chooseLanguage);
-      } else if (role == 'parent') {
+      } else if (role == 'parent' || role == 'teacher') {
         _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
         await _setLanguageOnboardingDone(_user!.id, false);
         await _goToRouteReplacingStack(AppRoute.chooseLanguage);
+        _signupPhone = role == 'teacher';
+        if (_signupPhone) await _saveSignupPhone(true);
         _parentEmailChecked = true;
         _parentEmailVerified = false;
-      } else if (role == 'teacher') {
-        _theme = TapTalkThemes.byKey(_user!.themeKey ?? 'mint_green');
-        await _setLanguageOnboardingDone(_user!.id, false);
-        await _goToRouteReplacingStack(AppRoute.chooseLanguage);
       } else {
         await _goToRouteReplacingStack(AppRoute.login);
       }
 
       notifyListeners();
-
-      try {
-        await _syncUserProfileToCloud();
-        if (role == 'learner') {
-          await _loadLearnerData(cloudSyncInBackground: false);
-          await _ensureStarterData();
-        } else if (role == 'parent') {
-          await _loadLearnerData(cloudSyncInBackground: true);
-          await _ensureStarterData();
-          await _loadLinkedChildren(syncCloudInBackground: true);
-        } else if (role == 'teacher') {
-          await _loadLearnerData(cloudSyncInBackground: true);
-          await _ensureStarterData();
-          await refreshTeacherClasses(cloudSyncInBackground: true);
-        }
-        unawaited(_activateMonitoringSync());
-        notifyListeners();
-      } catch (e, st) {
-        debugPrint(
-          'Post-register data load failed (account is saved): $e\n$st',
-        );
-      }
-
+      unawaited(_finishRegisterSetup(role));
       await _recordCurrentAccount();
       return null;
     } catch (e, st) {
       debugPrint('Post-register setup failed (account is saved): $e\n$st');
       notifyListeners();
       return null;
+    }
+  }
+
+  Future<void> _finishRegisterSetup(String role) async {
+    try {
+      await _syncUserProfileToCloud();
+      if (role == 'learner') {
+        await _loadLearnerData(cloudSyncInBackground: false);
+        await _ensureStarterData();
+      } else if (role == 'parent') {
+        await _loadLearnerData(cloudSyncInBackground: true);
+        await _ensureStarterData();
+        await _loadLinkedChildren(syncCloudInBackground: true);
+      } else if (role == 'teacher') {
+        await _loadLearnerData(cloudSyncInBackground: true);
+        await _ensureStarterData();
+        await refreshTeacherClasses(cloudSyncInBackground: true);
+      }
+      unawaited(_activateMonitoringSync());
+      notifyListeners();
+    } catch (e, st) {
+      debugPrint('Post-register data load failed (account is saved): $e\n$st');
     }
   }
 
@@ -2988,11 +3056,20 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await prefs.setInt('user_id', _user!.id);
     await _applyCrossDevicePreferencesFromAccount();
 
-    if (_user!.isParent) {
+    if (_trustedDeviceAccount) {
+      await _loadDeviceKnownTrusted();
       // Settle the security step first so an unregistered phone goes straight
       // to device verification instead of opening Home.
-      await _refreshParentEmailStatus();
-      if (_parentEmailVerified) unawaited(refreshCaregiverAccess());
+      final alreadyVerified =
+          FirebaseAuth.instance.currentUser?.emailVerified == true;
+      if (alreadyVerified) {
+        _parentEmailVerified = true;
+        _parentEmailChecked = true;
+        unawaited(refreshCaregiverAccess());
+      } else {
+        await _refreshParentEmailStatus();
+        if (_parentEmailVerified) unawaited(refreshCaregiverAccess());
+      }
     }
 
     if (_user!.isLearner || _user!.isParent || _user!.isTeacher) {
@@ -3232,21 +3309,78 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> logout({bool keepSavedAccounts = true}) async {
     final currentEmail = AuthValidation.normalizeEmail(_user?.email ?? '');
-    await _endActiveSession();
+    _dropLocalSession();
     if (!keepSavedAccounts) {
-      await _savedAccountsStore.clear();
       _savedAccounts = [];
     } else if (currentEmail.isNotEmpty) {
-      await _savedAccountsStore.remove(currentEmail);
-      _savedAccounts = await _savedAccountsStore.load();
-    }
-    if (_savedAccounts.isNotEmpty) {
-      await _goToRouteReplacingStack(AppRoute.login);
-    } else {
-      await _goToRouteReplacingStack(AppRoute.welcome);
+      _savedAccounts = [
+        for (final account in _savedAccounts)
+          if (AuthValidation.normalizeEmail(account.email) != currentEmail)
+            account,
+      ];
     }
     _drawerOpen = false;
+    final next = _savedAccounts.isNotEmpty ? AppRoute.login : AppRoute.welcome;
+    _resetNavigationStack(next);
     notifyListeners();
+    final nav = navigatorKey.currentState;
+    if (nav != null) {
+      unawaited(nav.pushAndRemoveUntil(_pageRoute(next), (_) => false));
+    }
+    unawaited(
+      _persistLogout(currentEmail, keepSavedAccounts: keepSavedAccounts),
+    );
+  }
+
+  void _dropLocalSession() {
+    _pendingActivitySyncTimer?.cancel();
+    _pendingActivitySyncTimer = null;
+    _liveMonitoredLearnerIds.clear();
+    _childMonitoringRevision.clear();
+    _classContentRevision.clear();
+    _classLocalEditAt.clear();
+    _lastOwnClassPushUpdatedAt.clear();
+    _lastAppliedRemoteClassContentMs.clear();
+    _recentDeletedPhraseKeys.clear();
+    _classContentMergeChain.clear();
+    _classContentPushInFlight.clear();
+    _classContentPushPending.clear();
+    _liveClassContentIds.clear();
+    _liveDataRevision = 0;
+    unawaited(_connectivitySubscription?.cancel());
+    _connectivitySubscription = null;
+    unawaited(_firebaseAuthRestoreSubscription?.cancel());
+    _firebaseAuthRestoreSubscription = null;
+    unawaited(_firebaseAccountInvalidationSubscription?.cancel());
+    _firebaseAccountInvalidationSubscription = null;
+    _loggedCloudAuthMissing = false;
+    unawaited(_notificationSync.stopParentSync());
+    unawaited(_notificationSync.stopMonitoringSync());
+    unawaited(FirebaseService.instance.signOut());
+    _language = AppLanguage.english;
+    _languageRevision = 0;
+    _ttsSpeed = TtsSpeedOptions.defaultSpeed;
+    _user = null;
+    _resetAccountSession();
+    _theme = TapTalkThemes.appDefault;
+    _resetSpeechTracking();
+  }
+
+  Future<void> _persistLogout(
+    String currentEmail, {
+    required bool keepSavedAccounts,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('user_id');
+      if (!keepSavedAccounts) {
+        await _savedAccountsStore.clear();
+      } else if (currentEmail.isNotEmpty) {
+        await _savedAccountsStore.remove(currentEmail);
+      }
+    } catch (e, st) {
+      debugPrint('Logout cleanup failed: $e\n$st');
+    }
   }
 
   Future<void> refreshSavedAccounts() async {
@@ -3341,39 +3475,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _endActiveSession() async {
-    _pendingActivitySyncTimer?.cancel();
-    _pendingActivitySyncTimer = null;
-    _liveMonitoredLearnerIds.clear();
-    _childMonitoringRevision.clear();
-    _classContentRevision.clear();
-    _classLocalEditAt.clear();
-    _lastOwnClassPushUpdatedAt.clear();
-    _lastAppliedRemoteClassContentMs.clear();
-    _recentDeletedPhraseKeys.clear();
-    _classContentMergeChain.clear();
-    _classContentPushInFlight.clear();
-    _classContentPushPending.clear();
-    _liveClassContentIds.clear();
-    _liveDataRevision = 0;
-    await _connectivitySubscription?.cancel();
-    _connectivitySubscription = null;
-    await _firebaseAuthRestoreSubscription?.cancel();
-    _firebaseAuthRestoreSubscription = null;
-    await _firebaseAccountInvalidationSubscription?.cancel();
-    _firebaseAccountInvalidationSubscription = null;
-    _loggedCloudAuthMissing = false;
-    await _notificationSync.stopParentSync();
-    await _notificationSync.stopMonitoringSync();
-    await FirebaseService.instance.signOut();
+    _dropLocalSession();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('user_id');
-    _language = AppLanguage.english;
-    _languageRevision = 0;
-    _ttsSpeed = TtsSpeedOptions.defaultSpeed;
-    _user = null;
-    _resetAccountSession();
-    _theme = TapTalkThemes.appDefault;
-    _resetSpeechTracking();
   }
 
   Future<void> completeLanguageSelection(AppLanguage lang) async {
@@ -3789,7 +3893,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       unawaited(_syncPendingLearnerActivityToCloud());
     }
     unawaited(_enforceFirebaseAccountStillExists());
-    if (_user != null && _user!.isParent) {
+    if (_user != null && _trustedDeviceAccount) {
       unawaited(refreshCaregiverAccess());
     }
   }
@@ -3808,6 +3912,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _onConnectivityRestored() async {
+    if (_user == null) return;
+    try {
+      await _onConnectivityRestoredBody();
+    } catch (e, st) {
+      debugPrint('Connectivity restore skipped: $e\n$st');
+    }
+  }
+
+  Future<void> _onConnectivityRestoredBody() async {
     if (_user == null) return;
     if (await NetworkStatus.isOffline()) return;
     if (NetworkStatus.isCloudBlocked) {
@@ -3842,7 +3955,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
     if (_user!.isParent || _user!.isTeacher) {
       await _syncFirebaseSessionAfterRestore();
-      if (_user!.isParent) {
+      if (_trustedDeviceAccount) {
         await refreshCaregiverAccess();
       }
       if (_user!.isTeacher) {
@@ -3853,6 +3966,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         await _loadNotifications();
       }
       unawaited(_evaluateTeacherNegativeUsageWarnings());
+      if (_user == null) return;
       await _prefetchMonitoredLearnerCachesWithRetry();
       await _reconcileClassContentLiveSync();
     }
@@ -4869,6 +4983,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         context,
         warnings: toShow,
         lang: _language,
+        emphasizeTypeLabel: _user?.isTeacher == true,
       );
     } finally {
       _negativeUsageDialogShowing = false;
@@ -5013,7 +5128,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         .listen((user) {
           if (_loggingOutDeletedFirebaseAccount || _user == null) return;
           if (user != null) return;
-          unawaited(_logoutBecauseFirebaseAccountDeleted());
+          // Signing in the trusted-session token briefly reports no user.
+          // Confirm the account is still gone before treating it as deleted.
+          unawaited(
+            Future<void>.delayed(const Duration(milliseconds: 900), () async {
+              if (_loggingOutDeletedFirebaseAccount || _user == null) return;
+              if (FirebaseAuth.instance.currentUser != null) return;
+              await _logoutBecauseFirebaseAccountDeleted();
+            }),
+          );
         });
   }
 
@@ -5452,7 +5575,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _refreshParentEmailStatus() async {
-    if (_user?.isParent != true || _user!.isPhoneAccount) {
+    if (!_trustedDeviceAccount || _user!.isPhoneAccount) {
       _parentEmailChecked = true;
       _parentEmailVerified = true;
       return;
@@ -5481,7 +5604,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return AppStrings.notSignedIn(_language);
-      await user.sendEmailVerification();
+      await user.sendEmailVerification(
+        ActionCodeSettings(
+          url: 'https://taptalk-2d809.firebaseapp.com/email-verified',
+          handleCodeInApp: true,
+          androidPackageName: 'com.example.flutter_application_1',
+          androidInstallApp: false,
+          iOSBundleId: 'com.example.flutterApplication1',
+        ),
+      );
       return null;
     } catch (e, st) {
       debugPrint('Send verification email failed: $e\n$st');
@@ -5494,7 +5625,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   Future<bool> confirmParentEmailVerified() async {
     await _refreshParentEmailStatus();
     if (_parentEmailVerified) {
-      _emailVerifiedPendingContinue = true;
+      _emailVerifiedPendingContinue = false;
       notifyListeners();
       unawaited(refreshCaregiverAccess());
     }
@@ -5507,7 +5638,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> refreshCaregiverAccess() async {
-    if (_user?.isParent != true) return;
+    if (!_trustedDeviceAccount) return;
     final inFlight = _caregiverRefresh;
     if (inFlight != null) return inFlight;
     final run = _refreshCaregiverAccessBody();
@@ -5520,9 +5651,18 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _refreshCaregiverAccessBody() async {
-    if (_user?.isParent != true) return;
+    if (!_trustedDeviceAccount) return;
     final generation = ++_caregiverGeneration;
-    if (!_parentEmailChecked) await _refreshParentEmailStatus();
+    if (!_parentEmailChecked) {
+      final alreadyVerified =
+          FirebaseAuth.instance.currentUser?.emailVerified == true;
+      if (alreadyVerified) {
+        _parentEmailVerified = true;
+        _parentEmailChecked = true;
+      } else {
+        await _refreshParentEmailStatus();
+      }
+    }
     if (generation != _caregiverGeneration) return;
     if (!_parentEmailVerified) return;
     try {
@@ -5532,15 +5672,28 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         _setCaregiverAccess(CaregiverAccess.unavailable);
         return;
       }
-      final result = await CaregiverSecurityService.instance.call('status');
+      final result = await CaregiverSecurityService.instance.call(
+        'status',
+        const {},
+        false,
+      );
       if (generation != _caregiverGeneration) return;
       final plan = CaregiverAccessPlan.fromStatus(result['state'] as String?);
+      if (plan.access == CaregiverAccess.verifyDevice &&
+          _caregiverAccess == CaregiverAccess.trusted) {
+        _deviceKnownTrusted = false;
+        unawaited(_saveDeviceKnownTrusted(false));
+        unawaited(logout());
+        return;
+      }
       _legacyLearners = (result['learners'] as List? ?? [])
           .whereType<Map>()
           .map((learner) => Map<String, dynamic>.from(learner))
           .toList();
       if (plan.access == CaregiverAccess.trusted) {
         _setCaregiverAccess(CaregiverAccess.trusted);
+        await CaregiverSecurityService.instance.sessionReady;
+        if (generation != _caregiverGeneration) return;
         await applyVerifiedCaregiverLinks(result['links'] as List? ?? []);
         if (generation != _caregiverGeneration) return;
         await _startProtectedParentMonitoring();
@@ -5582,8 +5735,33 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         access == CaregiverAccess.setup) {
       _deviceKnownTrusted = access == CaregiverAccess.trusted;
       unawaited(_saveDeviceKnownTrusted(_deviceKnownTrusted));
+      if (access == CaregiverAccess.trusted ||
+          access == CaregiverAccess.verifyDevice) {
+        _signupPhone = false;
+        unawaited(_saveSignupPhone(false));
+      }
+    }
+    if (access == CaregiverAccess.trusted) {
+      _watchTrustedDevice();
+    } else {
+      _trustedDevicePoll?.cancel();
+      _trustedDevicePoll = null;
     }
     notifyListeners();
+  }
+
+  /// The phone that already owns the account leaves as soon as another phone
+  /// is approved. The check stays short so it does not sit inside the app.
+  void _watchTrustedDevice() {
+    if (_trustedDevicePoll != null) return;
+    _trustedDevicePoll = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (_user == null || _caregiverAccess != CaregiverAccess.trusted) {
+        _trustedDevicePoll?.cancel();
+        _trustedDevicePoll = null;
+        return;
+      }
+      unawaited(refreshCaregiverAccess());
+    });
   }
 
   String? _trustedDeviceKey() {
@@ -5591,14 +5769,25 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     return userId == null ? null : 'caregiver_trusted_device_$userId';
   }
 
+  String? _signupPhoneKey() {
+    final userId = _user?.id;
+    return userId == null ? null : 'teacher_signup_phone_$userId';
+  }
+
   Future<void> _loadDeviceKnownTrusted() async {
     final key = _trustedDeviceKey();
     if (key == null) {
       _deviceKnownTrusted = false;
+      _signupPhone = false;
       return;
     }
     final prefs = await SharedPreferences.getInstance();
     _deviceKnownTrusted = prefs.getBool(key) == true;
+    final signupKey = _signupPhoneKey();
+    _signupPhone =
+        _user?.isTeacher == true &&
+        signupKey != null &&
+        prefs.getBool(signupKey) == true;
   }
 
   Future<void> _saveDeviceKnownTrusted(bool trusted) async {
@@ -5606,6 +5795,17 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (key == null) return;
     final prefs = await SharedPreferences.getInstance();
     if (trusted) {
+      await prefs.setBool(key, true);
+    } else {
+      await prefs.remove(key);
+    }
+  }
+
+  Future<void> _saveSignupPhone(bool signupPhone) async {
+    final key = _signupPhoneKey();
+    if (key == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (signupPhone) {
       await prefs.setBool(key, true);
     } else {
       await prefs.remove(key);
@@ -5632,24 +5832,19 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   /// runs or the server is unreachable, so it never reaches Home first.
   bool get parentNeedsDeviceRegistration {
     final user = _user;
-    if (user == null || !user.isParent) return false;
-    if (parentNeedsEmailVerification) return false;
-    if (!_parentEmailChecked) {
-      return !_deviceKnownTrusted &&
-          user.isOnlineAccount &&
-          !user.isPhoneAccount;
+    if (!_trustedDeviceAccount || user == null || user.isPhoneAccount) {
+      return false;
     }
+    if (parentNeedsEmailVerification) return false;
+    if (!_parentEmailChecked) return true;
     if (_caregiverAccess == CaregiverAccess.verifyDevice ||
         _deviceRegisteredPendingContinue) {
       return true;
     }
-    final awaitingCheck =
-        _caregiverAccess == CaregiverAccess.unknown ||
-        _caregiverAccess == CaregiverAccess.unavailable;
-    return awaitingCheck &&
-        !_deviceKnownTrusted &&
-        user.isOnlineAccount &&
-        !user.isPhoneAccount;
+    // The phone used to create this account continues while its first check
+    // runs. Every other phone stays on verification until the server agrees.
+    if (_signupPhone) return false;
+    return _caregiverAccess != CaregiverAccess.trusted;
   }
 
   bool get deviceCheckPending =>
@@ -5681,7 +5876,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }) async {
     String pick(String en, String fil) =>
         _language == AppLanguage.filipino ? fil : en;
-    if (_user?.isParent != true) {
+    if (!_trustedDeviceAccount) {
       return (error: AppStrings.notSignedIn(_language), needsReauth: false);
     }
     final key = _deviceRequestKey();
@@ -5824,7 +6019,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   Future<String?> completeDeviceRegistration(String link) async {
     String pick(String en, String fil) =>
         _language == AppLanguage.filipino ? fil : en;
-    if (_user?.isParent != true) return AppStrings.notSignedIn(_language);
+    if (!_trustedDeviceAccount) return AppStrings.notSignedIn(_language);
     final key = _deviceRequestKey();
     final prefs = await SharedPreferences.getInstance();
     final requestId = key == null ? null : prefs.getString(key);
@@ -5902,7 +6097,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   checkDeviceRegistrationApproval() async {
     String pick(String en, String fil) =>
         _language == AppLanguage.filipino ? fil : en;
-    if (_user?.isParent != true) return (completed: false, error: null);
+    if (!_trustedDeviceAccount) return (completed: false, error: null);
     final key = _deviceRequestKey();
     if (key == null) return (completed: false, error: null);
     final prefs = await SharedPreferences.getInstance();

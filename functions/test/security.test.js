@@ -110,6 +110,18 @@ test('first verified sign-in registers exactly one trusted phone; a second phone
   await assert.rejects(call('parent', 'adoptDevice', B), {code: 'invalid-argument'});
   assert.equal((await get('caregiver_security/parent')).deviceHash, hash(A));
 });
+test('teacher first sign-in registers one phone; another phone must verify', async () => {
+  await db.doc('user_profiles/teacher').set({firebaseUid: 'teacher', role: 'teacher'});
+  const first = await call('teacher', 'status', A);
+  assert.equal(first.state, 'trusted');
+  assert.equal((await get('caregiver_security/teacher')).deviceHash, hash(A));
+  assert.equal((await get('caregiver_security/teacher')).recoveryEmail, 'teacher@example.test');
+  const prior = await get('caregiver_security/teacher');
+  assert.equal((await call('teacher', 'status', B)).state, 'verificationRequired');
+  await call('teacher', 'requestReplacement', B);
+  assert.deepEqual(await get('caregiver_security/teacher'), prior);
+  await assert.rejects(call('teacher', 'link', A, {profileCode: 'TT-12345678'}), {code: 'permission-denied'});
+});
 test('unverified email never registers a phone', async () => {
   getAuth().getUser = async uid => ({...account(uid), emailVerified: false});
   assert.equal((await call('parent', 'status', A)).state, 'setup');

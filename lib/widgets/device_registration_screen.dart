@@ -23,6 +23,9 @@ class _DeviceRegistrationScreenState extends State<DeviceRegistrationScreen>
     with WidgetsBindingObserver {
   final _password = TextEditingController();
   Timer? _approvalTimer;
+  Timer? _resendTimer;
+  int _resendSecondsLeft = 0;
+  static const _resendCooldown = 60;
   bool _busy = false;
   bool _checkingApproval = false;
   bool _sent = false;
@@ -50,6 +53,7 @@ class _DeviceRegistrationScreenState extends State<DeviceRegistrationScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _approvalTimer?.cancel();
+    _resendTimer?.cancel();
     _password.dispose();
     super.dispose();
   }
@@ -78,7 +82,28 @@ class _DeviceRegistrationScreenState extends State<DeviceRegistrationScreen>
       _message = firstReauthPrompt ? null : result.error;
       _messageIsError = _message != null;
     });
-    if (result.error == null) unawaited(_checkApproval());
+    if (result.error == null) {
+      _startResendTimer();
+      unawaited(_checkApproval());
+    }
+  }
+
+  void _startResendTimer() {
+    _resendTimer?.cancel();
+    setState(() => _resendSecondsLeft = _resendCooldown);
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() {
+        if (_resendSecondsLeft > 0) {
+          _resendSecondsLeft--;
+        } else {
+          timer.cancel();
+        }
+      });
+    });
   }
 
   Future<void> _checkApproval() async {
@@ -180,8 +205,10 @@ class _DeviceRegistrationScreenState extends State<DeviceRegistrationScreen>
         messageIsError: _messageIsError,
         primaryLabel: AppStrings.waitingForConfirmation(lang),
         onPrimary: null,
-        secondaryLabel: AppStrings.resendDeviceLink(lang),
-        onSecondary: _send,
+        secondaryLabel: _resendSecondsLeft > 0
+            ? AppStrings.resendIn(_resendSecondsLeft, lang)
+            : AppStrings.resendDeviceLink(lang),
+        onSecondary: _resendSecondsLeft > 0 ? null : _send,
         footerLabel: logout,
         onFooter: () => app.logout(),
       );

@@ -7,6 +7,10 @@ const {hash, newId, trusted, deviceMatches, canConfirm} = require('./security-po
 initializeApp();
 const db = getFirestore();
 const deny = () => { throw new HttpsError('permission-denied', 'Verification required or request unavailable.'); };
+const teacherDeviceActions = new Set([
+  'status', 'requestReplacement', 'replacementStatus', 'approveReplacement',
+  'confirmReplacement', 'sendRecovery', 'verifyRecovery', 'logout',
+]);
 const emailOf = value => typeof value === 'string' ? value.trim().toLowerCase() : '';
 const recentLogin = auth => Number.isFinite(auth.token.auth_time) && Date.now() / 1000 - auth.token.auth_time <= 300;
 const ref = (collection, id) => db.collection(collection).doc(id);
@@ -52,6 +56,7 @@ exports.caregiverSecurity = onCall(
     enforceAppCheck: true,
     region: 'us-central1',
     invoker: 'public',
+    minInstances: 1,
   },
   async request => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
@@ -70,9 +75,13 @@ exports.caregiverSecurity = onCall(
   if (action === 'deleteClass' || action === 'clearClassEnrollments') return clearClass(request);
   if (action === 'enroll' || action === 'unenroll') return enrollment(request);
   const profile = (await ref('user_profiles', uid).get()).data();
-  if (profile?.role !== 'parent') deny();
+  const role = profile?.role;
+  // Teachers use the same one-phone registration as parents. Learner linking
+  // and caregiver transfer stay parent-only.
+  if (role !== 'parent' && role !== 'teacher') deny();
   const secret = data.deviceSecret;
   if (typeof secret !== 'string' || !/^[a-f0-9]{64}$/.test(secret)) deny();
+  if (role === 'teacher' && !teacherDeviceActions.has(action)) deny();
   if (action === 'transfer') return transfer(request, secret);
   if (action === 'confirmLegacy') return confirmLegacy(request, secret);
   if (action === 'sendRecovery' || action === 'verifyRecovery') return recover(request, secret);
@@ -82,8 +91,10 @@ exports.caregiverSecurity = onCall(
     const result = await db.runTransaction(async tx => {
       const sec = (await tx.get(secRef)).data();
       if (!sec) {
-        const legacy = await tx.get(db.collection('parent_child_links').where('parentFirebaseUid', '==', uid).limit(1));
-        if (!legacy.empty) return {state: 'legacyConfirmation'};
+        if (role !== 'teacher') {
+          const legacy = await tx.get(db.collection('parent_child_links').where('parentFirebaseUid', '==', uid).limit(1));
+          if (!legacy.empty) return {state: 'legacyConfirmation'};
+        }
         if (!account.emailVerified || !accountEmail) return {state: 'setup'};
         // The first phone a verified parent signs in on becomes the only
         // trusted phone. Any other phone must verify through the email link.

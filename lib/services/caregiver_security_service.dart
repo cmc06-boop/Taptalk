@@ -33,7 +33,22 @@ class CaregiverSecurityService {
 
   Future<String>? _secretFuture;
   Future<void> _tokenApplication = Future<void>.value();
+  Future<void> get sessionReady => _tokenApplication;
   int _authGeneration = 0;
+  int _sessionHold = 0;
+  Timer? _authNullTimer;
+
+  /// Email and password sign-in must finish before a trusted-session token
+  /// replaces the account. A token sign-in also emits a brief signed-out event.
+  void holdSessionChanges() {
+    _sessionHold++;
+    _authGeneration++;
+  }
+
+  void releaseSessionChanges() {
+    if (_sessionHold > 0) _sessionHold--;
+  }
+
   StreamSubscription<User?>? _authSubscription;
   String? _observedUid;
   void Function(String link)? _onEmailLink;
@@ -51,8 +66,19 @@ class CaregiverSecurityService {
     if (_authSubscription != null) return;
     _observedUid = FirebaseAuth.instance.currentUser?.uid;
     _authSubscription = FirebaseAuth.instance.authStateChanges().listen((user) {
-      if (user?.uid != _observedUid) {
-        _observedUid = user?.uid;
+      _authNullTimer?.cancel();
+      if (user == null) {
+        final previous = _observedUid;
+        _authNullTimer = Timer(const Duration(milliseconds: 900), () {
+          final current = FirebaseAuth.instance.currentUser?.uid;
+          if (current == previous) return;
+          _observedUid = current;
+          _authGeneration++;
+        });
+        return;
+      }
+      if (user.uid != _observedUid) {
+        _observedUid = user.uid;
         _authGeneration++;
       }
     });
@@ -226,6 +252,7 @@ class CaregiverSecurityService {
   Future<Map<String, dynamic>> call(
     String action, [
     Map<String, dynamic> values = const {},
+    bool waitForToken = true,
   ]) async {
     _watchAccount();
     final user = FirebaseAuth.instance.currentUser;
@@ -255,9 +282,10 @@ class CaregiverSecurityService {
       final application = _tokenApplication.catchError((Object _) {}).then((
         _,
       ) async {
-        if (_authGeneration != generation ||
+        if (_sessionHold > 0 ||
+            _authGeneration != generation ||
             FirebaseAuth.instance.currentUser?.uid != user.uid) {
-          throw StateError('The signed-in account changed.');
+          return;
         }
         await FirebaseAuth.instance.signInWithCustomToken(
           data['token'] as String,
@@ -268,7 +296,7 @@ class CaregiverSecurityService {
         }
       });
       _tokenApplication = application;
-      await application;
+      if (waitForToken) await application;
     }
     return data;
   }
@@ -276,12 +304,14 @@ class CaregiverSecurityService {
   Future<void> endSession() async {
     // Prevent an earlier status response from signing back in after logout.
     _authGeneration++;
-    await _tokenApplication.catchError((Object _) {});
-    try {
-      await call('logout');
-    } catch (_) {
-      // Local Auth sign-out must still work offline. No device credential is
-      // removed here; a normal logout is distinct from device revocation.
-    }
+    _authNullTimer?.cancel();
+    unawaited(_tokenApplication.catchError((Object _) {}));
+    unawaited(() async {
+      try {
+        await call('logout');
+      } catch (_) {
+        // Local sign-out still finishes. This only clears the server session.
+      }
+    }());
   }
 }

@@ -155,7 +155,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     required ParentNotification notification,
     required TapTalkThemeToken theme,
     required AppLanguage lang,
+    required bool isTeacher,
   }) {
+    final rawTitle = _displayTitle(notification.title);
+    final usageWarning = _isUsageWarningNotification(notification);
+    final childName = notification.childName.trim();
+    final headline = isTeacher && usageWarning && childName.isNotEmpty
+        ? childName
+        : rawTitle;
+    final showTypeLabel = isTeacher && usageWarning ? true : !usageWarning;
     return showGeneralDialog<void>(
       context: context,
       barrierDismissible: true,
@@ -168,9 +176,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             notification: notification,
             theme: theme,
             lang: lang,
-            title: _displayTitle(notification.title),
+            title: headline,
             body: _displayBody(notification.body),
-            showTypeLabel: !_isUsageWarningNotification(notification),
+            showTypeLabel: showTypeLabel,
+            typeLabelOverride: isTeacher && usageWarning ? rawTitle : null,
             timeLabel: _formatTime(notification.createdAt, lang),
             icon: _iconFor(notification.alertType),
             onClose: () => Navigator.of(dialogContext).pop(),
@@ -342,6 +351,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                       notification: notification,
                                       theme: theme,
                                       lang: lang,
+                                      isTeacher: app.user?.isTeacher == true,
                                     );
                                   },
                                 ),
@@ -578,6 +588,7 @@ class _NotificationDetailPopup extends StatelessWidget {
     required this.timeLabel,
     required this.icon,
     required this.onClose,
+    this.typeLabelOverride,
   });
 
   final ParentNotification notification;
@@ -586,6 +597,7 @@ class _NotificationDetailPopup extends StatelessWidget {
   final String title;
   final String body;
   final bool showTypeLabel;
+  final String? typeLabelOverride;
   final String timeLabel;
   final IconData icon;
   final VoidCallback onClose;
@@ -595,11 +607,17 @@ class _NotificationDetailPopup extends StatelessWidget {
     final accent = theme.bgAccent;
     final iconColor = ParentAlertIcons.iconColor(notification.alertType);
     final iconBg = ParentAlertIcons.iconBackground(notification.alertType);
-    final typeLabel = AppStrings.alertTypeLabel(lang, notification.alertType);
+    final typeLabel = (typeLabelOverride?.trim().isNotEmpty ?? false)
+        ? typeLabelOverride!.trim()
+        : AppStrings.alertTypeLabel(lang, notification.alertType);
     final trimmedBody = body.trim();
     final showBody =
         trimmedBody.isNotEmpty &&
         trimmedBody.toLowerCase() != typeLabel.trim().toLowerCase();
+    final showHeadline =
+        title.trim().isNotEmpty &&
+        (!showTypeLabel ||
+            title.trim().toLowerCase() != typeLabel.trim().toLowerCase());
     final maxHeight = MediaQuery.sizeOf(context).height * 0.72;
 
     return Material(
@@ -651,18 +669,19 @@ class _NotificationDetailPopup extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                title,
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.poppins(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                  color: theme.textMain,
-                                  height: 1.25,
+                              if (showHeadline)
+                                Text(
+                                  title,
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: theme.textMain,
+                                    height: 1.25,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 4),
+                              if (showHeadline) const SizedBox(height: 4),
                               Text(
                                 timeLabel,
                                 style: GoogleFonts.poppins(

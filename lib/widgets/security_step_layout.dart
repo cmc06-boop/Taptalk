@@ -19,6 +19,7 @@ class SecurityStepLayout extends StatelessWidget {
     this.message,
     this.messageIsError = false,
     this.busy = false,
+    this.showPrimary = true,
     this.secondaryLabel,
     this.onSecondary,
     this.footerLabel,
@@ -32,6 +33,7 @@ class SecurityStepLayout extends StatelessWidget {
   final String? message;
   final bool messageIsError;
   final bool busy;
+  final bool showPrimary;
   final String primaryLabel;
   final VoidCallback? onPrimary;
   final String? secondaryLabel;
@@ -169,49 +171,68 @@ class SecurityStepLayout extends StatelessWidget {
                               ),
                             ),
                           ],
-                          const SizedBox(height: AppSpacing.lg),
-                          FilledButton(
-                            onPressed: busy ? null : onPrimary,
-                            style: FilledButton.styleFrom(
-                              backgroundColor: theme.bgAccent,
-                              foregroundColor: Colors.white,
-                              disabledBackgroundColor: theme.bgAccent
-                                  .withValues(alpha: 0.48),
-                              disabledForegroundColor: Colors.white,
-                              minimumSize: const Size.fromHeight(50),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                            ),
-                            child: busy
-                                ? const SizedBox(
-                                    width: 24,
-                                    height: 24,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2.5,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : Text(
-                                    primaryLabel,
-                                    style: GoogleFonts.poppins(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 15,
-                                    ),
-                                  ),
-                          ),
-                          if (secondaryLabel != null)
-                            TextButton(
-                              onPressed: busy ? null : onSecondary,
-                              child: Text(
-                                secondaryLabel!,
-                                style: GoogleFonts.poppins(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: theme.bgAccent,
+                          if (showPrimary) ...[
+                            const SizedBox(height: AppSpacing.lg),
+                            FilledButton(
+                              onPressed: busy ? null : onPrimary,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: theme.bgAccent,
+                                foregroundColor: Colors.white,
+                                disabledBackgroundColor: theme.bgAccent
+                                    .withValues(alpha: 0.48),
+                                disabledForegroundColor: Colors.white,
+                                minimumSize: const Size.fromHeight(50),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
                                 ),
                               ),
+                              child: busy
+                                  ? const SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.5,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : Text(
+                                      primaryLabel,
+                                      style: GoogleFonts.poppins(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 15,
+                                      ),
+                                    ),
                             ),
+                          ] else
+                            const SizedBox(height: AppSpacing.md),
+                          if (secondaryLabel != null)
+                            if (onSecondary == null)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 12,
+                                ),
+                                child: Text(
+                                  secondaryLabel!,
+                                  textAlign: TextAlign.center,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: muted,
+                                  ),
+                                ),
+                              )
+                            else
+                              TextButton(
+                                onPressed: busy ? null : onSecondary,
+                                child: Text(
+                                  secondaryLabel!,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: theme.bgAccent,
+                                  ),
+                                ),
+                              ),
                           if (footerLabel != null) ...[
                             const SizedBox(height: AppSpacing.sm),
                             TextButton(

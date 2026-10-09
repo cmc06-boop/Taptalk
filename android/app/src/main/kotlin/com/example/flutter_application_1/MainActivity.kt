@@ -189,8 +189,11 @@ class MainActivity : FlutterActivity() {
 
     private fun rememberEmailLink(intent: Intent?) {
         val data = intent?.dataString ?: return
-        if (data.contains("oobCode") ||
+        if (data.startsWith("taptalk://") ||
+            data.contains("oobCode") ||
             data.contains("mode=signIn") ||
+            data.contains("mode=verifyEmail") ||
+            data.contains("email-verified") ||
             data.contains("caregiver-recovery")
         ) {
             pendingEmailLink = data
